@@ -965,6 +965,9 @@ export function Sessions() {
                   <Eye size={16} />
                   {t('sessions.actions.view')}
                 </button>
+                <button className="btn-action" style={{ color: '#16a34a', borderColor: '#86efac', fontWeight: 600 }} onClick={() => setSelectedSession(session)}>
+                  📱 Reenvío Nativo
+                </button>
                 {canWrite && isSessionStarted(session) ? (
                   <button className="btn-action" onClick={() => handleStop(session.id)}>
                     <Square size={16} />
