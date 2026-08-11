@@ -330,22 +330,34 @@ export function MessageTester() {
 
       // Bulk is a batch, not a single send: 202 + batchId, then poll progress until terminal.
       if (messageType === 'bulk') {
+        let finalMediaObj: BulkMediaPayload | null = null;
+        if (bulkMediaType !== 'text') {
+          if (mediaFile) {
+            setToast({ type: 'info', message: 'Subiendo archivo multimedia al servidor...' });
+            const uploaded = await messageApi.uploadMedia(session, {
+              base64: mediaFile.base64,
+              mimetype: mediaFile.mimetype,
+              filename: mediaFile.name,
+            });
+            finalMediaObj = { url: uploaded.url };
+          } else if (mediaUrl) {
+            finalMediaObj = { url: mediaUrl };
+          }
+        }
+
         const messages: BulkMessageItem[] = bulkRecipientList.map(recipientChatId => {
-          if (bulkMediaType === 'text') {
+          if (bulkMediaType === 'text' || !finalMediaObj) {
             return {
               chatId: recipientChatId,
               type: 'text' as const,
               content: { text: content },
             };
           }
-          const mediaObj: BulkMediaPayload = mediaFile
-            ? { base64: mediaFile.base64, mimetype: mediaFile.mimetype }
-            : { url: mediaUrl };
           return {
             chatId: recipientChatId,
             type: bulkMediaType,
             content: {
-              [bulkMediaType]: mediaObj,
+              [bulkMediaType]: finalMediaObj,
               ...(content ? { caption: content } : {}),
               ...(bulkMediaType === 'document' && content ? { filename: content } : {}),
             },

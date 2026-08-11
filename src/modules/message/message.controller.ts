@@ -707,4 +707,22 @@ export class MessageController {
   deleteScheduledBroadcast(@Param('sessionId') sessionId: string, @Param('id') id: string) {
     return { success: this.scheduledBroadcastService.deleteBroadcast(sessionId, id) };
   }
+
+  @Post('upload-media')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Upload media for bulk send or scheduled campaigns' })
+  async uploadMedia(
+    @Param('sessionId') sessionId: string,
+    @Body() dto: { base64: string; mimetype?: string; filename?: string },
+  ) {
+    const filename = await this.messageService.saveTempMedia(dto);
+    const fileUrl = `/api/sessions/${sessionId}/messages/media-file/${filename}`;
+    return { url: fileUrl, filename };
+  }
+
+  @Get('media-file/:filename')
+  getMediaFile(@Param('filename') filename: string, @Res() res: Response) {
+    const filePath = this.messageService.getTempMediaPath(filename);
+    res.sendFile(filePath);
+  }
 }

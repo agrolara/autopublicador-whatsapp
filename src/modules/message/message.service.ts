@@ -1048,4 +1048,31 @@ export class MessageService {
       mentions: dto.mentions,
     };
   }
+
+  async saveTempMedia(dto: { base64: string; mimetype?: string; filename?: string }): Promise<string> {
+    const rawData = dto.base64.replace(/^data:[^;]+;base64,/, '');
+    const buffer = Buffer.from(rawData, 'base64');
+    const uploadsDir = require('path').join(process.cwd(), 'data', 'uploads');
+    const fs = require('fs');
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+    const ext = dto.mimetype ? (dto.mimetype.split('/')[1] || 'bin') : 'bin';
+    const cleanExt = ext.split('+')[0].split(';')[0].split('?')[0];
+    const filename = `media_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${cleanExt}`;
+    const filePath = require('path').join(uploadsDir, filename);
+    await fs.promises.writeFile(filePath, buffer);
+    return filename;
+  }
+
+  getTempMediaPath(filename: string): string {
+    const path = require('path');
+    const fs = require('fs');
+    const sanitized = path.basename(filename);
+    const filePath = path.join(process.cwd(), 'data', 'uploads', sanitized);
+    if (!fs.existsSync(filePath)) {
+      throw new NotFoundException('Media file not found');
+    }
+    return filePath;
+  }
 }

@@ -1009,6 +1009,11 @@ export const messageApi = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  uploadMedia: (sessionId: string, data: { base64: string; mimetype?: string; filename?: string }) =>
+    request<{ url: string; filename: string }>(`/sessions/${sessionId}/messages/upload-media`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
   // Async batch: returns 202 immediately; poll getBatchStatus until a terminal status.
   sendBulk: (sessionId: string, data: SendBulkPayload) =>
     request<BulkBatchResponse>(`/sessions/${sessionId}/messages/send-bulk`, {
