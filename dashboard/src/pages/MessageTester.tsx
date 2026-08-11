@@ -1219,19 +1219,25 @@ export function MessageTester() {
                     </div>
                     <div style={{ maxHeight: '180px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                       {bulkRecipientList.map(jid => {
-                        const matchedGroup = groups.find((g: any) => g.id === jid);
+                        const cleanDigits = jid.replace(/[^0-9]/g, '');
+                        const matchedGroup = groups.find((g: any) => {
+                          if (g.id === jid) return true;
+                          const gDigits = (g.id || '').replace(/[^0-9]/g, '');
+                          return gDigits.length > 0 && gDigits === cleanDigits;
+                        });
                         const isPersonalPhone = jid.endsWith('@c.us');
-                        const displayName = matchedGroup 
-                          ? matchedGroup.name 
-                          : isPersonalPhone 
-                            ? `📱 Teléfono Personal (+${jid.replace('@c.us', '')})`
-                            : jid;
+                        const groupName = matchedGroup?.name || matchedGroup?.subject;
+                        const displayName = groupName
+                          ? groupName
+                          : isPersonalPhone
+                            ? `📱 Teléfono Personal (+${cleanDigits})`
+                            : `👥 Grupo WhatsApp (${jid})`;
                         return (
                           <div
                             key={jid}
                             style={{
                               display: 'flex',
-                              justify: 'space-between',
+                              justifyContent: 'space-between',
                               alignItems: 'center',
                               background: 'var(--bg-primary, #ffffff)',
                               padding: '6px 10px',
@@ -1241,8 +1247,10 @@ export function MessageTester() {
                             }}
                           >
                             <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: '8px' }}>
-                              <strong style={{ color: 'var(--text-main, #0f172a)' }}>{displayName}</strong>
-                              {matchedGroup && (
+                              <strong style={{ color: 'var(--text-main, #0f172a)' }}>
+                                {groupName ? `👥 ${groupName}` : displayName}
+                              </strong>
+                              {groupName && (
                                 <span style={{ color: '#64748b', fontSize: '0.75rem', marginLeft: '6px' }}>
                                   ({jid})
                                 </span>

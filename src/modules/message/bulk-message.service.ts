@@ -716,9 +716,10 @@ export class BulkMessageService implements OnApplicationBootstrap {
   ): Promise<MessageResult> {
     let targetChatId = chatId.trim();
     const base = targetChatId.split('@')[0];
-    const digits = base.replace(/[^0-9]/g, '');
-    if (base.includes('-') || (digits.length >= 17 && digits.startsWith('120363'))) {
-      targetChatId = `${digits}@g.us`;
+    const cleanBase = base.replace(/[^0-9-]/g, '');
+    const digits = cleanBase.replace(/[^0-9]/g, '');
+    if (cleanBase.includes('-') || (digits.length >= 17 && digits.startsWith('120363'))) {
+      targetChatId = `${cleanBase}@g.us`;
     }
 
     const resolveData = (base64?: string, url?: string): string => {

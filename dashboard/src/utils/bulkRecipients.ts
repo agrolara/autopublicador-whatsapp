@@ -14,14 +14,15 @@ export function parseBulkRecipients(text: string): string[] {
     if (!line) continue;
 
     const base = line.split('@')[0];
-    const digits = base.replace(/[^0-9]/g, '');
+    const cleanBase = base.replace(/[^0-9-]/g, '');
+    const digits = cleanBase.replace(/[^0-9]/g, '');
     if (!digits) continue;
 
     // Detect group JID: WhatsApp Group WIDs start with '120363' (17+ digits) or contain hyphen
-    const isGroup = base.includes('-') || (digits.length >= 17 && digits.startsWith('120363'));
+    const isGroup = cleanBase.includes('-') || (digits.length >= 17 && digits.startsWith('120363'));
 
     if (isGroup) {
-      seen.add(`${digits}@g.us`);
+      seen.add(`${cleanBase}@g.us`);
     } else {
       seen.add(`${digits}@c.us`);
     }
