@@ -1024,6 +1024,80 @@ export function MessageTester() {
                   {t('messageTester.bulkRecipientsHint')} ·{' '}
                   {t('messageTester.bulkRecipientsCount', { count: bulkRecipientList.length })}
                 </span>
+
+                {bulkRecipientList.length > 0 && (
+                  <div style={{ marginTop: '12px', background: 'var(--bg-secondary, #f8fafc)', border: '1px solid var(--border-color, #e2e8f0)', borderRadius: '8px', padding: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <strong style={{ fontSize: '0.88rem', color: 'var(--text-main, #1e293b)' }}>
+                        📋 Lista de Grupos Seleccionados ({bulkRecipientList.length}):
+                      </strong>
+                      <button
+                        type="button"
+                        style={{ background: 'transparent', border: 'none', color: '#ef4444', fontSize: '0.8rem', cursor: 'pointer', fontWeight: 600 }}
+                        onClick={() => {
+                          setBulkRecipients('');
+                          setToast({ type: 'info', message: 'Lista de destinatarios vaciada.' });
+                        }}
+                      >
+                        Vaciar lista
+                      </button>
+                    </div>
+                    <div style={{ maxHeight: '180px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      {bulkRecipientList.map(jid => {
+                        const matchedGroup = groups.find((g: any) => g.id === jid);
+                        const displayName = matchedGroup ? matchedGroup.name : jid;
+                        return (
+                          <div
+                            key={jid}
+                            style={{
+                              display: 'flex',
+                              justify: 'space-between',
+                              alignItems: 'center',
+                              background: 'var(--bg-primary, #ffffff)',
+                              padding: '6px 10px',
+                              borderRadius: '6px',
+                              border: '1px solid var(--border-color, #cbd5e1)',
+                              fontSize: '0.83rem',
+                            }}
+                          >
+                            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: '8px' }}>
+                              <strong style={{ color: 'var(--text-main, #0f172a)' }}>{displayName}</strong>
+                              {matchedGroup && (
+                                <span style={{ color: '#64748b', fontSize: '0.75rem', marginLeft: '6px' }}>
+                                  ({jid})
+                                </span>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              style={{
+                                background: '#fee2e2',
+                                color: '#dc2626',
+                                border: '1px solid #fca5a5',
+                                borderRadius: '4px',
+                                padding: '2px 8px',
+                                cursor: 'pointer',
+                                fontSize: '0.78rem',
+                                fontWeight: 600,
+                                flexShrink: 0,
+                              }}
+                              onClick={() => {
+                                const remaining = bulkRecipients
+                                  .split('\n')
+                                  .filter(line => line.trim() !== jid && line.trim().split(' ')[0] !== jid)
+                                  .join('\n');
+                                setBulkRecipients(remaining);
+                                setToast({ type: 'info', message: `Se quitó el grupo "${displayName}" de la lista.` });
+                              }}
+                            >
+                              🗑️ Quitar
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
               {bulkMediaType === 'text' && (
                 <div className="form-group">
