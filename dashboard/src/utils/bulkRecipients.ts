@@ -10,14 +10,21 @@ export const BULK_MAX_RECIPIENTS = 100;
 export function parseBulkRecipients(text: string): string[] {
   const seen = new Set<string>();
   for (const rawLine of text.split('\n')) {
-    const line = rawLine.trim();
+    const line = rawLine.trim().split(' ')[0];
     if (!line) continue;
-    if (line.includes('@')) {
-      seen.add(line);
-      continue;
+
+    const base = line.split('@')[0];
+    const digits = base.replace(/[^0-9]/g, '');
+    if (!digits) continue;
+
+    // Detect group JID: WhatsApp Group WIDs start with '120363' (17+ digits) or contain hyphen
+    const isGroup = base.includes('-') || (digits.length >= 17 && digits.startsWith('120363'));
+
+    if (isGroup) {
+      seen.add(`${digits}@g.us`);
+    } else {
+      seen.add(`${digits}@c.us`);
     }
-    const digits = line.replace(/[^0-9]/g, '');
-    if (digits) seen.add(`${digits}@c.us`);
   }
   return [...seen];
 }

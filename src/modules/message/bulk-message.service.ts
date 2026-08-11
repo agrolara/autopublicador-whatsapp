@@ -714,6 +714,13 @@ export class BulkMessageService implements OnApplicationBootstrap {
     type: string,
     content: BulkMessageContent,
   ): Promise<MessageResult> {
+    let targetChatId = chatId.trim();
+    const base = targetChatId.split('@')[0];
+    const digits = base.replace(/[^0-9]/g, '');
+    if (base.includes('-') || (digits.length >= 17 && digits.startsWith('120363'))) {
+      targetChatId = `${digits}@g.us`;
+    }
+
     const resolveData = (base64?: string, url?: string): string => {
       const stripped = stripBase64DataUri(base64);
       if (stripped) return stripped;
@@ -727,27 +734,27 @@ export class BulkMessageService implements OnApplicationBootstrap {
 
     switch (type) {
       case 'text':
-        return engine.sendTextMessage(chatId, content.text || '');
+        return engine.sendTextMessage(targetChatId, content.text || '');
       case 'image':
-        return engine.sendImageMessage(chatId, {
+        return engine.sendImageMessage(targetChatId, {
           mimetype: content.image?.mimetype || 'image/jpeg',
           data: resolveData(content.image?.base64, content.image?.url),
           caption: content.caption,
         });
       case 'video':
-        return engine.sendVideoMessage(chatId, {
+        return engine.sendVideoMessage(targetChatId, {
           mimetype: content.video?.mimetype || 'video/mp4',
           data: resolveData(content.video?.base64, content.video?.url),
           caption: content.caption,
         });
       case 'audio':
-        return engine.sendAudioMessage(chatId, {
+        return engine.sendAudioMessage(targetChatId, {
           mimetype: content.audio?.mimetype || (content.audio?.ptt ? 'audio/ogg; codecs=opus' : 'audio/mpeg'),
           data: resolveData(content.audio?.base64, content.audio?.url),
           ptt: content.audio?.ptt,
         });
       case 'document':
-        return engine.sendDocumentMessage(chatId, {
+        return engine.sendDocumentMessage(targetChatId, {
           mimetype: content.document?.mimetype || 'application/octet-stream',
           data: resolveData(content.document?.base64, content.document?.url),
           filename: content.document?.filename,
