@@ -186,6 +186,8 @@ RUN mkdir -p ./data/sessions ./data/media ./data/plugins && \
 ENV HOME=/app/data
 ENV XDG_CONFIG_HOME=/tmp/.config
 ENV XDG_CACHE_HOME=/tmp/.cache
+ENV TZ=America/Santiago
+ENV TIMEZONE=America/Santiago
 
 # Copy entrypoint: runs as root to fix named-volume ownership, then drops to openwa via gosu
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh

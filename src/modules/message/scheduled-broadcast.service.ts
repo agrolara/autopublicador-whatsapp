@@ -15,6 +15,31 @@ export interface ScheduledBroadcast {
   createdAt: string;
 }
 
+function getLocalChileTime(): { hour: number; minute: number; ymd: string; hhmm: string } {
+  const tz = process.env.TIMEZONE || 'America/Santiago';
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  });
+
+  const p: Record<string, string> = {};
+  formatter.formatToParts(new Date()).forEach(x => {
+    if (x.type !== 'literal') p[x.type] = x.value;
+  });
+
+  const hour = parseInt(p.hour || '0', 10);
+  const minute = parseInt(p.minute || '0', 10);
+  const ymd = `${p.year}-${p.month}-${p.day}`;
+  const hhmm = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+
+  return { hour, minute, ymd, hhmm };
+}
+
 @Injectable()
 export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ScheduledBroadcastService.name);
@@ -32,7 +57,7 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
   onModuleInit() {
     // Check every 30 seconds for scheduled broadcasts
     this.checkInterval = setInterval(() => this.processDueBroadcasts(), 30000);
-    this.logger.log('ScheduledBroadcastService initialized, timer active (30s interval)');
+    this.logger.log('ScheduledBroadcastService initialized with Chile Timezone (America/Santiago), timer active (30s interval)');
   }
 
   onModuleDestroy() {
@@ -87,7 +112,7 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
 
     this.items.push(newBroadcast);
     this.saveToFile();
-    this.logger.log(`Created scheduled broadcast ${newBroadcast.id} at ${newBroadcast.scheduledTime} (${newBroadcast.frequency})`);
+    this.logger.log(`Created scheduled broadcast ${newBroadcast.id} at ${newBroadcast.scheduledTime} (${newBroadcast.frequency}) [Chile Time]`);
     return newBroadcast;
   }
 
@@ -103,17 +128,12 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
   }
 
   private async processDueBroadcasts() {
-    const now = new Date();
-    const currentHHMM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    const todayYMD = now.toISOString().split('T')[0];
+    const { hour: nowH, minute: nowM, ymd: todayYMD, hhmm: currentHHMM } = getLocalChileTime();
 
     for (const item of this.items) {
-      // Check if current time matches scheduledTime OR for twice_daily if current time matches scheduledTime + 12h
       let isDue = false;
 
       const [targetH, targetM] = item.scheduledTime.split(':').map(Number);
-      const nowH = now.getHours();
-      const nowM = now.getMinutes();
 
       if (nowM === targetM) {
         if (nowH === targetH) {
@@ -129,8 +149,8 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
         const currentMinuteStr = `${todayYMD}T${currentHHMM}`;
 
         if (lastRunMinute !== currentMinuteStr) {
-          this.logger.log(`🚀 Executing due scheduled broadcast ${item.id} (${item.scheduledTime}) for session ${item.sessionId}...`);
-          item.lastRunAt = new Date().toISOString();
+          this.logger.log(`🚀 Executing due scheduled broadcast ${item.id} (${item.scheduledTime} Chile Time) for session ${item.sessionId}...`);
+          item.lastRunAt = `${todayYMD}T${currentHHMM}:00Z`;
           this.saveToFile();
 
           try {
