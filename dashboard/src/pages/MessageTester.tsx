@@ -889,14 +889,20 @@ export function MessageTester() {
                         gap: '4px',
                         fontWeight: 500,
                       }}
-                      onClick={() => {
-                        if (groups.length === 0) {
-                          setToast({ type: 'error', message: 'No se encontraron grupos en esta sesión.' });
-                          return;
+                      onClick={async () => {
+                        try {
+                          const res = await refetchGroups();
+                          const activeGroups = res.data || groups;
+                          if (activeGroups.length === 0) {
+                            setToast({ type: 'error', message: 'No se encontraron grupos en esta sesión. Asegúrate de tener una sesión activa iniciada.' });
+                            return;
+                          }
+                          const allGroupIds = activeGroups.map((g: any) => g.id).join('\n');
+                          setBulkRecipients(allGroupIds);
+                          setToast({ type: 'success', message: `Se cargaron los ${activeGroups.length} grupos encontrados exitosamente.` });
+                        } catch (err) {
+                          setToast({ type: 'error', message: 'Error al consultar los grupos de WhatsApp.' });
                         }
-                        const allGroupIds = groups.map(g => g.id).join('\n');
-                        setBulkRecipients(allGroupIds);
-                        setToast({ type: 'success', message: `Se cargaron los ${groups.length} grupos registrados.` });
                       }}
                     >
                       👥 Cargar todos mis grupos ({groups.length})
@@ -920,24 +926,28 @@ export function MessageTester() {
                         try {
                           const res = await refetchGroups();
                           const latestGroups = res.data || [];
-                          // Group IDs already known/registered in OpenWA session or present in bulk recipients
-                          const knownSet = new Set([
-                            ...groups.map((g: any) => g.id),
-                            ...bulkRecipientList,
-                          ]);
-                          const diffGroups = latestGroups.filter((g: any) => !knownSet.has(g.id));
+                          if (latestGroups.length === 0) {
+                            setToast({ type: 'info', message: 'No se encontraron grupos. Conecta una sesión activa con grupos.' });
+                            setNewGroupsFound([]);
+                            return;
+                          }
+                          // Parse current items already loaded in the bulk recipient text area
+                          const currentTextRecipients = new Set(parseBulkRecipients(bulkRecipients));
+                          
+                          // Filter groups that are NOT currently in the textarea
+                          const diffGroups = latestGroups.filter((g: any) => !currentTextRecipients.has(g.id));
                           
                           if (diffGroups.length > 0) {
                             setNewGroupsFound(diffGroups);
                             setToast({
                               type: 'success',
-                              message: `✨ ¡Se encontraron ${diffGroups.length} grupos nuevos que no estaban registrados!`,
+                              message: `✨ ¡Se encontraron ${diffGroups.length} grupos nuevos que no estaban en tu lista!`,
                             });
                           } else {
                             setNewGroupsFound([]);
                             setToast({
                               type: 'info',
-                              message: `No hay grupos nuevos. Todos los ${latestGroups.length} grupos ya están registrados en el sistema.`,
+                              message: `No hay grupos nuevos por agregar. Todos los ${latestGroups.length} grupos ya están en tu lista.`,
                             });
                           }
                         } catch (err: any) {
