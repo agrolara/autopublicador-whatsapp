@@ -382,8 +382,8 @@ export class MessageProjector {
       const engine = this.engines.get(sessionId);
       if (!engine) return;
 
-      const senderName = message.pushName || message.senderPhone || authorJid.replace('@c.us', '');
-      const bodyText = message.body || (message.caption ? `[Media] ${message.caption}` : '[Archivo / Multimedia]');
+      const senderName = message.contact?.name || message.senderPhone || authorJid.replace('@c.us', '');
+      const bodyText = message.body || (message.media ? `[Multimedia / ${message.media.mimetype}]` : '[Contenido WhatsApp]');
 
       let notificationText = '';
       if (isGroup) {
@@ -392,7 +392,7 @@ export class MessageProjector {
         notificationText = `📩 *[Mensaje Directo DM]*\n👤 *De:* ${senderName}\n📱 *Número:* +${authorJid.replace('@c.us', '')}\n💬 *Mensaje:*\n${bodyText}`;
       }
 
-      await engine.sendText(targetJid, notificationText);
+      await engine.sendTextMessage(targetJid, notificationText);
       this.logger.log(`Native Auto-Forwarded message from ${senderJid} to ${targetJid} for session ${sessionId}`);
     } catch (err: any) {
       this.logger.warn(`Failed to auto-forward message for session ${sessionId}: ${err?.message}`);
