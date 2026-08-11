@@ -155,6 +155,39 @@ export function MessageTester() {
   const [newGroupsFound, setNewGroupsFound] = useState<{ id: string; name?: string }[]>([]);
   const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
 
+  const [savedImages, setSavedImages] = useState<{ id: string; name: string; base64: string; mimetype: string; filename: string }[]>(() => {
+    try {
+      const raw = localStorage.getItem('openwa_saved_images');
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const saveCurrentImage = () => {
+    if (!mediaFile) return;
+    const name = window.prompt('Escribe un nombre para guardar esta imagen en tu Galería Frecuente:', mediaFile.filename);
+    if (!name) return;
+    const newItem = {
+      id: `img_${Date.now()}`,
+      name,
+      base64: mediaFile.base64,
+      mimetype: mediaFile.mimetype,
+      filename: mediaFile.filename,
+    };
+    const updated = [newItem, ...savedImages];
+    setSavedImages(updated);
+    localStorage.setItem('openwa_saved_images', JSON.stringify(updated));
+    setToast({ type: 'success', message: `✨ Imagen "${name}" guardada en tu Galería Frecuente.` });
+  };
+
+  const deleteSavedImage = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const updated = savedImages.filter(item => item.id !== id);
+    setSavedImages(updated);
+    localStorage.setItem('openwa_saved_images', JSON.stringify(updated));
+  };
+
   const loadSchedules = async () => {
     if (session) {
       try {
@@ -705,7 +738,98 @@ export function MessageTester() {
                   accept={messageType === 'bulk' ? mediaAccept[bulkMediaType] : mediaAccept[messageType]}
                   onChange={handleFileChange}
                 />
+
+                {mediaFile && (
+                  <button
+                    type="button"
+                    onClick={saveCurrentImage}
+                    style={{
+                      marginTop: '6px',
+                      fontSize: '0.8rem',
+                      background: '#10b981',
+                      color: '#fff',
+                      border: 'none',
+                      padding: '5px 12px',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontWeight: 600,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                    }}
+                  >
+                    ⭐ Guardar esta imagen en mi Galería Frecuente
+                  </button>
+                )}
+
+                {savedImages.length > 0 && (
+                  <div style={{ marginTop: '12px', background: 'var(--bg-secondary, #f8fafc)', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border-color, #e2e8f0)' }}>
+                    <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-main, #334155)', display: 'block', marginBottom: '8px' }}>
+                      🖼️ Mis Imágenes Frecuentes Guardadas (Selección en 1 Clic):
+                    </span>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      {savedImages.map(img => (
+                        <div
+                          key={img.id}
+                          onClick={() => {
+                            setMediaFile({ base64: img.base64, mimetype: img.mimetype, filename: img.filename });
+                            setMediaUrl('');
+                            setToast({ type: 'info', message: `Seleccionada: "${img.name}"` });
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            background: 'var(--bg-primary, #ffffff)',
+                            padding: '4px 10px',
+                            borderRadius: '6px',
+                            border: '1px solid #cbd5e1',
+                            cursor: 'pointer',
+                            fontSize: '0.8rem',
+                            fontWeight: 500,
+                          }}
+                        >
+                          <span>🖼️ {img.name}</span>
+                          <button
+                            type="button"
+                            onClick={e => deleteSavedImage(img.id, e)}
+                            style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '0 2px' }}
+                            title="Eliminar de mi galería"
+                          >
+                            ❌
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
+
+              {templates.length > 0 && (
+                <div className="form-group" style={{ background: '#f0fdf4', padding: '10px 12px', borderRadius: '8px', border: '1px solid #bbf7d0', marginBottom: '12px' }}>
+                  <label style={{ fontSize: '0.82rem', fontWeight: 600, color: '#166534', margin: '0 0 6px 0', display: 'block' }}>
+                    📋 Cargar desde tus Plantillas Guardadas:
+                  </label>
+                  <select
+                    onChange={e => {
+                      const found = templates.find(t => t.id === e.target.value);
+                      if (found) {
+                        const fullText = [found.header, found.body, found.footer].filter(Boolean).join('\n\n');
+                        setContent(fullText);
+                        setToast({ type: 'success', message: `✨ Carga exitosa de plantilla: "${found.name}"` });
+                      }
+                    }}
+                    style={{ width: '100%', padding: '6px 10px', fontSize: '0.85rem', borderRadius: '6px', border: '1px solid #86efac' }}
+                    defaultValue=""
+                  >
+                    <option value="" disabled>-- Selecciona una plantilla guardada --</option>
+                    {templates.map(t => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               {messageType !== 'audio' && messageType !== 'sticker' && (
                 <div className="form-group">
                   <label>
