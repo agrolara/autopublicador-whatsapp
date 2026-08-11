@@ -974,6 +974,35 @@ export function MessageTester() {
                     >
                       🔄 Buscar grupos nuevos
                     </button>
+                    <button
+                      type="button"
+                      style={{
+                        padding: '4px 10px',
+                        fontSize: '0.82rem',
+                        background: '#059669',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        fontWeight: 500,
+                      }}
+                      onClick={() => {
+                        const inputPhone = window.prompt('Ingresa tu número de teléfono personal (ejemplo: +56912345678):');
+                        if (inputPhone) {
+                          const cleanDigits = inputPhone.replace(/[^0-9]/g, '');
+                          if (cleanDigits) {
+                            const formattedJid = `${cleanDigits}@c.us`;
+                            setBulkRecipients(prev => (prev.trim() ? `${prev.trim()}\n${formattedJid}` : formattedJid));
+                            setToast({ type: 'success', message: `📱 Se agregó tu teléfono personal (+${cleanDigits}) a la lista de envíos.` });
+                          }
+                        }
+                      }}
+                    >
+                      📱 + Agregar número personal
+                    </button>
                   </div>
                 </div>
 
@@ -1029,7 +1058,7 @@ export function MessageTester() {
                   <div style={{ marginTop: '12px', background: 'var(--bg-secondary, #f8fafc)', border: '1px solid var(--border-color, #e2e8f0)', borderRadius: '8px', padding: '12px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                       <strong style={{ fontSize: '0.88rem', color: 'var(--text-main, #1e293b)' }}>
-                        📋 Lista de Grupos Seleccionados ({bulkRecipientList.length}):
+                        📋 Lista de Destinatarios Seleccionados ({bulkRecipientList.length}):
                       </strong>
                       <button
                         type="button"
@@ -1045,7 +1074,12 @@ export function MessageTester() {
                     <div style={{ maxHeight: '180px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                       {bulkRecipientList.map(jid => {
                         const matchedGroup = groups.find((g: any) => g.id === jid);
-                        const displayName = matchedGroup ? matchedGroup.name : jid;
+                        const isPersonalPhone = jid.endsWith('@c.us');
+                        const displayName = matchedGroup 
+                          ? matchedGroup.name 
+                          : isPersonalPhone 
+                            ? `📱 Teléfono Personal (+${jid.replace('@c.us', '')})`
+                            : jid;
                         return (
                           <div
                             key={jid}
@@ -1087,7 +1121,7 @@ export function MessageTester() {
                                   .filter(line => line.trim() !== jid && line.trim().split(' ')[0] !== jid)
                                   .join('\n');
                                 setBulkRecipients(remaining);
-                                setToast({ type: 'info', message: `Se quitó el grupo "${displayName}" de la lista.` });
+                                setToast({ type: 'info', message: `Se quitó "${displayName}" de la lista.` });
                               }}
                             >
                               🗑️ Quitar
