@@ -508,6 +508,15 @@ export function MessageTester() {
         <div className="compose-panel">
           <h2 className="eyebrow">{t('messageTester.compose')}</h2>
 
+          {sessions.length === 0 && (
+            <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', color: '#991b1b', fontSize: '0.9rem' }}>
+              <strong>⚠️ Sin sesión conectada en el servidor VPS</strong>
+              <p style={{ margin: '4px 0 0' }}>
+                Para buscar y cargar tus grupos, ve a la sección <strong>Sesiones</strong>, crea una sesión y escanea el código QR con tu WhatsApp.
+              </p>
+            </div>
+          )}
+
           <div className="form-group">
             <label>{t('messageTester.session')}</label>
             <select value={session} onChange={e => setSession(e.target.value)}>
@@ -890,6 +899,10 @@ export function MessageTester() {
                         fontWeight: 500,
                       }}
                       onClick={async () => {
+                        if (!session) {
+                          setToast({ type: 'error', message: '⚠️ Primero debes conectar tu teléfono escaneando el QR en la pestaña Sesiones.' });
+                          return;
+                        }
                         try {
                           const res = await refetchGroups();
                           const activeGroups = res.data || groups;
@@ -923,6 +936,10 @@ export function MessageTester() {
                         fontWeight: 500,
                       }}
                       onClick={async () => {
+                        if (!session) {
+                          setToast({ type: 'error', message: '⚠️ Primero debes conectar tu teléfono escaneando el QR en la pestaña Sesiones.' });
+                          return;
+                        }
                         try {
                           const res = await refetchGroups();
                           const latestGroups = res.data || [];
