@@ -316,16 +316,26 @@ export function MessageTester() {
       // Bulk carries its own recipient list, so the shared selector's target is not resolved there.
       let chatId = targetId;
       if (messageType !== 'bulk' && recipientType !== 'group') {
-        const resolved = await contactApi.checkNumber(session, targetId.replace(/[^0-9]/g, ''));
-        if (!resolved.exists || !resolved.whatsappId) {
+        const cleanNum = targetId.replace(/[^0-9]/g, '');
+        if (!cleanNum) {
           setResponse({
             success: false,
             timestamp: new Date().toISOString(),
-            error: t('messageTester.notOnWhatsApp'),
+            error: 'Número de teléfono no válido',
           });
+          setIsLoading(false);
           return;
         }
-        chatId = resolved.whatsappId;
+        try {
+          const resolved = await contactApi.checkNumber(session, cleanNum);
+          if (resolved.exists && resolved.whatsappId) {
+            chatId = resolved.whatsappId;
+          } else {
+            chatId = `${cleanNum}@c.us`;
+          }
+        } catch {
+          chatId = targetId.includes('@') ? targetId : `${cleanNum}@c.us`;
+        }
       }
 
       // Bulk is a batch, not a single send: 202 + batchId, then poll progress until terminal.

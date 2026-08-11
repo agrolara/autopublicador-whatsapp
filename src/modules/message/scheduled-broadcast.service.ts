@@ -130,16 +130,22 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
   private async processDueBroadcasts() {
     const { hour: nowH, minute: nowM, ymd: todayYMD, hhmm: currentHHMM } = getLocalChileTime();
 
-    for (const item of this.items) {
+    for (const item of [...this.items]) {
       let isDue = false;
+      const targetHHMM = item.scheduledTime.padStart(5, '0');
 
-      const [targetH, targetM] = item.scheduledTime.split(':').map(Number);
-
-      if (nowM === targetM) {
-        if (nowH === targetH) {
+      if (item.frequency === 'once') {
+        if (!item.lastRunAt && currentHHMM >= targetHHMM) {
           isDue = true;
-        } else if (item.frequency === 'twice_daily' && (nowH === (targetH + 12) % 24)) {
-          isDue = true;
+        }
+      } else {
+        const [targetH, targetM] = item.scheduledTime.split(':').map(Number);
+        if (nowM === targetM) {
+          if (nowH === targetH) {
+            isDue = true;
+          } else if (item.frequency === 'twice_daily' && (nowH === (targetH + 12) % 24)) {
+            isDue = true;
+          }
         }
       }
 

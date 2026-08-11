@@ -716,7 +716,9 @@ export class MessageController {
     @Body() dto: { base64: string; mimetype?: string; filename?: string },
   ) {
     const filename = await this.messageService.saveTempMedia(dto);
-    const fileUrl = `/api/sessions/${sessionId}/messages/media-file/${filename}`;
+    const port = process.env.PORT || '2785';
+    const baseUrl = process.env.PUBLIC_URL || `http://127.0.0.1:${port}`;
+    const fileUrl = `${baseUrl}/api/sessions/${sessionId}/messages/media-file/${filename}`;
     return { url: fileUrl, filename };
   }
 

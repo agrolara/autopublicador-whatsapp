@@ -714,31 +714,42 @@ export class BulkMessageService implements OnApplicationBootstrap {
     type: string,
     content: BulkMessageContent,
   ): Promise<MessageResult> {
+    const resolveData = (base64?: string, url?: string): string => {
+      const stripped = stripBase64DataUri(base64);
+      if (stripped) return stripped;
+      if (!url) return '';
+      if (url.startsWith('/')) {
+        const port = process.env.PORT || '2785';
+        return `http://127.0.0.1:${port}${url}`;
+      }
+      return url;
+    };
+
     switch (type) {
       case 'text':
         return engine.sendTextMessage(chatId, content.text || '');
       case 'image':
         return engine.sendImageMessage(chatId, {
           mimetype: content.image?.mimetype || 'image/jpeg',
-          data: stripBase64DataUri(content.image?.base64) || content.image?.url || '',
+          data: resolveData(content.image?.base64, content.image?.url),
           caption: content.caption,
         });
       case 'video':
         return engine.sendVideoMessage(chatId, {
           mimetype: content.video?.mimetype || 'video/mp4',
-          data: stripBase64DataUri(content.video?.base64) || content.video?.url || '',
+          data: resolveData(content.video?.base64, content.video?.url),
           caption: content.caption,
         });
       case 'audio':
         return engine.sendAudioMessage(chatId, {
           mimetype: content.audio?.mimetype || (content.audio?.ptt ? 'audio/ogg; codecs=opus' : 'audio/mpeg'),
-          data: stripBase64DataUri(content.audio?.base64) || content.audio?.url || '',
+          data: resolveData(content.audio?.base64, content.audio?.url),
           ptt: content.audio?.ptt,
         });
       case 'document':
         return engine.sendDocumentMessage(chatId, {
           mimetype: content.document?.mimetype || 'application/octet-stream',
-          data: stripBase64DataUri(content.document?.base64) || content.document?.url || '',
+          data: resolveData(content.document?.base64, content.document?.url),
           filename: content.document?.filename,
           caption: content.caption,
         });
