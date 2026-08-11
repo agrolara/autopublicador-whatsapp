@@ -31,7 +31,7 @@ import {
   VotePollDto,
   UnpinMessageDto,
 } from './dto/message-actions.dto';
-import { RequireRole } from '../auth/decorators/auth.decorators';
+import { RequireRole, Public } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
 import {
   CHANNEL_MEDIA_501,
@@ -723,6 +723,8 @@ export class MessageController {
   }
 
   @Get('media-file/:filename')
+  @Public()
+  @ApiOperation({ summary: 'Get temp media file for bulk send or scheduled campaigns' })
   getMediaFile(@Param('filename') filename: string, @Res() res: Response) {
     const filePath = this.messageService.getTempMediaPath(filename);
     res.sendFile(filePath);

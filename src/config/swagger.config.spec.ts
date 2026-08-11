@@ -102,6 +102,7 @@ describe('PUBLIC_PATHS drift guard', () => {
     'src/modules/health/health.controller.ts',
     'src/modules/infra/infra-status.controller.ts',
     'src/modules/integration/ingress.controller.ts',
+    'src/modules/message/message.controller.ts',
     'src/modules/metrics/metrics.controller.ts',
   ];
 
