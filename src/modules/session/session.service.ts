@@ -275,6 +275,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       autoRejectCalls: config?.autoRejectCalls === true,
       maxReconnectAttempts: Number.isFinite(maxAttempts) ? maxAttempts : null,
       reconnectBaseDelay: baseDelay,
+      autoForward: config?.autoForward ? (config.autoForward as any) : undefined,
     };
   }
 
@@ -287,15 +288,6 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
    * Merge the supplied keys into `config` and persist. Merge rather than replace: the column is
    * documented as an opaque blob, so a key this endpoint does not know about belongs to the
    * operator and must survive a write that never mentioned it.
-   *
-   * An explicit `null` deletes the key, which is the only way back to a default that no in-range
-   * value can express (`maxReconnectAttempts` unlimited). `undefined` — the key simply absent from
-   * the request — leaves the stored value alone.
-   *
-   * No restart, and deliberately no engine call: `autoRejectCalls` is re-read from this row on
-   * every incoming call, so the write alone is what takes effect. The reconnect pair is read once
-   * per start() into reconnectStates, so it lands on the next start; that asymmetry is documented
-   * on the DTO rather than papered over by forcing a reconnect nobody asked for.
    */
   async updateConfig(id: string, dto: UpdateSessionConfigDto): Promise<SessionConfigResponseDto> {
     const session = await this.findOne(id);
@@ -308,6 +300,17 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
         delete config[key];
       } else {
         config[key] = value;
+      }
+    }
+
+    if (dto.autoForward !== undefined) {
+      if (dto.autoForward === null) {
+        delete config.autoForward;
+      } else {
+        config.autoForward = {
+          ...((config.autoForward as Record<string, unknown>) ?? {}),
+          ...dto.autoForward,
+        };
       }
     }
 

@@ -68,16 +68,22 @@ export class UpdateSessionConfigDto {
   @Min(1000)
   @Max(300000)
   reconnectBaseDelay?: number | null;
+
+  @ApiPropertyOptional({ description: 'Native auto-forward configuration' })
+  @IsOptional()
+  autoForward?: {
+    enabled?: boolean;
+    phone?: string;
+    direct?: boolean;
+    groups?: boolean;
+  } | null;
 }
 
 /**
  * The effective configuration, not the stored blob. `config` is deliberately stripped from
  * SessionResponseDto because it is an opaque column an operator may have put anything into
  * (alongside the credential-bearing proxyUrl) — echoing it back would leak that. Reporting only
- * the three recognised keys keeps that guarantee while still letting a caller confirm what landed.
- *
- * Values are resolved through resolveReconnectConfig, so what is reported is what the engine will
- * actually do, including for legacy rows whose stored values fall outside the accepted range.
+ * the recognised keys keeps that guarantee while still letting a caller confirm what landed.
  */
 export class SessionConfigResponseDto {
   @ApiProperty({ description: 'Whether incoming calls are auto-rejected', example: false })
@@ -93,4 +99,12 @@ export class SessionConfigResponseDto {
 
   @ApiProperty({ description: 'Base reconnect backoff in milliseconds', example: 5000 })
   reconnectBaseDelay!: number;
+
+  @ApiPropertyOptional({ description: 'Native auto-forward configuration' })
+  autoForward?: {
+    enabled: boolean;
+    phone: string;
+    direct: boolean;
+    groups: boolean;
+  };
 }
