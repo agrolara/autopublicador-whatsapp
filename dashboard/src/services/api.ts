@@ -418,8 +418,19 @@ export interface BatchMessageResult {
   chatId: string;
   status: 'pending' | 'sent' | 'failed' | 'cancelled';
   messageId?: string;
-  error?: { code: string; message: string };
+  error?: string;
   sentAt?: string;
+}
+
+export interface ScheduledBroadcastItem {
+  id: string;
+  sessionId: string;
+  name?: string;
+  scheduledTime: string;
+  frequency: 'once' | 'daily' | 'twice_daily';
+  payload: SendBulkPayload;
+  lastRunAt?: string;
+  createdAt: string;
 }
 
 /** GET batch/:batchId shape; the cancel endpoint returns the same minus results/timestamps. */
@@ -1026,6 +1037,25 @@ export const messageApi = {
     request<void>(`/sessions/${sessionId}/messages/delete`, {
       method: 'POST',
       body: JSON.stringify(data),
+    }),
+  getScheduledBroadcasts: (sessionId: string) =>
+    request<ScheduledBroadcastItem[]>(`/sessions/${sessionId}/messages/scheduled-broadcasts`),
+  createScheduledBroadcast: (
+    sessionId: string,
+    data: {
+      scheduledTime: string;
+      frequency: 'once' | 'daily' | 'twice_daily';
+      payload: SendBulkPayload;
+      name?: string;
+    },
+  ) =>
+    request<ScheduledBroadcastItem>(`/sessions/${sessionId}/messages/scheduled-broadcasts`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  deleteScheduledBroadcast: (sessionId: string, id: string) =>
+    request<{ success: boolean }>(`/sessions/${sessionId}/messages/scheduled-broadcasts/${id}`, {
+      method: 'DELETE',
     }),
 };
 

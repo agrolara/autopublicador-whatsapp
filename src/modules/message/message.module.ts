@@ -13,6 +13,8 @@ import { Session } from '../session/entities/session.entity';
 import { SendPacingService } from './send-pacing.service';
 import { MessageBatch } from './entities/message-batch.entity';
 
+import { ScheduledBroadcastService } from './scheduled-broadcast.service';
+
 @Module({
   imports: [
     TypeOrmModule.forFeature([Message, MessageBatch, Session], 'data'),
@@ -27,7 +29,8 @@ import { MessageBatch } from './entities/message-batch.entity';
     MessageTypeBackfillService,
     PendingMessageReaperService,
     SendPacingService,
+    ScheduledBroadcastService,
   ],
-  exports: [MessageService, BulkMessageService, SendPacingService],
+  exports: [MessageService, BulkMessageService, SendPacingService, ScheduledBroadcastService],
 })
 export class MessageModule {}

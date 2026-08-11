@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, type ChangeEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Send, CheckCircle, XCircle, Loader2, Upload, X, Plus } from 'lucide-react';
+import { Send, CheckCircle, XCircle, Loader2, Upload, X, Plus, Trash2, Clock, Calendar } from 'lucide-react';
 import {
   messageApi,
   contactApi,
@@ -8,10 +8,12 @@ import {
   type MessageResponse,
   type BatchStatus,
   type BatchStatusResponse,
+  type ScheduledBroadcastItem,
+  type SendBulkPayload,
 } from '../services/api';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { useRole } from '../hooks/useRole';
-import { useSessionsQuery, useSessionGroupsQuery } from '../hooks/queries';
+import { useSessionsQuery, useSessionGroupsQuery, useTemplatesQuery } from '../hooks/queries';
 import { parseBulkRecipients, BULK_MAX_RECIPIENTS } from '../utils/bulkRecipients';
 import { PageHeader } from '../components/PageHeader';
 import './MessageTester.css';
@@ -132,6 +134,7 @@ export function MessageTester() {
   const [forwardMessageId, setForwardMessageId] = useState('');
   const [bulkRecipients, setBulkRecipients] = useState('');
   const [bulkDelay, setBulkDelay] = useState('');
+  const [bulkMediaType, setBulkMediaType] = useState<'text' | 'image' | 'video' | 'audio' | 'document'>('text');
   const [isLoading, setIsLoading] = useState(false);
   const [response, setResponse] = useState<ApiResponse | null>(null);
   // Live bulk-batch progress, polled every ~2s while the batch runs (see startBatchPolling).
@@ -143,7 +146,29 @@ export function MessageTester() {
   // poll/cancel must keep addressing the session the batch was created on.
   const batchSessionRef = useRef('');
 
-  const { data: groups = [], isLoading: loadingGroups } = useSessionGroupsQuery(session, recipientType === 'group');
+  const [sendMode, setSendMode] = useState<'now' | 'scheduled'>('now');
+  const [scheduledTime, setScheduledTime] = useState('09:00');
+  const [scheduledFrequency, setScheduledFrequency] = useState<'once' | 'daily' | 'twice_daily'>('twice_daily');
+  const [scheduledList, setScheduledList] = useState<ScheduledBroadcastItem[]>([]);
+  const [newGroupsFound, setNewGroupsFound] = useState<{ id: string; name?: string }[]>([]);
+
+  const loadSchedules = async () => {
+    if (session) {
+      try {
+        const items = await messageApi.getScheduledBroadcasts(session);
+        setScheduledList(items);
+      } catch (e) {
+        // ignore
+      }
+    }
+  };
+
+  useEffect(() => {
+    loadSchedules();
+  }, [session]);
+
+  const { data: groups = [], refetch: refetchGroups, isLoading: loadingGroups } = useSessionGroupsQuery(session, true);
+  const { data: templates = [] } = useTemplatesQuery(session, !!session);
 
   useEffect(() => {
     if (sessions.length > 0 && !session) {
@@ -236,7 +261,7 @@ export function MessageTester() {
     reader.readAsDataURL(file);
   };
 
-  const isMediaMessageType = mediaMessageTypes.includes(messageType);
+  const isMediaMessageType = mediaMessageTypes.includes(messageType) || (messageType === 'bulk' && bulkMediaType !== 'text');
   const bulkRecipientList = parseBulkRecipients(bulkRecipients);
   const pollOptionsFilled = pollOptions.map(o => o.trim()).filter(o => o.length > 0);
   const lat = parseFloat(latitude);
@@ -257,8 +282,9 @@ export function MessageTester() {
   } else if (messageType === 'forward') {
     formValid = forwardTo.trim().length > 0 && forwardMessageId.trim().length > 0;
   } else if (messageType === 'bulk') {
+    const mediaValid = bulkMediaType === 'text' ? content.trim().length > 0 : (!!mediaFile || mediaUrl.trim().length > 0);
     formValid =
-      content.trim().length > 0 &&
+      mediaValid &&
       bulkRecipientList.length > 0 &&
       bulkRecipientList.length <= BULK_MAX_RECIPIENTS &&
       (delayMs === undefined || (!Number.isNaN(delayMs) && delayMs >= 1000 && delayMs <= 60000));
@@ -301,14 +327,50 @@ export function MessageTester() {
 
       // Bulk is a batch, not a single send: 202 + batchId, then poll progress until terminal.
       if (messageType === 'bulk') {
-        const batch = await messageApi.sendBulk(session, {
-          messages: bulkRecipientList.map(recipientChatId => ({
+        const messages: BulkMessageItem[] = bulkRecipientList.map(recipientChatId => {
+          if (bulkMediaType === 'text') {
+            return {
+              chatId: recipientChatId,
+              type: 'text' as const,
+              content: { text: content },
+            };
+          }
+          const mediaObj: BulkMediaPayload = mediaFile
+            ? { base64: mediaFile.base64, mimetype: mediaFile.mimetype }
+            : { url: mediaUrl };
+          return {
             chatId: recipientChatId,
-            type: 'text' as const,
-            content: { text: content },
-          })),
-          ...(delayMs !== undefined ? { options: { delayBetweenMessages: delayMs } } : {}),
+            type: bulkMediaType,
+            content: {
+              [bulkMediaType]: mediaObj,
+              ...(content ? { caption: content } : {}),
+              ...(bulkMediaType === 'document' && content ? { filename: content } : {}),
+            },
+          };
         });
+
+        const bulkPayload: SendBulkPayload = {
+          messages,
+          ...(delayMs !== undefined ? { options: { delayBetweenMessages: delayMs } } : {}),
+        };
+
+        if (sendMode === 'scheduled') {
+          await messageApi.createScheduledBroadcast(session, {
+            scheduledTime,
+            frequency: scheduledFrequency,
+            payload: bulkPayload,
+            name: `Envío Masivo (${scheduledTime})`,
+          });
+          setToast({
+            type: 'success',
+            message: `Campaña masiva programada exitosamente para las ${scheduledTime}`,
+          });
+          loadSchedules();
+          setResponse({ success: true, timestamp: new Date().toISOString() });
+          return;
+        }
+
+        const batch = await messageApi.sendBulk(session, bulkPayload);
         batchSessionRef.current = session;
         setResponse({ success: true, timestamp: new Date().toISOString(), batchId: batch.batchId });
         setBatchStatus({
@@ -514,6 +576,28 @@ export function MessageTester() {
             </>
           )}
 
+          {templates.length > 0 && (
+            <div className="form-group">
+              <label>Cargar plantilla guardada (Opcional)</label>
+              <select
+                onChange={e => {
+                  const tpl = templates.find(t => t.id === e.target.value);
+                  if (tpl) {
+                    const fullText = [tpl.header, tpl.body, tpl.footer].filter(Boolean).join('\n\n');
+                    setContent(fullText);
+                  }
+                }}
+              >
+                <option value="">-- Seleccionar una plantilla guardada --</option>
+                {templates.map(t => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <div className="form-group">
             <label>{t('messageTester.messageType')}</label>
             <div className="toggle-group toggle-group-wrap">
@@ -584,7 +668,7 @@ export function MessageTester() {
                   ref={fileInputRef}
                   type="file"
                   style={{ display: 'none' }}
-                  accept={mediaAccept[messageType]}
+                  accept={messageType === 'bulk' ? mediaAccept[bulkMediaType] : mediaAccept[messageType]}
                   onChange={handleFileChange}
                 />
               </div>
@@ -766,7 +850,140 @@ export function MessageTester() {
           {messageType === 'bulk' && (
             <>
               <div className="form-group">
-                <label>{t('messageTester.bulkRecipients')}</label>
+                <label>Tipo de contenido masivo</label>
+                <div className="toggle-group toggle-group-wrap">
+                  {(['text', 'image', 'video', 'audio', 'document'] as const).map(type => (
+                    <button
+                      key={type}
+                      type="button"
+                      className={bulkMediaType === type ? 'active' : ''}
+                      onClick={() => {
+                        if (type !== bulkMediaType) clearMediaFile();
+                        setBulkMediaType(type);
+                      }}
+                    >
+                      {t(`messageTester.types.${type}`)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="form-group">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+                  <label style={{ margin: 0 }}>{t('messageTester.bulkRecipients')}</label>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      type="button"
+                      style={{
+                        padding: '4px 10px',
+                        fontSize: '0.82rem',
+                        background: '#2563eb',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        fontWeight: 500,
+                      }}
+                      onClick={() => {
+                        if (groups.length === 0) {
+                          setToast({ type: 'error', message: 'No se encontraron grupos en esta sesión.' });
+                          return;
+                        }
+                        const allGroupIds = groups.map(g => g.id).join('\n');
+                        setBulkRecipients(allGroupIds);
+                        setToast({ type: 'success', message: `Se cargaron los ${groups.length} grupos registrados.` });
+                      }}
+                    >
+                      👥 Cargar todos mis grupos ({groups.length})
+                    </button>
+                    <button
+                      type="button"
+                      style={{
+                        padding: '4px 10px',
+                        fontSize: '0.82rem',
+                        background: 'var(--bg-secondary, #f1f5f9)',
+                        color: 'var(--text-main, #334155)',
+                        border: '1px solid var(--border-color, #cbd5e1)',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        fontWeight: 500,
+                      }}
+                      onClick={async () => {
+                        try {
+                          const res = await refetchGroups();
+                          const latestGroups = res.data || [];
+                          // Group IDs already known/registered in OpenWA session or present in bulk recipients
+                          const knownSet = new Set([
+                            ...groups.map((g: any) => g.id),
+                            ...bulkRecipientList,
+                          ]);
+                          const diffGroups = latestGroups.filter((g: any) => !knownSet.has(g.id));
+                          
+                          if (diffGroups.length > 0) {
+                            setNewGroupsFound(diffGroups);
+                            setToast({
+                              type: 'success',
+                              message: `✨ ¡Se encontraron ${diffGroups.length} grupos nuevos que no estaban registrados!`,
+                            });
+                          } else {
+                            setNewGroupsFound([]);
+                            setToast({
+                              type: 'info',
+                              message: `No hay grupos nuevos. Todos los ${latestGroups.length} grupos ya están registrados en el sistema.`,
+                            });
+                          }
+                        } catch (err: any) {
+                          setToast({ type: 'error', message: 'Error al buscar nuevos grupos.' });
+                        }
+                      }}
+                    >
+                      🔄 Buscar grupos nuevos
+                    </button>
+                  </div>
+                </div>
+
+                {newGroupsFound.length > 0 && (
+                  <div style={{ background: '#f0fdf4', border: '1px solid #86efac', padding: '12px 16px', borderRadius: '8px', marginBottom: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                      <div>
+                        <strong style={{ color: '#166534' }}>✨ ¡Se encontraron {newGroupsFound.length} grupos nuevos!</strong>
+                        <p style={{ margin: '4px 0 0', fontSize: '0.85rem', color: '#15803d' }}>
+                          {newGroupsFound.map(g => g.name || g.id).slice(0, 3).join(', ')}
+                          {newGroupsFound.length > 3 ? ` y ${newGroupsFound.length - 3} más...` : ''}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        style={{
+                          background: '#16a34a',
+                          color: '#fff',
+                          border: 'none',
+                          padding: '6px 12px',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                          fontSize: '0.85rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                        }}
+                        onClick={() => {
+                          const newIds = newGroupsFound.map(g => g.id).join('\n');
+                          setBulkRecipients(prev => (prev.trim() ? `${prev.trim()}\n${newIds}` : newIds));
+                          setToast({ type: 'success', message: `Se agregaron ${newGroupsFound.length} grupos nuevos a tu lista.` });
+                          setNewGroupsFound([]);
+                        }}
+                      >
+                        ➕ Agregar los {newGroupsFound.length} grupos nuevos a mi lista
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <textarea
                   value={bulkRecipients}
                   onChange={e => setBulkRecipients(e.target.value)}
@@ -778,15 +995,17 @@ export function MessageTester() {
                   {t('messageTester.bulkRecipientsCount', { count: bulkRecipientList.length })}
                 </span>
               </div>
-              <div className="form-group">
-                <label>{t('messageTester.messageContent')}</label>
-                <textarea
-                  value={content}
-                  onChange={e => setContent(e.target.value)}
-                  placeholder={t('messageTester.messagePlaceholder')}
-                  rows={4}
-                />
-              </div>
+              {bulkMediaType === 'text' && (
+                <div className="form-group">
+                  <label>{t('messageTester.messageContent')}</label>
+                  <textarea
+                    value={content}
+                    onChange={e => setContent(e.target.value)}
+                    placeholder={t('messageTester.messagePlaceholder')}
+                    rows={4}
+                  />
+                </div>
+              )}
               <div className="form-group">
                 <label>
                   {t('messageTester.bulkDelay')} ({t('common.optional')})
@@ -802,12 +1021,59 @@ export function MessageTester() {
                 />
                 <span className="hint">{t('messageTester.bulkDelayHint')}</span>
               </div>
+
+              <div className="form-group" style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border-color, #e2e8f0)' }}>
+                <label style={{ fontWeight: 600, fontSize: '0.95rem' }}>Modo de Envío</label>
+                <div className="toggle-group" style={{ marginBottom: '12px' }}>
+                  <button
+                    type="button"
+                    className={sendMode === 'now' ? 'active' : ''}
+                    onClick={() => setSendMode('now')}
+                  >
+                    🚀 Envío Inmediato
+                  </button>
+                  <button
+                    type="button"
+                    className={sendMode === 'scheduled' ? 'active' : ''}
+                    onClick={() => setSendMode('scheduled')}
+                  >
+                    ⏰ Programar por Horario
+                  </button>
+                </div>
+
+                {sendMode === 'scheduled' && (
+                  <div style={{ background: 'var(--bg-secondary, #f8fafc)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border-color, #cbd5e1)' }}>
+                    <div className="form-group">
+                      <label>Hora de disparo (Hora Local HH:MM)</label>
+                      <input
+                        type="time"
+                        value={scheduledTime}
+                        onChange={e => setScheduledTime(e.target.value)}
+                        style={{ fontSize: '1.1rem', fontWeight: 600, padding: '8px 12px' }}
+                      />
+                      <span className="hint">Escribe o selecciona la hora exacta del día en que quieres publicar.</span>
+                    </div>
+                    <div className="form-group">
+                      <label>Frecuencia de Repetición</label>
+                      <select
+                        value={scheduledFrequency}
+                        onChange={e => setScheduledFrequency(e.target.value as any)}
+                        style={{ padding: '8px 12px' }}
+                      >
+                        <option value="twice_daily">Cada 12 Horas (2 veces al día)</option>
+                        <option value="daily">Todos los días a esta hora (1 vez al día)</option>
+                        <option value="once">Solo una vez a esta hora</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+              </div>
             </>
           )}
 
           <button className="send-btn" onClick={handleSend} disabled={isSendDisabled}>
-            {isLoading ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}
-            {isLoading ? t('messageTester.sending') : canWrite ? t('messageTester.send') : t('messageTester.viewOnly')}
+            {isLoading ? <Loader2 className="animate-spin" size={18} /> : sendMode === 'scheduled' ? <Clock size={18} /> : <Send size={18} />}
+            {isLoading ? t('messageTester.sending') : sendMode === 'scheduled' ? '⏰ Programar Publicación Automática' : canWrite ? t('messageTester.send') : t('messageTester.viewOnly')}
           </button>
         </div>
 
@@ -905,6 +1171,69 @@ export function MessageTester() {
           )}
         </div>
       </div>
+
+      {scheduledList.length > 0 && (
+        <div style={{ marginTop: '24px', padding: '20px', background: 'var(--bg-card, #ffffff)', border: '1px solid var(--border-color, #e2e8f0)', borderRadius: '12px' }}>
+          <h3 style={{ fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+            <Clock size={18} /> Campañas Programadas Activas ({scheduledList.length})
+          </h3>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border-color, #e2e8f0)', color: 'var(--text-secondary, #64748b)' }}>
+                  <th style={{ padding: '8px 12px' }}>Hora de disparo</th>
+                  <th style={{ padding: '8px 12px' }}>Frecuencia</th>
+                  <th style={{ padding: '8px 12px' }}>Destinatarios</th>
+                  <th style={{ padding: '8px 12px' }}>Último envío</th>
+                  <th style={{ padding: '8px 12px' }}>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {scheduledList.map(item => (
+                  <tr key={item.id} style={{ borderBottom: '1px solid var(--border-color, #f1f5f9)' }}>
+                    <td style={{ padding: '10px 12px', fontWeight: 600 }}>
+                      ⏰ {item.scheduledTime} hrs
+                    </td>
+                    <td style={{ padding: '10px 12px' }}>
+                      {item.frequency === 'twice_daily' && 'Cada 12 Horas'}
+                      {item.frequency === 'daily' && 'Todos los días'}
+                      {item.frequency === 'once' && 'Una sola vez'}
+                    </td>
+                    <td style={{ padding: '10px 12px' }}>{item.payload.messages.length} grupos</td>
+                    <td style={{ padding: '10px 12px' }}>
+                      {item.lastRunAt ? new Date(item.lastRunAt).toLocaleString() : 'Pendiente'}
+                    </td>
+                    <td style={{ padding: '10px 12px' }}>
+                      <button
+                        type="button"
+                        style={{
+                          background: '#ef4444',
+                          color: '#fff',
+                          border: 'none',
+                          padding: '6px 12px',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          fontSize: '0.85rem',
+                        }}
+                        onClick={async () => {
+                          await messageApi.deleteScheduledBroadcast(session, item.id);
+                          setToast({ type: 'success', message: 'Programación eliminada exitosamente' });
+                          loadSchedules();
+                        }}
+                      >
+                        <Trash2 size={14} /> Eliminar
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

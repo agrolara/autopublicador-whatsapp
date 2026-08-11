@@ -598,8 +598,10 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
         handleSIGTERM: false,
         handleSIGHUP: false,
         // Only override the executable when explicitly configured; otherwise let
-        // whatsapp-web.js fall back to Puppeteer's bundled Chromium.
-        ...(this.config.puppeteer?.executablePath ? { executablePath: this.config.puppeteer.executablePath } : {}),
+        // process.env.PUPPETEER_EXECUTABLE_PATH or whatsapp-web.js fall back to Puppeteer's bundled Chromium.
+        ...(this.config.puppeteer?.executablePath || process.env.PUPPETEER_EXECUTABLE_PATH
+          ? { executablePath: this.config.puppeteer?.executablePath || process.env.PUPPETEER_EXECUTABLE_PATH }
+          : {}),
       },
       ...(authTimeoutMs !== undefined ? { authTimeoutMs } : {}),
       ...(proxyAuthentication ? { proxyAuthentication } : {}),

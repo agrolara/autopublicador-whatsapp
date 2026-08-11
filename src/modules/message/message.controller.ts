@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Param, Body, Query, Res, HttpCode, HttpStatus, StreamableFile } from '@nestjs/common';
+import { Controller, Post, Get, Delete, Param, Body, Query, Res, HttpCode, HttpStatus, StreamableFile } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery, ApiBody } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { MessageService } from './message.service';
@@ -42,12 +42,15 @@ import {
   RECIPIENT_UNREACHABLE_400,
 } from '../../common/openapi/engine-status-responses';
 
+import { ScheduledBroadcastService } from './scheduled-broadcast.service';
+
 @ApiTags('messages')
 @Controller('sessions/:sessionId/messages')
 export class MessageController {
   constructor(
     private readonly messageService: MessageService,
     private readonly bulkMessageService: BulkMessageService,
+    private readonly scheduledBroadcastService: ScheduledBroadcastService,
   ) {}
 
   @Get()
@@ -669,5 +672,39 @@ export class MessageController {
       status: batch.status,
       progress: batch.progress,
     };
+  }
+
+  // ========== Scheduled Broadcasts ==========
+
+  @Get('scheduled-broadcasts')
+  @ApiOperation({ summary: 'Get all scheduled broadcasts for a session' })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  getScheduledBroadcasts(@Param('sessionId') sessionId: string) {
+    return this.scheduledBroadcastService.getBroadcasts(sessionId);
+  }
+
+  @Post('scheduled-broadcasts')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Create a new scheduled bulk broadcast campaign' })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  createScheduledBroadcast(
+    @Param('sessionId') sessionId: string,
+    @Body() dto: {
+      scheduledTime: string;
+      frequency: 'once' | 'daily' | 'twice_daily';
+      payload: SendBulkMessageDto;
+      name?: string;
+    },
+  ) {
+    return this.scheduledBroadcastService.addBroadcast(sessionId, dto);
+  }
+
+  @Delete('scheduled-broadcasts/:id')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Delete a scheduled broadcast campaign' })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiParam({ name: 'id', description: 'Scheduled broadcast ID' })
+  deleteScheduledBroadcast(@Param('sessionId') sessionId: string, @Param('id') id: string) {
+    return { success: this.scheduledBroadcastService.deleteBroadcast(sessionId, id) };
   }
 }

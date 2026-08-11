@@ -51,6 +51,7 @@ media/
 uploads/
 .wwebjs_auth/
 .wwebjs_cache/
+chrome/
 
 # Database
 *.db
