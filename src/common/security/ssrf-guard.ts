@@ -51,19 +51,19 @@ export function isSsrfProtectionEnabled(): boolean {
  * bypass the block. Matched case-insensitively against the URL hostname.
  */
 function getAllowedHosts(): Set<string> {
-  return new Set(
-    (process.env.SSRF_ALLOWED_HOSTS ?? '')
-      .split(',')
-      // Strip IPv6 brackets so an entry copied from a URL (e.g. "[::1]") matches the
-      // bracket-stripped url.hostname we compare against below.
-      .map(h =>
-        h
-          .trim()
-          .replace(/^\[|\]$/g, '')
-          .toLowerCase(),
-      )
-      .filter(Boolean),
-  );
+  const allowed = new Set<string>(['127.0.0.1', 'localhost', '::1']);
+  if (process.env.PUBLIC_URL) {
+    try {
+      const u = new URL(process.env.PUBLIC_URL);
+      allowed.add(u.hostname.toLowerCase());
+    } catch {}
+  }
+  const envHosts = (process.env.SSRF_ALLOWED_HOSTS ?? '')
+    .split(',')
+    .map(h => h.trim().replace(/^\[|\]$/g, '').toLowerCase())
+    .filter(Boolean);
+  envHosts.forEach(h => allowed.add(h));
+  return allowed;
 }
 
 function ipv4ToInt(ip: string): number {
