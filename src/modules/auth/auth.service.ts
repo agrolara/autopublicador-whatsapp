@@ -28,6 +28,9 @@ import { KeyedAsyncLock } from '../integration/ordering-lock';
  * a developer explicitly opts in with `ALLOW_DEV_API_KEY=true`, never by default.
  */
 export function resolveSeedApiKey(): string {
+  if (process.env.ADMIN_API_KEY) {
+    return process.env.ADMIN_API_KEY;
+  }
   if (process.env.API_MASTER_KEY) {
     return process.env.API_MASTER_KEY;
   }
@@ -79,6 +82,15 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
     const count = await this.apiKeyRepository.count();
     let displayKey: string;
     let isNewKey = false;
+
+    const configuredKey = process.env.ADMIN_API_KEY || process.env.API_MASTER_KEY;
+    if (configuredKey) {
+      const hash = this.hashKey(configuredKey);
+      const exists = await this.apiKeyRepository.findOne({ where: { keyHash: hash } });
+      if (!exists) {
+        await this.seedApiKey(configuredKey, 'Master Admin Key', ApiKeyRole.ADMIN);
+      }
+    }
 
     if (count === 0) {
       displayKey = resolveSeedApiKey();

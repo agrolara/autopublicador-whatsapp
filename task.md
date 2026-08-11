@@ -5,4 +5,5 @@
 - [x] Creación del repositorio remoto `https://github.com/agrolara/autopublicador-whatsapp`
 - [x] Configuración de la aplicación Dockerfile en Coolify (Puerto 2785)
 - [x] Asignación del subdominio `https://whatsapp-autopublicaciones.agrolara.dedyn.io` en Coolify
-- [x] Re-despliegue activado en Coolify (Deployment UUID: `hburghxecx7y9tuxiuem5rya`)
+- [x] Despliegue en Coolify completado exitosamente (Deployment Status: `finished`)
+- [x] Verificación de salud HTTP 200 OK en `https://whatsapp-autopublicaciones.agrolara.dedyn.io/api/health/ready`
