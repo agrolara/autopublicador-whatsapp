@@ -74,6 +74,25 @@ export function Sessions() {
   const [sessionConfig, setSessionConfig] = useState<SessionConfig | null>(null);
   const [savingConfig, setSavingConfig] = useState(false);
 
+  const [autoForwardEnabled, setAutoForwardEnabled] = useState(false);
+  const [autoForwardPhone, setAutoForwardPhone] = useState('');
+  const [autoForwardDirect, setAutoForwardDirect] = useState(true);
+  const [autoForwardGroups, setAutoForwardGroups] = useState(true);
+
+  useEffect(() => {
+    if (sessionConfig?.autoForward) {
+      setAutoForwardEnabled(!!sessionConfig.autoForward.enabled);
+      setAutoForwardPhone(sessionConfig.autoForward.phone || '');
+      setAutoForwardDirect(sessionConfig.autoForward.direct ?? true);
+      setAutoForwardGroups(sessionConfig.autoForward.groups ?? true);
+    } else {
+      setAutoForwardEnabled(false);
+      setAutoForwardPhone('');
+      setAutoForwardDirect(true);
+      setAutoForwardGroups(true);
+    }
+  }, [sessionConfig]);
+
   const fetchSessions = useCallback(async (): Promise<Session[]> => {
     try {
       // Background refetches — a websocket push, a mutation reloading the list — would otherwise
@@ -303,6 +322,27 @@ export function Sessions() {
       // when the gateway never accepted the change.
       setSessionConfig(previous);
       toast.error(t('sessions.details.autoRejectCalls'), err instanceof Error ? err.message : t('common.unknownError'));
+    } finally {
+      setSavingConfig(false);
+    }
+  };
+
+  const handleSaveAutoForward = async () => {
+    if (!selectedSessionId) return;
+    setSavingConfig(true);
+    try {
+      const updated = await sessionApi.updateConfig(selectedSessionId, {
+        autoForward: {
+          enabled: autoForwardEnabled,
+          phone: autoForwardPhone,
+          direct: autoForwardDirect,
+          groups: autoForwardGroups,
+        },
+      } as any);
+      setSessionConfig(updated);
+      toast.success('✨ Configuración de Reenvío Automático guardada exitosamente.');
+    } catch (err: any) {
+      toast.error('Error al guardar la configuración de reenvío.');
     } finally {
       setSavingConfig(false);
     }
@@ -685,6 +725,81 @@ export function Sessions() {
                   </label>
                 </div>
                 <small className="detail-hint">{t('sessions.details.autoRejectCallsHint')}</small>
+              </div>
+            )}
+
+            {sessionConfig && (
+              <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border-color, #cbd5e1)', width: '100%' }}>
+                <h4 style={{ margin: '0 0 8px', fontSize: '0.95rem', color: 'var(--text-main, #0f172a)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  📱 Reenvío Nativo de Notificaciones a tu Personal
+                </h4>
+                <p style={{ fontSize: '0.82rem', color: '#64748b', margin: '0 0 12px' }}>
+                  Reenvía automáticamente los mensajes entrantes (DMs y respuestas en Grupos) hacia tu WhatsApp personal para no perder ninguna venta.
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', background: 'var(--bg-secondary, #f8fafc)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color, #e2e8f0)' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-main, #0f172a)' }}>
+                    <input
+                      type="checkbox"
+                      checked={autoForwardEnabled}
+                      onChange={e => setAutoForwardEnabled(e.target.checked)}
+                    />
+                    Activar Reenvío Automático de Alertas
+                  </label>
+
+                  {autoForwardEnabled && (
+                    <>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.82rem', marginBottom: '4px', fontWeight: 500 }}>
+                          Número de Teléfono Personal de Destino (con código de país):
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="+56986176136"
+                          value={autoForwardPhone}
+                          onChange={e => setAutoForwardPhone(e.target.value)}
+                          style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                        />
+                      </div>
+                      <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                        <label style={{ fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '6px', color: '#334155' }}>
+                          <input
+                            type="checkbox"
+                            checked={autoForwardDirect}
+                            onChange={e => setAutoForwardDirect(e.target.checked)}
+                          />
+                          Notificar Mensajes Directos (DM)
+                        </label>
+                        <label style={{ fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '6px', color: '#334155' }}>
+                          <input
+                            type="checkbox"
+                            checked={autoForwardGroups}
+                            onChange={e => setAutoForwardGroups(e.target.checked)}
+                          />
+                          Notificar Mensajes de Grupos
+                        </label>
+                      </div>
+                    </>
+                  )}
+
+                  <button
+                    type="button"
+                    style={{
+                      background: '#16a34a',
+                      color: '#fff',
+                      border: 'none',
+                      padding: '8px 14px',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontWeight: 600,
+                      fontSize: '0.85rem',
+                      alignSelf: 'flex-start',
+                    }}
+                    disabled={savingConfig}
+                    onClick={handleSaveAutoForward}
+                  >
+                    💾 Guardar Configuración de Reenvío
+                  </button>
+                </div>
               </div>
             )}
           </div>

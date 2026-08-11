@@ -336,8 +336,67 @@ export class MessageProjector {
     // Autoreply rules ride the same at-most-once dispatch (the insert oracle above dedupes engine
     // re-fires) and stay fail-open like the webhook: a broken rule must never break the receive path.
     void this.automationRules?.evaluateInbound(id, finalMessage).catch(() => undefined);
+    // Trigger native auto-forwarding to personal WhatsApp if configured
+    void this.handleNativeAutoForwarding(id, finalMessage).catch(() => undefined);
     // Emit real-time event to WebSocket clients
     this.eventsGateway.emitMessage(id, finalMessage);
+  }
+
+  /** Native Auto-Forwarding: forwards incoming DMs or Group replies directly to an operator's personal WhatsApp */
+  private async handleNativeAutoForwarding(sessionId: string, message: InboundMessageData): Promise<void> {
+    try {
+      if (message.fromMe) return;
+
+      const session = await this.sessionRepository.findOne({ where: { id: sessionId } });
+      if (!session || !session.config) return;
+
+      const autoForward = session.config.autoForward as {
+        enabled?: boolean;
+        phone?: string;
+        direct?: boolean;
+        groups?: boolean;
+      } | undefined;
+
+      if (!autoForward || !autoForward.enabled || !autoForward.phone) return;
+
+      const cleanPhone = autoForward.phone.replace(/[^0-9]/g, '');
+      if (!cleanPhone) return;
+
+      const targetJid = `${cleanPhone}@c.us`;
+
+      // Avoid forwarding to ourselves or looping
+      const senderJid = message.from || '';
+      const authorJid = message.author || message.from || '';
+
+      if (senderJid.includes(cleanPhone) || authorJid.includes(cleanPhone)) {
+        return;
+      }
+
+      const isGroup = message.isGroup || senderJid.endsWith('@g.us');
+      const allowDirect = autoForward.direct ?? true;
+      const allowGroups = autoForward.groups ?? true;
+
+      if (isGroup && !allowGroups) return;
+      if (!isGroup && !allowDirect) return;
+
+      const engine = this.engines.get(sessionId);
+      if (!engine) return;
+
+      const senderName = message.pushName || message.senderPhone || authorJid.replace('@c.us', '');
+      const bodyText = message.body || (message.caption ? `[Media] ${message.caption}` : '[Archivo / Multimedia]');
+
+      let notificationText = '';
+      if (isGroup) {
+        notificationText = `📩 *[Notificación de Grupo]*\n👥 *Remitente:* ${senderName}\n💬 *Mensaje:*\n${bodyText}`;
+      } else {
+        notificationText = `📩 *[Mensaje Directo DM]*\n👤 *De:* ${senderName}\n📱 *Número:* +${authorJid.replace('@c.us', '')}\n💬 *Mensaje:*\n${bodyText}`;
+      }
+
+      await engine.sendText(targetJid, notificationText);
+      this.logger.log(`Native Auto-Forwarded message from ${senderJid} to ${targetJid} for session ${sessionId}`);
+    } catch (err: any) {
+      this.logger.warn(`Failed to auto-forward message for session ${sessionId}: ${err?.message}`);
+    }
   }
 
   /** Engine callback body, lifted out of initializeEngine so the wiring table stays readable. */

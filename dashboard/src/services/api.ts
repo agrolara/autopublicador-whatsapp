@@ -31,6 +31,12 @@ export interface SessionConfig {
   autoRejectCalls: boolean;
   maxReconnectAttempts: number | null;
   reconnectBaseDelay: number;
+  autoForward?: {
+    enabled: boolean;
+    phone: string;
+    direct: boolean;
+    groups: boolean;
+  };
 }
 
 export interface Session {
