@@ -905,16 +905,16 @@ export function MessageTester() {
                         }
                         try {
                           const res = await refetchGroups();
-                          const activeGroups = res.data || groups;
+                          const activeGroups = res.data || [];
                           if (activeGroups.length === 0) {
-                            setToast({ type: 'error', message: 'No se encontraron grupos en esta sesión. Asegúrate de tener una sesión activa iniciada.' });
+                            setToast({ type: 'info', message: 'WhatsApp está sincronizando tus chats en el servidor. Aguarda unos 5 a 10 segundos y vuelve a presionar el botón.' });
                             return;
                           }
                           const allGroupIds = activeGroups.map((g: any) => g.id).join('\n');
                           setBulkRecipients(allGroupIds);
-                          setToast({ type: 'success', message: `Se cargaron los ${activeGroups.length} grupos encontrados exitosamente.` });
+                          setToast({ type: 'success', message: `✨ ¡Se cargaron con éxito los ${activeGroups.length} grupos de tu cuenta!` });
                         } catch (err) {
-                          setToast({ type: 'error', message: 'Error al consultar los grupos de WhatsApp.' });
+                          setToast({ type: 'error', message: 'WhatsApp se está sincronizando en el servidor. Aguarda unos segundos y vuelve a presionar.' });
                         }
                       }}
                     >
@@ -944,7 +944,7 @@ export function MessageTester() {
                           const res = await refetchGroups();
                           const latestGroups = res.data || [];
                           if (latestGroups.length === 0) {
-                            setToast({ type: 'info', message: 'No se encontraron grupos. Conecta una sesión activa con grupos.' });
+                            setToast({ type: 'info', message: 'WhatsApp se está sincronizando. Aguarda unos segundos y vuelve a intentar.' });
                             setNewGroupsFound([]);
                             return;
                           }
@@ -958,7 +958,7 @@ export function MessageTester() {
                             setNewGroupsFound(diffGroups);
                             setToast({
                               type: 'success',
-                              message: `✨ ¡Se encontraron ${diffGroups.length} grupos nuevos que no estaban en tu lista!`,
+                              message: `✨ ¡Se encontraron ${diffGroups.length} grupos nuevos!`,
                             });
                           } else {
                             setNewGroupsFound([]);
@@ -968,7 +968,7 @@ export function MessageTester() {
                             });
                           }
                         } catch (err: any) {
-                          setToast({ type: 'error', message: 'Error al buscar nuevos grupos.' });
+                          setToast({ type: 'error', message: 'Sincronizando chats... Aguarda unos segundos y vuelve a presionar.' });
                         }
                       }}
                     >
