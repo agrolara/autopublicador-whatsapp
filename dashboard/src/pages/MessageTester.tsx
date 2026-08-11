@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, type ChangeEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Send, CheckCircle, XCircle, Loader2, Upload, X, Plus, Trash2, Clock, Calendar } from 'lucide-react';
+import { Send, CheckCircle, XCircle, Loader2, Upload, X, Plus, Trash2, Clock } from 'lucide-react';
 import {
   messageApi,
   contactApi,
@@ -10,6 +10,8 @@ import {
   type BatchStatusResponse,
   type ScheduledBroadcastItem,
   type SendBulkPayload,
+  type BulkMessageItem,
+  type BulkMediaPayload,
 } from '../services/api';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { useRole } from '../hooks/useRole';
@@ -151,6 +153,7 @@ export function MessageTester() {
   const [scheduledFrequency, setScheduledFrequency] = useState<'once' | 'daily' | 'twice_daily'>('twice_daily');
   const [scheduledList, setScheduledList] = useState<ScheduledBroadcastItem[]>([]);
   const [newGroupsFound, setNewGroupsFound] = useState<{ id: string; name?: string }[]>([]);
+  const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
 
   const loadSchedules = async () => {
     if (session) {
@@ -1232,6 +1235,26 @@ export function MessageTester() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+      {toast && (
+        <div style={{
+          position: 'fixed',
+          bottom: '20px',
+          right: '20px',
+          padding: '12px 20px',
+          borderRadius: '8px',
+          color: '#fff',
+          background: toast.type === 'error' ? '#ef4444' : toast.type === 'info' ? '#2563eb' : '#16a34a',
+          zIndex: 9999,
+          boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          fontWeight: 500,
+        }}>
+          <span>{toast.message}</span>
+          <button onClick={() => setToast(null)} style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 'bold' }}>×</button>
         </div>
       )}
     </div>
