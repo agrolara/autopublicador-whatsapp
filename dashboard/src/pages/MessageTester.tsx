@@ -193,8 +193,29 @@ export function MessageTester() {
   const [groupTags, setGroupTags] = useState<GroupTagItem[]>([]);
   const [selectedTagId, setSelectedTagId] = useState<string>('');
   const [showTagModal, setShowTagModal] = useState(false);
+  const [editingTagId, setEditingTagId] = useState<string | null>(null);
   const [newTagName, setNewTagName] = useState('');
   const [newTagColor, setNewTagColor] = useState('#10b981');
+  const [selectedGroupIdsForTag, setSelectedGroupIdsForTag] = useState<Set<string>>(new Set());
+  const [groupSearchQuery, setGroupSearchQuery] = useState('');
+
+  const openCreateTagModal = () => {
+    setEditingTagId(null);
+    setNewTagName('');
+    setNewTagColor('#10b981');
+    setSelectedGroupIdsForTag(new Set());
+    setGroupSearchQuery('');
+    setShowTagModal(true);
+  };
+
+  const openEditTagModal = (tag: GroupTagItem) => {
+    setEditingTagId(tag.id);
+    setNewTagName(tag.name);
+    setNewTagColor(tag.color || '#10b981');
+    setSelectedGroupIdsForTag(new Set(tag.groupIds));
+    setGroupSearchQuery('');
+    setShowTagModal(true);
+  };
 
   const loadGroupTags = async () => {
     if (session) {
@@ -1065,7 +1086,7 @@ export function MessageTester() {
                       alignItems: 'center',
                       gap: '4px',
                     }}
-                    onClick={() => setShowTagModal(true)}
+                    onClick={openCreateTagModal}
                   >
                     ➕ Crear Nueva Categoría
                   </button>
@@ -1106,6 +1127,14 @@ export function MessageTester() {
                         >
                           🏷️ {tag.name} ({tag.groupIds.length})
                         </span>
+                        <button
+                          type="button"
+                          onClick={() => openEditTagModal(tag)}
+                          style={{ background: 'none', border: 'none', color: '#ffffff', cursor: 'pointer', opacity: 0.9, padding: '0 2px' }}
+                          title="Editar grupos de esta categoría"
+                        >
+                          ✏️
+                        </button>
                         <button
                           type="button"
                           onClick={async e => {
@@ -1630,10 +1659,12 @@ export function MessageTester() {
       )}
       {showTagModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'var(--bg-primary, #ffffff)', padding: '20px', borderRadius: '12px', width: '90%', maxWidth: '480px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
-            <h3 style={{ margin: '0 0 12px 0', fontSize: '1.1rem', color: 'var(--text-main, #0f172a)' }}>🏷️ Crear Nueva Categoría de Grupos</h3>
+          <div style={{ background: 'var(--bg-primary, #ffffff)', padding: '20px', borderRadius: '12px', width: '90%', maxWidth: '540px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', maxHeight: '90vh', overflowY: 'auto' }}>
+            <h3 style={{ margin: '0 0 12px 0', fontSize: '1.1rem', color: 'var(--text-main, #0f172a)' }}>
+              🏷️ {editingTagId ? 'Editar Categoría de Grupos' : 'Crear Nueva Categoría de Grupos'}
+            </h3>
             <p style={{ fontSize: '0.83rem', color: '#64748b', margin: '0 0 16px 0' }}>
-              Se guardarán los <strong>{bulkRecipientList.length} grupos</strong> seleccionados actualmente en esta categoría.
+              Selecciona los grupos de tu WhatsApp que pertenecerán a esta categoría ({selectedGroupIdsForTag.size} seleccionados).
             </p>
 
             <div style={{ marginBottom: '12px' }}>
@@ -1667,6 +1698,89 @@ export function MessageTester() {
               </div>
             </div>
 
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                <label style={{ fontSize: '0.83rem', fontWeight: 600, color: '#334155', margin: 0 }}>
+                  Grupos de tu WhatsApp ({selectedGroupIdsForTag.size} de {groups.length}):
+                </label>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedGroupIdsForTag(new Set(groups.map(g => g.id)))}
+                    style={{ fontSize: '0.75rem', background: '#e2e8f0', border: 'none', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer', fontWeight: 500 }}
+                  >
+                    Marcar todos
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedGroupIdsForTag(new Set())}
+                    style={{ fontSize: '0.75rem', background: '#e2e8f0', border: 'none', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer', fontWeight: 500 }}
+                  >
+                    Desmarcar
+                  </button>
+                </div>
+              </div>
+
+              <input
+                type="text"
+                value={groupSearchQuery}
+                onChange={e => setGroupSearchQuery(e.target.value)}
+                placeholder="🔍 Buscar grupo por nombre..."
+                style={{ width: '100%', padding: '6px 10px', fontSize: '0.82rem', borderRadius: '6px', border: '1px solid #cbd5e1', marginBottom: '8px' }}
+              />
+
+              <div style={{ maxHeight: '220px', overflowY: 'auto', border: '1px solid #cbd5e1', borderRadius: '6px', background: '#fafafa', padding: '6px' }}>
+                {groups.length === 0 ? (
+                  <p style={{ margin: '8px', fontSize: '0.8rem', color: '#64748b', textAlign: 'center' }}>
+                    Sincronizando chats de WhatsApp... Aguarda unos segundos.
+                  </p>
+                ) : (
+                  groups
+                    .filter(g => (g.name || g.id).toLowerCase().includes(groupSearchQuery.toLowerCase()))
+                    .map(g => {
+                      const isChecked = selectedGroupIdsForTag.has(g.id);
+                      const otherCategory = groupTags.find(t => t.id !== editingTagId && t.groupIds.includes(g.id));
+                      return (
+                        <label
+                          key={g.id}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            padding: '6px 8px',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            background: isChecked ? '#e0f2fe' : 'transparent',
+                            borderBottom: '1px solid #f1f5f9',
+                            fontSize: '0.82rem',
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={e => {
+                              const next = new Set(selectedGroupIdsForTag);
+                              if (e.target.checked) next.add(g.id);
+                              else next.delete(g.id);
+                              setSelectedGroupIdsForTag(next);
+                            }}
+                          />
+                          <div style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <strong style={{ color: '#0f172a' }}>{g.name || '👥 Grupo WhatsApp'}</strong>
+                            <span style={{ fontSize: '0.74rem', color: '#64748b', marginLeft: '6px' }}>({g.id})</span>
+                          </div>
+                          {otherCategory && (
+                            <span style={{ fontSize: '0.7rem', padding: '2px 6px', borderRadius: '10px', background: otherCategory.color || '#94a3b8', color: '#fff', fontWeight: 600 }}>
+                              {otherCategory.name}
+                            </span>
+                          )}
+                        </label>
+                      );
+                    })
+                )}
+              </div>
+            </div>
+
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
               <button
                 type="button"
@@ -1682,19 +1796,21 @@ export function MessageTester() {
                     alert('Ingresa un nombre para la categoría.');
                     return;
                   }
-                  if (bulkRecipientList.length === 0) {
-                    alert('Primero debes tener al menos 1 grupo cargado en tu lista para asignar a la categoría.');
+                  if (selectedGroupIdsForTag.size === 0) {
+                    alert('Selecciona al menos 1 grupo para agregar a esta categoría.');
                     return;
                   }
-                  await groupTagsApi.save(session, {
+                  const tagPayload = {
+                    ...(editingTagId ? { id: editingTagId } : {}),
                     name: newTagName.trim(),
                     color: newTagColor,
-                    groupIds: bulkRecipientList,
-                  });
+                    groupIds: Array.from(selectedGroupIdsForTag),
+                  };
+                  await groupTagsApi.save(session, tagPayload);
                   loadGroupTags();
                   setNewTagName('');
                   setShowTagModal(false);
-                  setToast({ type: 'success', message: `✨ Categoría "${newTagName}" creada con ${bulkRecipientList.length} grupos.` });
+                  setToast({ type: 'success', message: `✨ Categoría "${newTagName}" guardada con ${selectedGroupIdsForTag.size} grupos.` });
                 }}
                 style={{ padding: '6px 14px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600 }}
               >
