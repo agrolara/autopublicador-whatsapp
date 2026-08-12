@@ -196,9 +196,6 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 # Expose port
 EXPOSE 2785
 
-# Declare persistent data volume for sessions, databases, templates, and scheduled broadcasts
-VOLUME ["/app/data"]
-
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:2785/api/health/ready || exit 1

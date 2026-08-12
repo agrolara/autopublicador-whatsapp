@@ -1,19 +1,57 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import * as fs from 'fs';
+import * as path from 'path';
 import { Template } from './entities/template.entity';
 import { CreateTemplateDto, UpdateTemplateDto } from './dto';
 import { createLogger } from '../../common/services/logger.service';
 import { isUniqueConstraintError } from '../../common/utils/unique-constraint.util';
 
 @Injectable()
-export class TemplateService {
+export class TemplateService implements OnModuleInit {
   private readonly logger = createLogger('TemplateService');
+  private readonly backupPath = path.join(process.cwd(), 'data', 'templates.json');
 
   constructor(
     @InjectRepository(Template, 'data')
     private readonly templateRepository: Repository<Template>,
   ) {}
+
+  async onModuleInit() {
+    await this.restoreFromBackup();
+  }
+
+  private async syncBackup() {
+    try {
+      const all = await this.templateRepository.find();
+      const dir = path.dirname(this.backupPath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(this.backupPath, JSON.stringify(all, null, 2), 'utf8');
+    } catch (e: any) {
+      this.logger.error('Failed to sync templates backup:', e?.message);
+    }
+  }
+
+  private async restoreFromBackup() {
+    try {
+      if (!fs.existsSync(this.backupPath)) return;
+      const raw = fs.readFileSync(this.backupPath, 'utf8');
+      const backup: Template[] = JSON.parse(raw);
+      if (!Array.isArray(backup) || backup.length === 0) return;
+
+      const currentCount = await this.templateRepository.count();
+      if (currentCount === 0) {
+        this.logger.log(`Restoring ${backup.length} templates from backup file...`);
+        for (const item of backup) {
+          const t = this.templateRepository.create(item);
+          await this.templateRepository.save(t).catch(() => {});
+        }
+      }
+    } catch (e: any) {
+      this.logger.error('Failed to restore templates from backup:', e?.message);
+    }
+  }
 
   async create(sessionId: string, dto: CreateTemplateDto): Promise<Template> {
     const template = this.templateRepository.create({
@@ -27,6 +65,7 @@ export class TemplateService {
     try {
       const saved = await this.templateRepository.save(template);
       this.logger.log('Template created', { sessionId, templateId: saved.id, name: saved.name });
+      await this.syncBackup();
       return saved;
     } catch (err) {
       if (isUniqueConstraintError(err)) {
@@ -87,7 +126,9 @@ export class TemplateService {
     if (dto.footer !== undefined) template.footer = dto.footer;
 
     try {
-      return await this.templateRepository.save(template);
+      const saved = await this.templateRepository.save(template);
+      await this.syncBackup();
+      return saved;
     } catch (err) {
       if (isUniqueConstraintError(err)) {
         throw new ConflictException(`A template named '${template.name}' already exists for this session`);
@@ -99,6 +140,7 @@ export class TemplateService {
   async delete(sessionId: string, id: string): Promise<void> {
     const template = await this.findOne(sessionId, id);
     await this.templateRepository.remove(template);
+    await this.syncBackup();
     this.logger.log('Template deleted', { sessionId, templateId: id });
   }
 }
