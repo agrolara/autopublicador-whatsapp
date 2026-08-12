@@ -4,6 +4,8 @@ import { Send, CheckCircle, XCircle, Loader2, Upload, X, Plus, Trash2, Clock } f
 import {
   messageApi,
   contactApi,
+  groupTagsApi,
+  type GroupTagItem,
   type SendMediaPayload,
   type MessageResponse,
   type BatchStatus,
@@ -188,6 +190,23 @@ export function MessageTester() {
     localStorage.setItem('openwa_saved_images', JSON.stringify(updated));
   };
 
+  const [groupTags, setGroupTags] = useState<GroupTagItem[]>([]);
+  const [selectedTagId, setSelectedTagId] = useState<string>('');
+  const [showTagModal, setShowTagModal] = useState(false);
+  const [newTagName, setNewTagName] = useState('');
+  const [newTagColor, setNewTagColor] = useState('#10b981');
+
+  const loadGroupTags = async () => {
+    if (session) {
+      try {
+        const tags = await groupTagsApi.list(session);
+        setGroupTags(tags);
+      } catch (e) {
+        // ignore
+      }
+    }
+  };
+
   const loadSchedules = async () => {
     if (session) {
       try {
@@ -201,6 +220,7 @@ export function MessageTester() {
 
   useEffect(() => {
     loadSchedules();
+    loadGroupTags();
   }, [session]);
 
   const { data: groups = [], refetch: refetchGroups, isLoading: loadingGroups } = useSessionGroupsQuery(session, true);
@@ -1025,6 +1045,88 @@ export function MessageTester() {
                   ))}
                 </div>
               </div>
+              <div className="form-group" style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#1e293b' }}>
+                    🏷️ Segmentación por Categorías de Grupos:
+                  </span>
+                  <button
+                    type="button"
+                    style={{
+                      background: '#0284c7',
+                      color: '#fff',
+                      border: 'none',
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      fontSize: '0.8rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                    }}
+                    onClick={() => setShowTagModal(true)}
+                  >
+                    ➕ Crear Nueva Categoría
+                  </button>
+                </div>
+
+                {groupTags.length === 0 ? (
+                  <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748b' }}>
+                    Aún no has creado categorías. Crea una categoría (ej: "Ventas Santiago", "Inmobiliaria") para agrupar tus grupos y seleccionarlos en 1 clic.
+                  </p>
+                ) : (
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                    {groupTags.map(tag => (
+                      <div
+                        key={tag.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          background: tag.color || '#10b981',
+                          color: '#ffffff',
+                          padding: '4px 10px',
+                          borderRadius: '20px',
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                          boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+                        }}
+                      >
+                        <span
+                          style={{ cursor: 'pointer' }}
+                          onClick={() => {
+                            if (tag.groupIds.length === 0) {
+                              setToast({ type: 'info', message: `La categoría "${tag.name}" no tiene grupos asignados aún.` });
+                              return;
+                            }
+                            setBulkRecipients(tag.groupIds.join('\n'));
+                            setToast({ type: 'success', message: `✨ ¡Se cargaron ${tag.groupIds.length} grupos pertenecientes a la categoría "${tag.name}"!` });
+                          }}
+                        >
+                          🏷️ {tag.name} ({tag.groupIds.length})
+                        </span>
+                        <button
+                          type="button"
+                          onClick={async e => {
+                            e.stopPropagation();
+                            if (window.confirm(`¿Deseas eliminar la categoría "${tag.name}"?`)) {
+                              await groupTagsApi.delete(session, tag.id);
+                              loadGroupTags();
+                              setToast({ type: 'info', message: `Categoría "${tag.name}" eliminada.` });
+                            }
+                          }}
+                          style={{ background: 'none', border: 'none', color: '#ffffff', cursor: 'pointer', opacity: 0.8, padding: '0 2px' }}
+                          title="Eliminar categoría"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div className="form-group">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
                   <label style={{ margin: 0 }}>{t('messageTester.bulkRecipients')}</label>
@@ -1523,6 +1625,82 @@ export function MessageTester() {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+      {showTagModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'var(--bg-primary, #ffffff)', padding: '20px', borderRadius: '12px', width: '90%', maxWidth: '480px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+            <h3 style={{ margin: '0 0 12px 0', fontSize: '1.1rem', color: 'var(--text-main, #0f172a)' }}>🏷️ Crear Nueva Categoría de Grupos</h3>
+            <p style={{ fontSize: '0.83rem', color: '#64748b', margin: '0 0 16px 0' }}>
+              Se guardarán los <strong>{bulkRecipientList.length} grupos</strong> seleccionados actualmente en esta categoría.
+            </p>
+
+            <div style={{ marginBottom: '12px' }}>
+              <label style={{ display: 'block', fontSize: '0.83rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>Nombre de la Categoría:</label>
+              <input
+                type="text"
+                value={newTagName}
+                onChange={e => setNewTagName(e.target.value)}
+                placeholder="ej: Ventas Santiago, Inmobiliaria, Oferta Pro"
+                style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+              />
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '0.83rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>Color de Identificación:</label>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                {['#10b981', '#0284c7', '#8b5cf6', '#ec4899', '#f59e0b', '#ef4444'].map(color => (
+                  <div
+                    key={color}
+                    onClick={() => setNewTagColor(color)}
+                    style={{
+                      width: '24px',
+                      height: '24px',
+                      borderRadius: '50%',
+                      background: color,
+                      cursor: 'pointer',
+                      border: newTagColor === color ? '3px solid #0f172a' : 'none',
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button
+                type="button"
+                onClick={() => setShowTagModal(false)}
+                style={{ padding: '6px 12px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 500 }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!newTagName.trim()) {
+                    alert('Ingresa un nombre para la categoría.');
+                    return;
+                  }
+                  if (bulkRecipientList.length === 0) {
+                    alert('Primero debes tener al menos 1 grupo cargado en tu lista para asignar a la categoría.');
+                    return;
+                  }
+                  await groupTagsApi.save(session, {
+                    name: newTagName.trim(),
+                    color: newTagColor,
+                    groupIds: bulkRecipientList,
+                  });
+                  loadGroupTags();
+                  setNewTagName('');
+                  setShowTagModal(false);
+                  setToast({ type: 'success', message: `✨ Categoría "${newTagName}" creada con ${bulkRecipientList.length} grupos.` });
+                }}
+                style={{ padding: '6px 14px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600 }}
+              >
+                Guardar Categoría
+              </button>
+            </div>
           </div>
         </div>
       )}

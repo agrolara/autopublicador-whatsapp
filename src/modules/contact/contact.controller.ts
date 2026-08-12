@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Post, Put, Delete, Param, Query, HttpCode, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { ContactService } from './contact.service';
+import { GroupTagsService } from './group-tags.service';
 import { RequireRole } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
 import { UpsertContactDto } from './dto/upsert-contact.dto';
@@ -17,7 +18,37 @@ import { ENGINE_NOT_READY_409 } from '../../common/openapi/engine-status-respons
 @ApiTags('contacts')
 @Controller('sessions/:sessionId/contacts')
 export class ContactController {
-  constructor(private readonly contactService: ContactService) {}
+  constructor(
+    private readonly contactService: ContactService,
+    private readonly groupTagsService: GroupTagsService,
+  ) {}
+
+  @Get('group-tags')
+  @ApiOperation({ summary: 'Get all group tags/categories for a session' })
+  async getGroupTags(@Param('sessionId') sessionId: string) {
+    return this.groupTagsService.getTags(sessionId);
+  }
+
+  @Post('group-tags')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Create or update a group tag/category' })
+  async saveGroupTag(
+    @Param('sessionId') sessionId: string,
+    @Body() dto: { name: string; color?: string; groupIds: string[]; id?: string },
+  ) {
+    return this.groupTagsService.saveTag(sessionId, dto);
+  }
+
+  @Delete('group-tags/:id')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Delete a group tag/category' })
+  async deleteGroupTag(@Param('sessionId') sessionId: string, @Param('id') id: string) {
+    const deleted = this.groupTagsService.deleteTag(sessionId, id);
+    return { success: deleted };
+  }
+
+  @Post(':contactId/block')
+  @RequireRole(ApiKeyRole.OPERATOR)
 
   @Get()
   @ApiOperation({ summary: 'Get all contacts for a session' })

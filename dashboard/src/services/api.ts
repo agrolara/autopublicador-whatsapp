@@ -900,6 +900,28 @@ export const contactApi = {
     ),
 };
 
+export interface GroupTagItem {
+  id: string;
+  sessionId: string;
+  name: string;
+  color?: string;
+  groupIds: string[];
+  createdAt: string;
+}
+
+export const groupTagsApi = {
+  list: (sessionId: string) => request<GroupTagItem[]>(`/sessions/${sessionId}/contacts/group-tags`),
+  save: (sessionId: string, data: { name: string; color?: string; groupIds: string[]; id?: string }) =>
+    request<GroupTagItem>(`/sessions/${sessionId}/contacts/group-tags`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  delete: (sessionId: string, id: string) =>
+    request<{ success: boolean }>(`/sessions/${sessionId}/contacts/group-tags/${id}`, {
+      method: 'DELETE',
+    }),
+};
+
 // =============================================================================
 // API Key API
 // =============================================================================
