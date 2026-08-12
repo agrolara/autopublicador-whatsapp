@@ -191,6 +191,7 @@ export function MessageTester() {
   };
 
   const [groupTags, setGroupTags] = useState<GroupTagItem[]>([]);
+  const [activeTagIds, setActiveTagIds] = useState<Set<string>>(new Set());
   const [selectedTagId, setSelectedTagId] = useState<string>('');
   const [showTagModal, setShowTagModal] = useState(false);
   const [editingTagId, setEditingTagId] = useState<string | null>(null);
@@ -198,6 +199,40 @@ export function MessageTester() {
   const [newTagColor, setNewTagColor] = useState('#10b981');
   const [selectedGroupIdsForTag, setSelectedGroupIdsForTag] = useState<Set<string>>(new Set());
   const [groupSearchQuery, setGroupSearchQuery] = useState('');
+
+  const toggleCategoryTag = (tag: GroupTagItem) => {
+    if (tag.groupIds.length === 0) {
+      setToast({ type: 'info', message: `La categoría "${tag.name}" no tiene grupos asignados aún.` });
+      return;
+    }
+
+    const nextActive = new Set(activeTagIds);
+    if (nextActive.has(tag.id)) {
+      nextActive.delete(tag.id);
+    } else {
+      nextActive.add(tag.id);
+    }
+    setActiveTagIds(nextActive);
+
+    const combinedGroupIds = new Set<string>();
+    groupTags.forEach(t => {
+      if (nextActive.has(t.id)) {
+        t.groupIds.forEach(id => combinedGroupIds.add(id));
+      }
+    });
+
+    const combinedList = Array.from(combinedGroupIds);
+    setBulkRecipients(combinedList.join('\n'));
+
+    if (nextActive.size === 0) {
+      setToast({ type: 'info', message: 'Todas las categorías han sido desmarcadas.' });
+    } else {
+      setToast({
+        type: 'success',
+        message: `✨ Seleccionadas ${nextActive.size} categorías (${combinedList.length} grupos únicos en total).`,
+      });
+    }
+  };
 
   const openCreateTagModal = () => {
     setEditingTagId(null);
@@ -1071,25 +1106,49 @@ export function MessageTester() {
                   <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#1e293b' }}>
                     🏷️ Segmentación por Categorías de Grupos:
                   </span>
-                  <button
-                    type="button"
-                    style={{
-                      background: '#0284c7',
-                      color: '#fff',
-                      border: 'none',
-                      padding: '4px 10px',
-                      borderRadius: '6px',
-                      fontSize: '0.8rem',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                    }}
-                    onClick={openCreateTagModal}
-                  >
-                    ➕ Crear Nueva Categoría
-                  </button>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    {activeTagIds.size > 0 && (
+                      <button
+                        type="button"
+                        style={{
+                          background: '#e2e8f0',
+                          color: '#334155',
+                          border: 'none',
+                          padding: '4px 8px',
+                          borderRadius: '6px',
+                          fontSize: '0.78rem',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => {
+                          setActiveTagIds(new Set());
+                          setBulkRecipients('');
+                          setToast({ type: 'info', message: 'Selección de categorías limpiada.' });
+                        }}
+                      >
+                        🧹 Desmarcar Categorías
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      style={{
+                        background: '#0284c7',
+                        color: '#fff',
+                        border: 'none',
+                        padding: '4px 10px',
+                        borderRadius: '6px',
+                        fontSize: '0.8rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                      }}
+                      onClick={openCreateTagModal}
+                    >
+                      ➕ Crear Nueva Categoría
+                    </button>
+                  </div>
                 </div>
 
                 {groupTags.length === 0 ? (
@@ -1098,60 +1157,61 @@ export function MessageTester() {
                   </p>
                 ) : (
                   <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-                    {groupTags.map(tag => (
-                      <div
-                        key={tag.id}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          background: tag.color || '#10b981',
-                          color: '#ffffff',
-                          padding: '4px 10px',
-                          borderRadius: '20px',
-                          fontSize: '0.8rem',
-                          fontWeight: 600,
-                          boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
-                        }}
-                      >
-                        <span
-                          style={{ cursor: 'pointer' }}
-                          onClick={() => {
-                            if (tag.groupIds.length === 0) {
-                              setToast({ type: 'info', message: `La categoría "${tag.name}" no tiene grupos asignados aún.` });
-                              return;
-                            }
-                            setBulkRecipients(tag.groupIds.join('\n'));
-                            setToast({ type: 'success', message: `✨ ¡Se cargaron ${tag.groupIds.length} grupos pertenecientes a la categoría "${tag.name}"!` });
+                    {groupTags.map(tag => {
+                      const isActive = activeTagIds.has(tag.id);
+                      return (
+                        <div
+                          key={tag.id}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            background: isActive ? (tag.color || '#10b981') : '#ffffff',
+                            color: isActive ? '#ffffff' : '#334155',
+                            border: isActive ? `2px solid ${tag.color || '#10b981'}` : `2px solid ${tag.color || '#cbd5e1'}`,
+                            padding: '4px 10px',
+                            borderRadius: '20px',
+                            fontSize: '0.8rem',
+                            fontWeight: 600,
+                            boxShadow: isActive ? '0 2px 6px rgba(0,0,0,0.15)' : 'none',
+                            transition: 'all 0.15s ease',
                           }}
                         >
-                          🏷️ {tag.name} ({tag.groupIds.length})
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => openEditTagModal(tag)}
-                          style={{ background: 'none', border: 'none', color: '#ffffff', cursor: 'pointer', opacity: 0.9, padding: '0 2px' }}
-                          title="Editar grupos de esta categoría"
-                        >
-                          ✏️
-                        </button>
-                        <button
-                          type="button"
-                          onClick={async e => {
-                            e.stopPropagation();
-                            if (window.confirm(`¿Deseas eliminar la categoría "${tag.name}"?`)) {
-                              await groupTagsApi.delete(session, tag.id);
-                              loadGroupTags();
-                              setToast({ type: 'info', message: `Categoría "${tag.name}" eliminada.` });
-                            }
-                          }}
-                          style={{ background: 'none', border: 'none', color: '#ffffff', cursor: 'pointer', opacity: 0.8, padding: '0 2px' }}
-                          title="Eliminar categoría"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ))}
+                          <span
+                            style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                            onClick={() => toggleCategoryTag(tag)}
+                          >
+                            {isActive ? '✓' : '+'} 🏷️ {tag.name} ({tag.groupIds.length})
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => openEditTagModal(tag)}
+                            style={{ background: 'none', border: 'none', color: isActive ? '#ffffff' : '#64748b', cursor: 'pointer', opacity: 0.9, padding: '0 2px' }}
+                            title="Editar grupos de esta categoría"
+                          >
+                            ✏️
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async e => {
+                              e.stopPropagation();
+                              if (window.confirm(`¿Deseas eliminar la categoría "${tag.name}"?`)) {
+                                await groupTagsApi.delete(session, tag.id);
+                                const nextActive = new Set(activeTagIds);
+                                nextActive.delete(tag.id);
+                                setActiveTagIds(nextActive);
+                                loadGroupTags();
+                                setToast({ type: 'info', message: `Categoría "${tag.name}" eliminada.` });
+                              }
+                            }}
+                            style={{ background: 'none', border: 'none', color: isActive ? '#ffffff' : '#94a3b8', cursor: 'pointer', opacity: 0.8, padding: '0 2px' }}
+                            title="Eliminar categoría"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
