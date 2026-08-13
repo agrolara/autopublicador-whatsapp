@@ -23,12 +23,12 @@ export class AnalyticsService {
   ) {}
 
   async getSummary(sessionId: string): Promise<AnalyticsSummary> {
-    const schedules = this.scheduledBroadcastService.getScheduledList(sessionId);
+    const schedules = this.scheduledBroadcastService.getBroadcasts(sessionId);
     const tags = this.groupTagsService.getTags(sessionId);
 
     const totalScheduled = schedules.length;
-    const completedScheduled = schedules.filter(s => s.status === 'completed').length;
-    const pendingScheduled = schedules.filter(s => s.status === 'scheduled').length;
+    const completedScheduled = schedules.filter((s: any) => s.status === 'completed').length;
+    const pendingScheduled = schedules.filter((s: any) => s.status === 'scheduled').length;
 
     const totalCategories = tags.length;
     const uniqueGroupIds = new Set<string>();
@@ -45,9 +45,9 @@ export class AnalyticsService {
       hourCounts[label] = 0;
     }
 
-    schedules.forEach(s => {
+    schedules.forEach((s: any) => {
       try {
-        const date = new Date(s.scheduledAt);
+        const date = new Date(s.scheduledAt || s.createdAt || Date.now());
         const hourLabel = `${date.getHours().toString().padStart(2, '0')}:00`;
         if (hourCounts[hourLabel] !== undefined) {
           hourCounts[hourLabel] += 1;
