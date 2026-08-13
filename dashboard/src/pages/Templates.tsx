@@ -65,8 +65,8 @@ export function Templates() {
   const [searchTerm, setSearchTerm] = useState('');
 
   const { data: templates = [], isLoading: loadingTemplates } = useTemplatesQuery(
-    selectedSessionId,
-    !!selectedSessionId,
+    selectedSessionId || 'default',
+    true,
   );
   const createMutation = useCreateTemplateMutation();
   const updateMutation = useUpdateTemplateMutation();

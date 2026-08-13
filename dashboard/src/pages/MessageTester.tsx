@@ -280,7 +280,7 @@ export function MessageTester() {
   }, [session]);
 
   const { data: groups = [], refetch: refetchGroups, isLoading: loadingGroups } = useSessionGroupsQuery(session, true);
-  const { data: templates = [] } = useTemplatesQuery(session, !!session);
+  const { data: templates = [] } = useTemplatesQuery(session || 'default', true);
 
   useEffect(() => {
     if (sessions.length > 0 && !session) {

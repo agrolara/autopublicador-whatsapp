@@ -76,14 +76,14 @@ export class TemplateService implements OnModuleInit {
   }
 
   async findBySession(sessionId: string): Promise<Template[]> {
+    // Return all saved templates so templates are permanent and global across all session reconnections
     return this.templateRepository.find({
-      where: { sessionId },
       order: { createdAt: 'DESC' },
     });
   }
 
   async findOne(sessionId: string, id: string): Promise<Template> {
-    const template = await this.templateRepository.findOne({ where: { id, sessionId } });
+    const template = await this.templateRepository.findOne({ where: { id } });
     if (!template) {
       throw new NotFoundException(`Template with id '${id}' not found`);
     }
@@ -91,30 +91,22 @@ export class TemplateService implements OnModuleInit {
   }
 
   /**
-   * Resolve a template for a session by id or by name. Throws NotFoundException
-   * when neither identifier matches. Used by the send-template message flow.
+   * Resolve a template by id or by name across all templates. Used by the send-template message flow.
    */
   async resolve(sessionId: string, identifier: { templateId?: string; templateName?: string }): Promise<Template> {
     const { templateId, templateName } = identifier;
 
     if (templateId) {
-      return this.findOne(sessionId, templateId);
+      const byId = await this.templateRepository.findOne({ where: { id: templateId } });
+      if (byId) return byId;
     }
 
     if (templateName) {
-      // Order by createdAt ASC so resolution is deterministic if more than one row shares a name
-      // (possible only on a DB predating the unique index); the migration keeps the earliest too.
-      const template = await this.templateRepository.findOne({
-        where: { name: templateName, sessionId },
-        order: { createdAt: 'ASC' },
-      });
-      if (!template) {
-        throw new NotFoundException(`Template with name '${templateName}' not found`);
-      }
-      return template;
+      const byName = await this.templateRepository.findOne({ where: { name: templateName }, order: { createdAt: 'ASC' } });
+      if (byName) return byName;
     }
 
-    throw new NotFoundException('Either templateId or templateName must be provided');
+    throw new NotFoundException(`Template not found for identifier: ${JSON.stringify(identifier)}`);
   }
 
   async update(sessionId: string, id: string, dto: UpdateTemplateDto): Promise<Template> {
