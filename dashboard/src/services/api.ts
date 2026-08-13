@@ -909,6 +909,21 @@ export interface GroupTagItem {
   createdAt: string;
 }
 
+export interface AnalyticsSummaryItem {
+  totalScheduled: number;
+  completedScheduled: number;
+  pendingScheduled: number;
+  totalCategories: number;
+  totalCategorizedGroups: number;
+  deliverySuccessRate: number;
+  activityByHour: Array<{ hour: string; count: number }>;
+  categoriesDistribution: Array<{ name: string; color: string; count: number }>;
+}
+
+export const analyticsApi = {
+  getSummary: (sessionId: string) => request<AnalyticsSummaryItem>(`/sessions/${sessionId}/analytics/summary`),
+};
+
 export const groupTagsApi = {
   list: (sessionId: string) => request<GroupTagItem[]>(`/sessions/${sessionId}/contacts/group-tags`),
   save: (sessionId: string, data: { name: string; color?: string; groupIds: string[]; id?: string }) =>

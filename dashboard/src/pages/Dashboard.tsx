@@ -14,6 +14,8 @@ import {
 import { PageHeader } from '../components/PageHeader';
 import './Dashboard.css';
 
+import { AnalyticsSection } from '../components/AnalyticsSection';
+
 // recharts is heavy (~150kB gzip); load the analytics section on demand so it never bloats the
 // main/login bundle and only ships when the dashboard actually renders.
 const DashboardCharts = lazy(() => import('../components/DashboardCharts').then(m => ({ default: m.DashboardCharts })));
@@ -118,6 +120,8 @@ export function Dashboard() {
           </div>
         ))}
       </div>
+
+      <AnalyticsSection />
 
       <Suspense fallback={null}>
         <DashboardCharts />
