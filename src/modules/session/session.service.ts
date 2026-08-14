@@ -239,14 +239,14 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     const { limit, offset } = resolveListWindow(opts.limit, opts.offset);
     const options: FindManyOptions<Session> = { order: { createdAt: 'DESC' }, take: limit, skip: offset };
     if (allowedSessions && allowedSessions.length > 0) {
-      options.where = { id: In(allowedSessions) };
+      options.where = [{ id: In(allowedSessions) }, { name: In(allowedSessions) }];
     }
     const sessions = await this.sessionRepository.find(options);
     return sessions.map(session => this.attachRuntimeState(session));
   }
 
   async findOne(id: string): Promise<Session> {
-    const session = await this.sessionRepository.findOne({ where: { id } });
+    const session = await this.sessionRepository.findOne({ where: [{ id }, { name: id }] });
     if (!session) {
       throw new NotFoundException(`Session with id '${id}' not found`);
     }

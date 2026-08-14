@@ -254,10 +254,10 @@ export function Chats() {
       try {
         setLoadingSessions(true);
         const list = await sessionApi.list();
-        const readySessions = list.filter(s => s.status === 'ready');
-        setSessions(readySessions);
-        if (readySessions.length > 0) {
-          setSelectedSessionId(readySessions[0].id);
+        setSessions(list);
+        if (list.length > 0) {
+          const readySession = list.find(s => s.status === 'ready');
+          setSelectedSessionId(readySession ? readySession.id : list[0].id);
         }
       } catch (err) {
         showErrorToast(t('chats.errors.loadSessions'), err instanceof Error ? err.message : undefined);

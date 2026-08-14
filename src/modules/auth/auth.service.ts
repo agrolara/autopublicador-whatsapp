@@ -13,6 +13,7 @@ import { randomBytes } from 'crypto';
 import { ipMatches } from '../../common/utils/ip';
 import { hashApiKey } from './api-key-hash';
 import { ApiKey, ApiKeyRole } from './entities/api-key.entity';
+import { Session } from '../session/entities/session.entity';
 import { CreateApiKeyDto, UpdateApiKeyDto } from './dto';
 import { createLogger } from '../../common/services/logger.service';
 import { readBootstrapKey, removeBootstrapKey, writeBootstrapKey } from './bootstrap-key-file';
@@ -73,6 +74,8 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
   constructor(
     @InjectRepository(ApiKey, 'main')
     private readonly apiKeyRepository: Repository<ApiKey>,
+    @InjectRepository(Session, 'main')
+    private readonly sessionRepository: Repository<Session>,
     private readonly usageTracker: ApiKeyUsageTracker,
     private readonly moduleRef: ModuleRef,
   ) {}
@@ -460,10 +463,19 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    // Check session restriction
+    // Check session restriction (support both UUID id and friendly session name)
     if (apiKey.allowedSessions && apiKey.allowedSessions.length > 0 && sessionId) {
-      if (!apiKey.allowedSessions.includes(sessionId)) {
-        throw new UnauthorizedException('API key not authorized for this session');
+      const directMatch = apiKey.allowedSessions.includes(sessionId);
+      if (!directMatch) {
+        const target = await this.sessionRepository.findOne({
+          where: [{ id: sessionId }, { name: sessionId }],
+        });
+        const resolvedMatch = target
+          ? apiKey.allowedSessions.includes(target.id) || apiKey.allowedSessions.includes(target.name)
+          : false;
+        if (!resolvedMatch) {
+          throw new UnauthorizedException('API key not authorized for this session');
+        }
       }
     }
 

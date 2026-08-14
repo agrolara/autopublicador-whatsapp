@@ -393,7 +393,7 @@ export class SessionController {
   @ApiQuery({ name: 'limit', required: false, description: 'Max groups to return (1–1000, default 1000)' })
   @ApiQuery({ name: 'offset', required: false, description: 'Number of groups to skip (for paging)' })
   async getGroups(
-    @Param('sessionId', ParseUUIDPipe) id: string,
+    @Param('sessionId') id: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ): Promise<{ id: string; name: string; linkedParentJID?: string | null }[]> {
