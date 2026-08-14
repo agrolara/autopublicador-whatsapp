@@ -27,6 +27,7 @@ import {
   useCreateApiKeyMutation,
   useDeleteApiKeyMutation,
   useRevokeApiKeyMutation,
+  useSessionsQuery,
 } from '../hooks/queries';
 import { PageHeader } from '../components/PageHeader';
 import { Modal } from '../components/Modal';
@@ -53,12 +54,13 @@ export function ApiKeys() {
   const toast = useToast();
   useDocumentTitle(t('apiKeys.title'));
   const { data: apiKeys = [], isLoading: loading, isError: apiKeysError } = useApiKeysQuery();
+  const { data: sessions = [] } = useSessionsQuery();
   const createMutation = useCreateApiKeyMutation();
   const deleteMutation = useDeleteApiKeyMutation();
   const revokeMutation = useRevokeApiKeyMutation();
   const [visibleKeys, setVisibleKeys] = useState<Set<string>>(new Set());
   const [showModal, setShowModal] = useState(false);
-  const [newKey, setNewKey] = useState({ name: '', role: 'operator' });
+  const [newKey, setNewKey] = useState({ name: '', role: 'operator', allowedSession: '' });
   const [createdKey, setCreatedKey] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{ type: 'delete' | 'revoke'; id: string; name: string } | null>(
@@ -77,9 +79,14 @@ export function ApiKeys() {
   const handleCreate = async () => {
     if (!newKey.name) return;
     try {
-      const created = await createMutation.mutateAsync({ name: newKey.name, role: newKey.role });
+      const allowedSessions = newKey.allowedSession ? [newKey.allowedSession] : undefined;
+      const created = await createMutation.mutateAsync({
+        name: newKey.name,
+        role: newKey.role,
+        allowedSessions,
+      });
       setCreatedKey(created.apiKey || null);
-      setNewKey({ name: '', role: 'operator' });
+      setNewKey({ name: '', role: 'operator', allowedSession: '' });
     } catch (err) {
       console.error('Failed to create:', err);
       toast.error(t('apiKeys.createBtn'), err instanceof Error ? err.message : t('common.unknownError'));
@@ -305,6 +312,20 @@ export function ApiKeys() {
                 {roleNames.map(r => (
                   <option key={r} value={r}>
                     {t(`apiKeys.roles.${r}`)}
+                  </option>
+                ))}
+              </select>
+              <label style={{ marginTop: '0.75rem', display: 'block' }}>
+                🔒 Sesión Permitida (Aislamiento de WhatsApp)
+              </label>
+              <select
+                value={newKey.allowedSession}
+                onChange={e => setNewKey({ ...newKey, allowedSession: e.target.value })}
+              >
+                <option value="">Todas las sesiones (Acceso Global)</option>
+                {sessions.map(s => (
+                  <option key={s.id} value={s.id}>
+                    {s.name || s.id} {s.me?.id ? `(${s.me.id.split('@')[0]})` : ''}
                   </option>
                 ))}
               </select>
