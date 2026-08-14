@@ -330,6 +330,8 @@ export interface Contact {
   name?: string;
   pushName?: string;
   number?: string;
+  isMyContact?: boolean;
+  isBlocked?: boolean;
 }
 
 export interface SendMediaPayload {

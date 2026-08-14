@@ -57,6 +57,7 @@
     "dashboard": "Dashboard",
     "sessions": "Sessions",
     "chats": "Chats",
+    "contacts": "Contacts",
     "webhooks": "Webhooks",
     "templates": "Templates",
     "apiKeys": "API Keys",

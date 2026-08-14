@@ -57,6 +57,7 @@
     "dashboard": "Panel",
     "sessions": "Sesiones",
     "chats": "Chats",
+    "contacts": "Contactos",
     "webhooks": "Webhooks",
     "apiKeys": "Claves API",
     "messageTester": "Probador de mensajes",
