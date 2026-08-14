@@ -20,12 +20,8 @@ export class Template {
 
   // varchar (not uuid) to match the authoritative migration DDL and sessions.id; the data connection
   // runs synchronize:false, so a 'uuid' decorator here would only mislead schema diffs / a stray sync.
-  @Column({ type: 'varchar' })
+  @Column({ type: 'varchar', default: 'global' })
   sessionId!: string;
-
-  @ManyToOne(() => Session, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'sessionId' })
-  session!: Session;
 
   @Column({ type: 'varchar', length: 100 })
   name!: string;

@@ -45,15 +45,16 @@ export class GroupTagsService {
     }
   }
 
-  getTags(sessionId: string): GroupTag[] {
-    return this.tags.filter(t => t.sessionId === sessionId);
+  getTags(sessionId?: string): GroupTag[] {
+    // Return all group categories globally so they are never hidden or lost when sessionId changes
+    return this.tags;
   }
 
   saveTag(sessionId: string, dto: { name: string; color?: string; groupIds: string[]; id?: string }): GroupTag {
-    let existing = dto.id ? this.tags.find(t => t.id === dto.id && t.sessionId === sessionId) : null;
+    let existing = dto.id ? this.tags.find(t => t.id === dto.id) : null;
 
     if (!existing) {
-      existing = this.tags.find(t => t.name.toLowerCase() === dto.name.toLowerCase() && t.sessionId === sessionId);
+      existing = this.tags.find(t => t.name.toLowerCase() === dto.name.toLowerCase());
     }
 
     if (existing) {
@@ -66,7 +67,7 @@ export class GroupTagsService {
 
     const newTag: GroupTag = {
       id: `tag_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      sessionId,
+      sessionId: 'global',
       name: dto.name,
       color: dto.color || '#10b981',
       groupIds: Array.from(new Set([...dto.groupIds])),
@@ -75,12 +76,12 @@ export class GroupTagsService {
 
     this.tags.push(newTag);
     this.saveToFile();
-    this.logger.log(`Created group tag "${newTag.name}" with ${newTag.groupIds.length} groups for session ${sessionId}`);
+    this.logger.log(`Created global group tag "${newTag.name}" with ${newTag.groupIds.length} groups`);
     return newTag;
   }
 
   deleteTag(sessionId: string, id: string): boolean {
-    const idx = this.tags.findIndex(t => t.sessionId === sessionId && t.id === id);
+    const idx = this.tags.findIndex(t => t.id === id);
     if (idx !== -1) {
       const deleted = this.tags.splice(idx, 1)[0];
       this.saveToFile();
