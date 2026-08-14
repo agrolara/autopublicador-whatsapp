@@ -39,7 +39,8 @@ export function resolveStartupValidation(
   status: number,
   body: { valid?: boolean; role?: string } | null,
 ): StartupValidation {
-  if (status === 401 || status === 403) return { action: 'logout' };
+  if (status === 401) return { action: 'logout' };
+  if (status === 403) return { action: 'keep' };
   if (status < 200 || status >= 300) return { action: 'keep' };
   if (body?.valid && isUserRole(body.role)) return { action: 'role', role: body.role };
   return { action: 'keep' };
