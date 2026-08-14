@@ -47,9 +47,6 @@ export class ContactController {
     return { success: deleted };
   }
 
-  @Post(':contactId/block')
-  @RequireRole(ApiKeyRole.OPERATOR)
-
   @Get()
   @ApiOperation({ summary: 'Get all contacts for a session' })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
