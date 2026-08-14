@@ -876,7 +876,7 @@ export interface ProfilePictureResponse {
 }
 
 export const contactApi = {
-  list: (sessionId: string) => request<Contact[]>(`/sessions/${sessionId}/contacts`),
+  list: (sessionId: string) => request<Contact[]>(`/sessions/${sessionId}/contacts?limit=10000`),
   checkNumber: (sessionId: string, number: string) =>
     request<CheckNumberResponse>(`/sessions/${sessionId}/contacts/check/${encodeURIComponent(number)}`),
   // Returns the contact/group profile picture URL. Both engines return null when the user hid their

@@ -17,12 +17,50 @@ export class ContactService {
     return this.engines.require(sessionId);
   }
 
-  getContacts(sessionId: string, opts: ListOptions = {}) {
-    // getEngine throws synchronously (keeps the "session not started" guard a sync 400); the
-    // engine returns the full set and we bound the HTTP response window via paginate().
-    return this.getEngine(sessionId)
-      .getContacts()
-      .then(contacts => paginate(contacts, opts.limit, opts.offset));
+  async getContacts(sessionId: string, opts: ListOptions = {}) {
+    const engine = this.getEngine(sessionId);
+    const contacts = await engine.getContacts();
+
+    let chats: any[] = [];
+    try {
+      chats = await engine.getChats();
+    } catch {
+      // Ignore chat fetching failures if any
+    }
+
+    const contactMap = new Map<string, any>();
+
+    // 1. Address book contacts first
+    for (const c of contacts) {
+      if (c && c.id) {
+        contactMap.set(c.id, c);
+      }
+    }
+
+    // 2. Merge non-group chats for unsaved contacts discovery
+    for (const chat of chats) {
+      if (!chat || chat.isGroup) continue;
+      const jid = chat.id;
+      if (typeof jid !== 'string' || jid.endsWith('@g.us') || jid === 'status@broadcast') continue;
+
+      const existing = contactMap.get(jid);
+      if (!existing) {
+        const number = jid.split('@')[0];
+        contactMap.set(jid, {
+          id: jid,
+          name: chat.name || undefined,
+          pushName: chat.name || undefined,
+          number: number,
+          isMyContact: chat.isMyContact ?? false,
+          isBlocked: chat.isBlocked ?? false,
+        });
+      } else if (!existing.name && chat.name) {
+        existing.name = chat.name;
+      }
+    }
+
+    const all = Array.from(contactMap.values());
+    return paginate(all, opts.limit, opts.offset);
   }
 
   async getContactById(sessionId: string, contactId: string) {

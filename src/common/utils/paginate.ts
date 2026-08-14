@@ -1,5 +1,5 @@
 /** Default and maximum number of items returned by a paginated list endpoint. */
-export const DEFAULT_LIST_LIMIT = 1000;
+export const DEFAULT_LIST_LIMIT = 10000;
 
 /** Optional pagination window for a list endpoint. */
 export interface ListOptions {
