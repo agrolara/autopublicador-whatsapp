@@ -21,7 +21,8 @@ export function CalendarPage() {
 
   useEffect(() => {
     if (sessions.length > 0 && !session) {
-      setSession(sessions[0].id);
+      const ready = sessions.find(s => s.status === 'ready');
+      setSession(ready ? ready.id : sessions[0].id);
     }
   }, [sessions, session]);
 
@@ -30,16 +31,16 @@ export function CalendarPage() {
     setLoading(true);
     try {
       const items = await messageApi.getScheduledBroadcasts(session);
-      setSchedules(items);
-    } catch (e) {
-      // ignore
+      setSchedules(Array.isArray(items) ? items : []);
+    } catch {
+      setSchedules([]);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadSchedules();
+    void loadSchedules();
   }, [session]);
 
   const year = currentDate.getFullYear();
@@ -67,7 +68,12 @@ export function CalendarPage() {
 
   const getSchedulesForDate = (date: Date) => {
     const formatted = date.toISOString().split('T')[0];
-    return schedules.filter(s => s.scheduledAt.startsWith(formatted));
+    return Array.isArray(schedules)
+      ? schedules.filter(s => {
+          const timeStr = s?.scheduledTime || (s as any)?.scheduledAt || '';
+          return typeof timeStr === 'string' && timeStr.startsWith(formatted);
+        })
+      : [];
   };
 
   const handleOpenDayModal = (date: Date) => {
@@ -87,13 +93,17 @@ export function CalendarPage() {
     const fullDateTime = `${selectedDateStr}T${modalTime}:00`;
 
     try {
-      await messageApi.scheduleBroadcast(session, {
-        recipients: modalRecipients.split('\n').map(s => s.trim()).filter(Boolean),
-        text: modalText.trim(),
-        scheduledAt: fullDateTime,
+      await messageApi.createScheduledBroadcast(session, {
+        name: `Envío ${selectedDateStr} ${modalTime}`,
+        scheduledTime: fullDateTime,
+        frequency: 'once',
+        payload: {
+          recipients: modalRecipients.split('\n').map(s => s.trim()).filter(Boolean),
+          text: modalText.trim(),
+        },
       });
       setShowModal(false);
-      loadSchedules();
+      void loadSchedules();
       setToast({ type: 'success', message: `✨ Publicación agendada para el ${selectedDateStr} a las ${modalTime}` });
     } catch (e: any) {
       alert(`Error al agendar: ${e?.message || 'Error desconocido'}`);
@@ -110,11 +120,18 @@ export function CalendarPage() {
       {/* Toolbar Controls */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <label style={{ fontSize: '0.88rem', fontWeight: 600, color: '#334155' }}>Sesión de WhatsApp:</label>
+          <label style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-color, #334155)' }}>Sesión de WhatsApp:</label>
           <select
             value={session}
             onChange={e => setSession(e.target.value)}
-            style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.88rem' }}
+            style={{
+              padding: '6px 12px',
+              borderRadius: '6px',
+              border: '1px solid var(--border-color, #cbd5e1)',
+              background: 'var(--bg-secondary, #ffffff)',
+              color: 'var(--text-color, #334155)',
+              fontSize: '0.88rem'
+            }}
           >
             {sessions.map(s => (
               <option key={s.id} value={s.id}>{s.name || s.id}</option>
@@ -122,28 +139,93 @@ export function CalendarPage() {
           </select>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#fff', padding: '4px 8px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
-          <button onClick={prevMonth} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px' }} title="Mes Anterior">
-            <ChevronLeft size={20} />
+        {/* Month Navigation */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <button
+            onClick={prevMonth}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '32px',
+              height: '32px',
+              borderRadius: '6px',
+              border: '1px solid var(--border-color, #cbd5e1)',
+              background: 'var(--bg-secondary, #ffffff)',
+              color: 'var(--text-color, #334155)',
+              cursor: 'pointer',
+            }}
+          >
+            <ChevronLeft size={18} />
           </button>
-          <span style={{ fontSize: '1rem', fontWeight: 700, minWidth: '160px', textAlign: 'center', color: '#0f172a' }}>
+          <span style={{ fontSize: '1.1rem', fontWeight: 700, minWidth: '180px', textAlign: 'center', color: 'var(--text-color, #1e293b)' }}>
             {monthNames[month]} {year}
           </span>
-          <button onClick={nextMonth} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px' }} title="Mes Siguiente">
-            <ChevronRight size={20} />
+          <button
+            onClick={nextMonth}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '32px',
+              height: '32px',
+              borderRadius: '6px',
+              border: '1px solid var(--border-color, #cbd5e1)',
+              background: 'var(--bg-secondary, #ffffff)',
+              color: 'var(--text-color, #334155)',
+              cursor: 'pointer',
+            }}
+          >
+            <ChevronRight size={18} />
           </button>
-          <button onClick={todayMonth} style={{ background: '#2563eb', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}>
+          <button
+            onClick={todayMonth}
+            style={{
+              padding: '6px 12px',
+              borderRadius: '6px',
+              border: '1px solid var(--border-color, #cbd5e1)',
+              background: 'var(--bg-secondary, #ffffff)',
+              color: 'var(--text-color, #334155)',
+              fontSize: '0.82rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              marginLeft: '8px',
+            }}
+          >
             Hoy
           </button>
         </div>
       </div>
 
-      {/* Calendar Month Grid */}
-      <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)', overflow: 'hidden' }}>
+      {/* Toast Feedback */}
+      {toast && (
+        <div style={{
+          padding: '10px 16px',
+          borderRadius: '8px',
+          background: toast.type === 'success' ? '#dcfce7' : '#e0f2fe',
+          color: toast.type === 'success' ? '#15803d' : '#0369a1',
+          marginBottom: '16px',
+          fontWeight: 600,
+          fontSize: '0.88rem'
+        }}>
+          {toast.message}
+        </div>
+      )}
+
+      {/* Calendar Grid Container */}
+      <div style={{
+        background: 'var(--card-bg, #ffffff)',
+        borderRadius: '12px',
+        border: '1px solid var(--border-color, #e2e8f0)',
+        overflow: 'hidden',
+        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
+      }}>
         {/* Days Header */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'center', fontWeight: 600, fontSize: '0.85rem', color: '#475569' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', background: 'var(--bg-secondary, #f8fafc)', borderBottom: '1px solid var(--border-color, #e2e8f0)' }}>
           {['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'].map(day => (
-            <div key={day} style={{ padding: '12px 0' }}>{day}</div>
+            <div key={day} style={{ padding: '10px', textAlign: 'center', fontWeight: 700, fontSize: '0.82rem', color: 'var(--text-muted, #64748b)' }}>
+              {day}
+            </div>
           ))}
         </div>
 
@@ -151,7 +233,7 @@ export function CalendarPage() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', autoRows: 'minmax(120px, auto)' }}>
           {calendarDays.map((date, idx) => {
             if (!date) {
-              return <div key={`empty_${idx}`} style={{ background: '#f1f5f9', borderRight: '1px solid #e2e8f0', borderBottom: '1px solid #e2e8f0' }} />;
+              return <div key={`empty_${idx}`} style={{ background: 'var(--bg-secondary, #f1f5f9)', borderRight: '1px solid var(--border-color, #e2e8f0)', borderBottom: '1px solid var(--border-color, #e2e8f0)' }} />;
             }
             const isToday = new Date().toDateString() === date.toDateString();
             const daySchedules = getSchedulesForDate(date);
@@ -161,10 +243,10 @@ export function CalendarPage() {
                 key={date.toISOString()}
                 onClick={() => handleOpenDayModal(date)}
                 style={{
-                  borderRight: '1px solid #e2e8f0',
-                  borderBottom: '1px solid #e2e8f0',
+                  borderRight: '1px solid var(--border-color, #e2e8f0)',
+                  borderBottom: '1px solid var(--border-color, #e2e8f0)',
                   padding: '8px',
-                  background: isToday ? '#eff6ff' : '#ffffff',
+                  background: isToday ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
                   cursor: 'pointer',
                   transition: 'background 0.15s ease',
                   position: 'relative',
@@ -174,7 +256,6 @@ export function CalendarPage() {
                   <span style={{
                     fontSize: '0.85rem',
                     fontWeight: isToday ? 700 : 600,
-                    color: isToday ? '#2563eb' : '#334155',
                     width: '24px',
                     height: '24px',
                     borderRadius: '50%',
@@ -182,7 +263,7 @@ export function CalendarPage() {
                     alignItems: 'center',
                     justifyContent: 'center',
                     background: isToday ? '#2563eb' : 'transparent',
-                    color: isToday ? '#ffffff' : '#334155',
+                    color: isToday ? '#ffffff' : 'var(--text-color, #334155)',
                   }}>
                     {date.getDate()}
                   </span>
@@ -196,9 +277,9 @@ export function CalendarPage() {
                 {/* Scheduled Items list on this day */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                   {daySchedules.map(item => {
-                    const isCompleted = item.status === 'completed';
-                    const isFailed = item.status === 'failed';
-                    const timeStr = item.scheduledAt.split('T')[1]?.substring(0, 5) || '10:00';
+                    const timeStr = (item.scheduledTime || (item as any).scheduledAt || '').split('T')[1]?.substring(0, 5) || '10:00';
+                    const textPreview = item.name || item.payload?.text || item.payload?.caption || (item as any).text || 'Mensaje programado';
+                    const recipientsCount = item.payload?.recipients?.length || (item as any).recipients?.length || 0;
 
                     return (
                       <div
@@ -207,7 +288,7 @@ export function CalendarPage() {
                           e.stopPropagation();
                           if (window.confirm(`¿Deseas cancelar/eliminar este envío programado del ${timeStr}?`)) {
                             await messageApi.deleteScheduledBroadcast(session, item.id);
-                            loadSchedules();
+                            void loadSchedules();
                             setToast({ type: 'info', message: 'Envío cancelado.' });
                           }
                         }}
@@ -215,18 +296,17 @@ export function CalendarPage() {
                           fontSize: '0.74rem',
                           padding: '4px 6px',
                           borderRadius: '4px',
-                          background: isCompleted ? '#dcfce7' : isFailed ? '#fee2e2' : '#e0f2fe',
-                          color: isCompleted ? '#15803d' : isFailed ? '#b91c1c' : '#0369a1',
-                          border: '1px solid',
-                          borderColor: isCompleted ? '#86efac' : isFailed ? '#fca5a5' : '#7dd3fc',
+                          background: '#e0f2fe',
+                          color: '#0369a1',
+                          border: '1px solid #7dd3fc',
                           fontWeight: 500,
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
                         }}
-                        title={`${timeStr} - ${item.text}`}
+                        title={`${timeStr} - ${textPreview}`}
                       >
-                        {isCompleted ? '✅' : isFailed ? '❌' : '⏱️'} {timeStr} ({item.recipients.length} grp) - {item.text}
+                        ⏱️ {timeStr} ({recipientsCount} grp) - {textPreview}
                       </div>
                     );
                   })}
@@ -239,80 +319,130 @@ export function CalendarPage() {
 
       {/* Modal for Scheduling New Broadcast */}
       {showModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', width: '90%', maxWidth: '520px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
-            <h3 style={{ margin: '0 0 12px 0', fontSize: '1.1rem', color: '#0f172a' }}>
-              📅 Agendar Publicación Masiva para el {selectedDateStr}
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          padding: '20px',
+        }}>
+          <div style={{
+            background: 'var(--card-bg, #ffffff)',
+            borderRadius: '12px',
+            width: '100%',
+            maxWidth: '560px',
+            padding: '24px',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
+            color: 'var(--text-color, #1e293b)'
+          }}>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '4px' }}>
+              🗓️ Agendar Publicación Masiva
             </h3>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted, #64748b)', marginBottom: '16px' }}>
+              Fecha seleccionada: <strong>{selectedDateStr}</strong>
+            </p>
 
-            <div style={{ marginBottom: '12px' }}>
-              <label style={{ display: 'block', fontSize: '0.83rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>Hora de Envió (HH:MM):</label>
-              <input
-                type="time"
-                value={modalTime}
-                onChange={e => setModalTime(e.target.value)}
-                style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
-              />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '6px' }}>
+                  ⏰ Hora de Envío:
+                </label>
+                <input
+                  type="time"
+                  value={modalTime}
+                  onChange={e => setModalTime(e.target.value)}
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border-color, #cbd5e1)',
+                    background: 'var(--bg-secondary, #ffffff)',
+                    color: 'var(--text-color, #334155)',
+                    width: '140px',
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '6px' }}>
+                  💬 Mensaje a Enviar (Soporta Spintax {'{Hola|Buenas}'}):
+                </label>
+                <textarea
+                  rows={4}
+                  value={modalText}
+                  onChange={e => setModalText(e.target.value)}
+                  placeholder="Escribe tu oferta o mensaje promocional..."
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border-color, #cbd5e1)',
+                    background: 'var(--bg-secondary, #ffffff)',
+                    color: 'var(--text-color, #334155)',
+                    fontSize: '0.88rem',
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '6px' }}>
+                  👥 Destinatarios (1 número o JID por línea):
+                </label>
+                <textarea
+                  rows={4}
+                  value={modalRecipients}
+                  onChange={e => setModalRecipients(e.target.value)}
+                  placeholder="56912345678&#10;120363045678901234@g.us&#10;56987654321"
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border-color, #cbd5e1)',
+                    background: 'var(--bg-secondary, #ffffff)',
+                    color: 'var(--text-color, #334155)',
+                    fontSize: '0.85rem',
+                    fontFamily: 'monospace',
+                  }}
+                />
+              </div>
             </div>
 
-            <div style={{ marginBottom: '12px' }}>
-              <label style={{ display: 'block', fontSize: '0.83rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>Mensaje a Publicar:</label>
-              <textarea
-                rows={4}
-                value={modalText}
-                onChange={e => setModalText(e.target.value)}
-                placeholder="Escribe el texto de tu anuncio de oferta o publicación..."
-                style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
-              />
-            </div>
-
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '0.83rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
-                Destinatarios / JIDs de Grupos (uno por línea):
-              </label>
-              <textarea
-                rows={3}
-                value={modalRecipients}
-                onChange={e => setModalRecipients(e.target.value)}
-                placeholder="120363040673899979@g.us..."
-                style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontFamily: 'monospace', fontSize: '0.8rem' }}
-              />
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
               <button
-                type="button"
                 onClick={() => setShowModal(false)}
-                style={{ padding: '8px 14px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 500 }}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--border-color, #cbd5e1)',
+                  background: 'var(--bg-secondary, #f8fafc)',
+                  color: 'var(--text-color, #475569)',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                }}
               >
                 Cancelar
               </button>
               <button
-                type="button"
                 onClick={handleSaveSchedule}
-                style={{ padding: '8px 16px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600 }}
+                style={{
+                  padding: '8px 18px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: '#2563eb',
+                  color: '#ffffff',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                }}
               >
-                Agendar Publicación
+                Agendar Envío
               </button>
             </div>
           </div>
-        </div>
-      )}
-
-      {toast && (
-        <div style={{
-          position: 'fixed',
-          bottom: '20px',
-          right: '20px',
-          padding: '12px 20px',
-          borderRadius: '8px',
-          color: '#fff',
-          background: toast.type === 'error' ? '#ef4444' : '#16a34a',
-          zIndex: 9999,
-          boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-          fontWeight: 500,
-        }}>
-          {toast.message}
         </div>
       )}
     </div>

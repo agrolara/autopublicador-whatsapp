@@ -208,7 +208,8 @@ export function Contacts() {
     if (!templateId) return;
     const tpl = templates.find(t => t.id === templateId);
     if (tpl) {
-      setMessageText(tpl.content);
+      const fullText = [tpl.header, tpl.body, tpl.footer].filter(Boolean).join('\n\n') || (tpl as any).content || (tpl as any).text || '';
+      setMessageText(fullText);
     }
   };
 
