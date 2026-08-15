@@ -914,6 +914,23 @@ export class InfraDataController {
         // re-resolution, so a reload failure degrades instead of failing the (already committed) import.
         await this.lidMappingStore?.reload();
 
+        // Auto-start restored sessions so the WhatsApp engine connects immediately
+        if (this.sessionService) {
+          try {
+            const restoredSessions = await this.sessionService.findAll();
+            for (const s of restoredSessions) {
+              if (['ready', 'authenticated', 'disconnected', 'initializing'].includes(s.status)) {
+                this.logger.log(`Auto-starting restored session ${s.name} (${s.id}) post-import`);
+                void this.sessionService.start(s.id).catch(err => {
+                  this.logger.error(`Failed to auto-start session ${s.id} post-import:`, err?.message);
+                });
+              }
+            }
+          } catch (err: any) {
+            this.logger.error('Failed to query sessions for auto-start post-import:', err?.message);
+          }
+        }
+
         // Audit the destructive replace-all restore, only on the committed-success path (the rollback /
         // refused-empty branches above return without emitting, since no data actually changed). Any
         // warnings would have taken the rollback branch, so warnings.length is always 0 here — record

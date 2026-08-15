@@ -1,0 +1,82 @@
+{
+  "exportedAt": "2026-08-15T08:18:00.500Z",
+  "dataDbType": "sqlite",
+  "tables": {
+    "sessions": [
+      {
+        "id": "037aef38-79f9-4965-940a-d1c2b55ea548",
+        "name": "pizzeria",
+        "status": "ready",
+        "phone": "56951782341",
+        "pushName": "🍕PIZZERIA DEL VALLE🍕",
+        "config": "{}",
+        "proxyUrl": null,
+        "proxyType": null,
+        "connectedAt": "2026-08-15T05:58:00.931Z",
+        "lastActiveAt": "2026-08-15T05:58:00.931Z",
+        "createdAt": "2026-08-15 05:34:01",
+        "updatedAt": "2026-08-15 06:25:13",
+        "nodeId": "65d019bc00b0",
+        "claimedAt": "2026-08-15T05:57:58.539Z",
+        "leaseExpiresAt": "2026-08-15T06:26:13.734Z",
+        "nodeUrl": null
+      }
+    ],
+    "webhooks": [],
+    "messages": [],
+    "messageBatches": [],
+    "templates": [
+      {
+        "id": "194411a4-cc0e-4dc1-9c66-4318cd413417",
+        "sessionId": "037aef38-79f9-4965-940a-d1c2b55ea548",
+        "name": "google ai pro",
+        "body": "👉Se activa a tu correo personal privado 100%❤️‍🔥\n\n✅️BENEFICIOS:\n🔥Gemini 3.7 flash\n🔥Nano Banana pro\n🔥Google Drive 5TB google fotos, gmail y mas\n🔥Flow creador de videos pro\n🔥Deep search\n🔥VEO 3.1\n🔥Notebook llm\n🔥Ia en Workspace\n\n\n🚨Precio: $30.000 1 solo pago x 18 meses\n\n\n*Valor real 21.700 x mes*",
+        "header": "*PLAN GEMINI AI PRO 3.7 flash ✨️ - 18 meses con todos sus beneficios*  👉Se activa a tu correo personal privado 100%❤️‍🔥  ✅️BENEFICIOS: 🔥Gemini 3.5 🔥Nano Banana 2 🔥Google Drive 5TB google fotos, gmail y mas 🔥Flow 🔥Deep search 🔥VEO 3.1 🔥Notebook llm 🔥Ia en Workspace   🚨Precio: $30.000 1 solo pago x 18 meses ✨stock 5  *Valor real 21.700 x mes*",
+        "footer": null,
+        "createdAt": "2026-08-15 05:40:27",
+        "updatedAt": "2026-08-15 05:40:27"
+      },
+      {
+        "id": "034a4f66-ac9d-41a2-bcb3-0d313c6eb043",
+        "sessionId": "037aef38-79f9-4965-940a-d1c2b55ea548",
+        "name": "video insta google ai pro",
+        "body": "*PLAN GEMINI AI PRO 3.7 flash ✨️ - 18 meses con todos sus beneficios*  👉Se activa a tu correo personal privado 100%❤️‍🔥  ✅️BENEFICIOS: 🔥Gemini 3.5 🔥Nano Banana 2 🔥Google Drive 5TB google fotos, gmail y mas 🔥Flow 🔥Deep search 🔥VEO 3.1 🔥Notebook llm 🔥Ia en Workspace   🚨Precio: $30.000 1 solo pago x 18 meses ✨stock 5  *Valor real 21.700 x mes*\n\n👉Se activa a tu correo personal privado 100%❤️‍🔥\n\n✅️BENEFICIOS:\n🔥Gemini 3.7 flash\n🔥Nano Banana pro\n🔥Google Drive 5TB google fotos, gmail y mas\n🔥Flow creador de videos pro\n🔥Deep search\n🔥VEO 3.1\n🔥Notebook llm\n🔥Ia en Workspace\n\n\n🚨Precio: $30.000 1 solo pago x 18 meses\n\n\n*Valor real 21.700 x mes*",
+        "header": "https://www.instagram.com/reel/DbPBmxgRb89/?utm_source=ig_web_copy_link&igsh=MzRlODBiNWFlZA==&igsi=MzRlODBiNWFlZA==",
+        "footer": null,
+        "createdAt": "2026-08-15 05:41:27",
+        "updatedAt": "2026-08-15 05:41:27"
+      },
+      {
+        "id": "def060f6-612c-4b7b-bb59-89bf700f7a76",
+        "sessionId": "037aef38-79f9-4965-940a-d1c2b55ea548",
+        "name": "VENTA PUBLICIDAD",
+        "body": "Olvídate de publicaciones que nadie ve. Hacemos que tu anuncio llegue directo a la pantalla de tus futuros clientes por WhatsApp.\n\n📍 Nuestra Red de Difusión:\n\n📲 +80 Grupos activos en Quilicura (Público 100% local y segmentado).\n\n+60 Grupos en todo Chile (Para envíos o servicios a nivel nacional).\n\nGRUPOS EN AUMENTO CADA DIA\n\n⚡ Difusión masiva y programada en horarios  DISPONIBLES\n\n💡 Ideal para: Fletes, comida rápida, servicios técnicos, emprendimientos, arriendos, ventas de garaje y profesionales independientes.\n\n🔥 ¡Cupos limitados por rubro para no saturar!\n\n👉 Escríbenos al WhatsApp y cotiza tu pack de publicaciones: \n\nPLANES BASICOS 1 PUBLICACION X DIA $13.000 - TODO EL MES\nPLAN STARTER 2 PUBLICACONES X DIA $23.000  - TODO EL MES\nPLAN PRO 3 PUBLICACIONES X DIA $30.000  - TODO EL MES",
+        "header": "🚀 ¿QUIERES MÁS CLIENTES PARA TU NEGOCIO O SERVICIO? 🚀",
+        "footer": "ENVIAME UN DM",
+        "createdAt": "2026-08-15 06:15:39",
+        "updatedAt": "2026-08-15 06:15:39"
+      }
+    ],
+    "baileysStoredMessages": [],
+    "lidMappings": [],
+    "pluginInstances": [],
+    "conversationMappings": [],
+    "ingressEvents": [],
+    "webhookDeliveryFailures": [],
+    "integrationDeliveryFailures": [],
+    "statusUpdates": [],
+    "automationRules": [],
+    "groupTags": []
+  },
+  "counts": {
+    "sessions": 1,
+    "templates": 3,
+    "messages": 0,
+    "groupTags": 0
+  },
+  "skippedTables": [],
+  "omittedInlineMedia": {
+    "messages": 0,
+    "messageBatches": 0
+  }
+}
