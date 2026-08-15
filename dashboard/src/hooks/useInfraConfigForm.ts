@@ -219,11 +219,14 @@ export function useInfraConfigForm(
   // The saved file is the intent; what is actually running is reported by the card badge and, when the
   // two differ, named by the card's own notice.
   useEffect(() => {
-    const seed = savedConfig?.engine.type;
+    const seed =
+      (infraStatus?.envPinned?.includes('ENGINE_TYPE') ? infraStatus.engine.type : undefined) ||
+      savedConfig?.engine.type ||
+      infraStatus?.engine.type;
     if (!seed || engineHydrated.current || engineTouched.current) return;
     engineHydrated.current = true;
     setEngineConfig(prev => (prev.type === seed ? prev : { ...prev, type: seed }));
-  }, [savedConfig]);
+  }, [savedConfig, infraStatus]);
 
   const updateDbConfig = (key: keyof DatabaseConfig, value: string | number | boolean) =>
     setDbConfig(prev => ({ ...prev, [key]: value }));
