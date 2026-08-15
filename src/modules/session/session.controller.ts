@@ -112,7 +112,7 @@ export class SessionController {
     type: SessionResponseDto,
   })
   @ApiResponse({ status: 404, description: 'Session not found' })
-  async findOne(@Param('id', ParseUUIDPipe) id: string): Promise<SessionResponseDto> {
+  async findOne(@Param('id') id: string): Promise<SessionResponseDto> {
     const session = await this.sessionService.findOne(id);
     return this.transformSession(session);
   }
@@ -126,7 +126,7 @@ export class SessionController {
     type: SessionConfigResponseDto,
   })
   @ApiResponse({ status: 404, description: 'Session not found' })
-  async getConfig(@Param('id', ParseUUIDPipe) id: string): Promise<SessionConfigResponseDto> {
+  async getConfig(@Param('id') id: string): Promise<SessionConfigResponseDto> {
     return this.sessionService.getConfig(id);
   }
 
@@ -149,7 +149,7 @@ export class SessionController {
   @ApiResponse({ status: 400, description: 'A supplied value is outside its accepted range' })
   @ApiResponse({ status: 404, description: 'Session not found' })
   async updateConfig(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id') id: string,
     @Body() dto: UpdateSessionConfigDto,
   ): Promise<SessionConfigResponseDto> {
     const config = await this.sessionService.updateConfig(id, dto);
@@ -177,7 +177,7 @@ export class SessionController {
       "another node currently holds this session's live engine and deleting it here would strip a " +
       'session the owner is running. No destructive side effect runs before either refusal.',
   })
-  async delete(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
+  async delete(@Param('id') id: string): Promise<void> {
     const session = await this.sessionService.findOne(id);
     await this.sessionService.delete(id);
     await this.auditService.logInfo(AuditAction.SESSION_DELETED, {
@@ -210,7 +210,7 @@ export class SessionController {
       "session's engine: only the owner may start it, and the claim is refused before any engine " +
       'is launched, so no second connection to the account is opened.',
   })
-  async start(@Param('id', ParseUUIDPipe) id: string): Promise<SessionResponseDto> {
+  async start(@Param('id') id: string): Promise<SessionResponseDto> {
     const session = await this.sessionService.start(id);
     await this.auditService.logInfo(AuditAction.SESSION_STARTED, {
       sessionId: session.id,
@@ -237,7 +237,7 @@ export class SessionController {
       'it here would report the session down while the owner keeps running it, so the request is ' +
       'refused. Retry against the owning node, or once its lease has lapsed.',
   })
-  async stop(@Param('id', ParseUUIDPipe) id: string): Promise<SessionResponseDto> {
+  async stop(@Param('id') id: string): Promise<SessionResponseDto> {
     const session = await this.sessionService.stop(id);
     await this.auditService.logInfo(AuditAction.SESSION_STOPPED, {
       sessionId: session.id,
@@ -303,7 +303,7 @@ export class SessionController {
       "body carries `code: 'SESSION_LOGOUT_INCOMPLETE'`; `phone` is cleared and no success audit " +
       'is written. Start the session again and retry the logout.',
   })
-  async logout(@Param('id', ParseUUIDPipe) id: string): Promise<SessionResponseDto> {
+  async logout(@Param('id') id: string): Promise<SessionResponseDto> {
     const session = await this.sessionService.logout(id);
     await this.auditService.logInfo(AuditAction.SESSION_LOGGED_OUT, {
       sessionId: session.id,
@@ -324,7 +324,7 @@ export class SessionController {
   })
   @ApiResponse({ status: 400, description: 'Session is not started' })
   @ApiResponse({ status: 404, description: 'Session not found' })
-  async forceKill(@Param('id', ParseUUIDPipe) id: string): Promise<SessionResponseDto> {
+  async forceKill(@Param('id') id: string): Promise<SessionResponseDto> {
     const session = await this.sessionService.forceKill(id);
     await this.auditService.logInfo(AuditAction.SESSION_FORCE_KILLED, {
       sessionId: session.id,
@@ -348,7 +348,7 @@ export class SessionController {
   })
   @ApiResponse({ status: 404, description: 'Session not found' })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
-  async getQRCode(@Param('id', ParseUUIDPipe) id: string): Promise<QRCodeResponseDto> {
+  async getQRCode(@Param('id') id: string): Promise<QRCodeResponseDto> {
     const qrCode = await this.sessionService.getQRCode(id);
     await this.auditService.logInfo(AuditAction.SESSION_QR_GENERATED, {
       sessionId: id,
@@ -365,7 +365,7 @@ export class SessionController {
   @ApiResponse({ status: 404, description: 'Session not found' })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async requestPairingCode(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id') id: string,
     @Body() dto: RequestPairingCodeDto,
   ): Promise<PairingCodeResponseDto> {
     return this.sessionService.requestPairingCode(id, dto.phoneNumber);
@@ -419,7 +419,7 @@ export class SessionController {
   @ApiQuery({ name: 'limit', required: false, description: 'Max chats to return (1–1000, default 1000)' })
   @ApiQuery({ name: 'offset', required: false, description: 'Number of chats to skip (for paging)' })
   async getChats(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id') id: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ): Promise<ChatSummary[]> {
@@ -445,7 +445,7 @@ export class SessionController {
   })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async markChatRead(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id') id: string,
     @Body() dto: MarkChatReadDto,
   ): Promise<{ success: boolean }> {
     const success = await this.sessionService.sendSeen(id, dto.chatId);
@@ -474,7 +474,7 @@ export class SessionController {
   @ApiResponse({ status: 501, description: 'The active engine cannot observe presence (whatsapp-web.js)' })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async subscribeToPresence(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id') id: string,
     @Body() dto: SubscribePresenceDto,
   ): Promise<{ success: boolean }> {
     await this.sessionService.subscribeToPresence(id, dto.chatId);
@@ -499,7 +499,7 @@ export class SessionController {
   @ApiResponse({ status: 404, description: 'Session not found' })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async setOnlinePresence(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id') id: string,
     @Body() dto: SetOwnPresenceDto,
   ): Promise<{ success: boolean }> {
     await this.sessionService.setOnlinePresence(id, dto.available);
@@ -523,7 +523,7 @@ export class SessionController {
   @ApiResponse({ status: 200, description: 'Last reported presence, or null', type: ChatPresenceResponseDto })
   @ApiResponse({ status: 404, description: 'Session not found' })
   async getPresence(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id') id: string,
     @Param('chatId') chatId: string,
   ): Promise<ChatPresenceResponseDto | null> {
     const presence = await this.sessionService.getPresence(id, chatId);
@@ -546,7 +546,7 @@ export class SessionController {
   })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async markChatUnread(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id') id: string,
     @Body() dto: MarkChatReadDto,
   ): Promise<{ success: boolean }> {
     const success = await this.sessionService.markUnread(id, dto.chatId);
@@ -575,7 +575,7 @@ export class SessionController {
   })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async clearChatMessages(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id') id: string,
     @Param('chatId') chatId: string,
   ): Promise<{ success: boolean }> {
     const success = await this.sessionService.clearChatMessages(id, chatId);
@@ -603,7 +603,7 @@ export class SessionController {
   })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async archiveChat(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id') id: string,
     @Body() dto: ArchiveChatDto,
   ): Promise<{ success: boolean }> {
     const success = await this.sessionService.archiveChat(id, dto.chatId, dto.archive);
@@ -631,7 +631,7 @@ export class SessionController {
       'the gateway stopped waiting for a confirmation that never came.',
   })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
-  async muteChat(@Param('id', ParseUUIDPipe) id: string, @Body() dto: MuteChatDto): Promise<{ success: boolean }> {
+  async muteChat(@Param('id') id: string, @Body() dto: MuteChatDto): Promise<{ success: boolean }> {
     await this.sessionService.muteChat(id, dto.chatId, dto.muteUntil);
     return { success: true };
   }
@@ -657,7 +657,7 @@ export class SessionController {
       'the gateway stopped waiting for a confirmation that never came.',
   })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
-  async pinChat(@Param('id', ParseUUIDPipe) id: string, @Body() dto: PinChatDto): Promise<{ success: boolean }> {
+  async pinChat(@Param('id') id: string, @Body() dto: PinChatDto): Promise<{ success: boolean }> {
     const success = await this.sessionService.pinChat(id, dto.chatId, dto.pin);
     return { success };
   }
@@ -677,7 +677,7 @@ export class SessionController {
       'the gateway stopped waiting for a confirmation that never came.',
   })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
-  async deleteChat(@Param('id', ParseUUIDPipe) id: string, @Body() dto: DeleteChatDto): Promise<{ success: boolean }> {
+  async deleteChat(@Param('id') id: string, @Body() dto: DeleteChatDto): Promise<{ success: boolean }> {
     const success = await this.sessionService.deleteChat(id, dto.chatId);
     return { success };
   }
@@ -691,7 +691,7 @@ export class SessionController {
   @ApiResponse({ status: 404, description: 'Session not found' })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async sendChatState(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id') id: string,
     @Body() dto: SendChatStateDto,
   ): Promise<{ success: boolean }> {
     await this.sessionService.sendChatState(id, dto.chatId, dto.state);
