@@ -531,7 +531,7 @@ export class SessionEngineLifecycle {
       proxyUrl: session.proxyUrl || undefined,
       proxyType: session.proxyType || undefined,
     });
-    this.engines.set(id, engine);
+    this.engines.set(id, engine, session.name);
     // Presence subscriptions live on the socket, so a fresh engine has none — whatever the previous
     // connection last reported is now unverifiable and would be served as if it were current.
     this.presence.clear(id);

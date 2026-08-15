@@ -20,6 +20,7 @@ import type { IWhatsAppEngine } from './interfaces/whatsapp-engine.interface';
 export class EngineRegistry {
   /** Live engines by session (DB) id. Presence here means "started"; identity means "not superseded". */
   private readonly engines = new Map<string, IWhatsAppEngine>();
+  private readonly nameToId = new Map<string, string>();
 
   /**
    * Sessions whose engine is being constructed but is not in `engines` yet. Held so concurrency
@@ -35,23 +36,36 @@ export class EngineRegistry {
   // ── Map-compatible surface (used by the lifecycle owner) ──────────────
 
   get(id: string): IWhatsAppEngine | undefined {
-    return this.engines.get(id);
+    const direct = this.engines.get(id);
+    if (direct) return direct;
+    const mapped = this.nameToId.get(id);
+    if (mapped) return this.engines.get(mapped);
+    return undefined;
   }
 
-  set(id: string, engine: IWhatsAppEngine): void {
+  set(id: string, engine: IWhatsAppEngine, name?: string): void {
     this.engines.set(id, engine);
+    if (name) {
+      this.nameToId.set(name, id);
+    }
   }
 
   has(id: string): boolean {
-    return this.engines.has(id);
+    return this.get(id) !== undefined;
   }
 
   delete(id: string): boolean {
+    for (const [name, mappedId] of this.nameToId.entries()) {
+      if (mappedId === id || name === id) {
+        this.nameToId.delete(name);
+      }
+    }
     return this.engines.delete(id);
   }
 
   clear(): void {
     this.engines.clear();
+    this.nameToId.clear();
   }
 
   get size(): number {
@@ -82,7 +96,7 @@ export class EngineRegistry {
    * presence check does not cover.
    */
   isLive(id: string, engine: IWhatsAppEngine): boolean {
-    return this.engines.get(id) === engine;
+    return this.get(id) === engine;
   }
 
   /**
@@ -94,7 +108,7 @@ export class EngineRegistry {
     if (!this.isLive(id, engine)) {
       return false;
     }
-    return this.engines.delete(id);
+    return this.delete(id);
   }
 
   // ── Consumer-facing accessor ──────────────────────────────────────────
@@ -108,7 +122,7 @@ export class EngineRegistry {
     id: string,
     onMissing: () => Error = () => new BadRequestException('Session is not started'),
   ): IWhatsAppEngine {
-    const engine = this.engines.get(id);
+    const engine = this.get(id);
     if (!engine) {
       throw onMissing();
     }
