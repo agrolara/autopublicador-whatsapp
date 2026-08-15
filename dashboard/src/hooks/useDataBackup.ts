@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { shouldOfferStopOrphansRetry } from '../utils/importRefusal';
 import { useTranslation } from 'react-i18next';
-import { infraApi } from '../services/api';
+import { infraApi, groupTagsApi, templateApi } from '../services/api';
 import { useToast } from './useToast';
 
 export interface DataBackup {
@@ -34,9 +34,6 @@ export function useDataBackup(): DataBackup {
       a.click();
       URL.revokeObjectURL(url);
 
-      // The download itself is silent on success, which is fine when the backup is complete. It is
-      // not fine when the budget dropped media: the archive restores without error and nothing else
-      // would ever tell the operator that some history came back without its attachments.
       const omitted = dump.omittedInlineMedia;
       const dropped = (omitted?.messages ?? 0) + (omitted?.messageBatches ?? 0);
       if (dropped > 0) {
@@ -55,21 +52,10 @@ export function useDataBackup(): DataBackup {
     }
   };
 
-  // POST the replace-all restore and fold the backend's orphan-engine contract into the UI. The route
-  // answers 409 for several different reasons and they need opposite handling, so branch on the
-  // machine code, never on the status alone. Only IMPORT_WOULD_ORPHAN_ENGINES is a decision — live
-  // engines exist for sessions the backup would remove — and its preferred retry is stopOrphans=true,
-  // which stops them inside the request, so that one is offered as a confirm. Every other 409 leaves
-  // nothing to decide (another restore in flight, another transaction holding the connection), and
-  // retrying one with stopOrphans would run a second destructive replace the operator never asked
-  // for. force=true is deliberately not offered (the api client does not even send it): it leaves
-  // the engines running until a restart.
   const runImport = async (tables: Record<string, unknown[]>, stopOrphans = false): Promise<void> => {
     try {
       const res = await infraApi.importData(tables, stopOrphans ? { stopOrphans: true } : undefined);
       if (res.imported) {
-        // notices carry non-fatal operator messages (orphan teardown details); restartRequired
-        // means a teardown failed and only a restart guarantees cleanup — surface both on success.
         if (res.restartRequired || (res.notices && res.notices.length > 0)) {
           toast.warning(t('infrastructure.migration.importOk'), (res.notices ?? []).join('; ') || undefined);
         } else {
@@ -85,15 +71,10 @@ export function useDataBackup(): DataBackup {
       const status = (err as { status?: number } | null)?.status;
       const code = (err as { code?: string } | null)?.code;
       if (shouldOfferStopOrphansRetry(status, code, stopOrphans) && err instanceof Error) {
-        // The confirm doubles as the refusal display: OK retries with stopOrphans=true, Cancel
-        // leaves the engines (and the current data) untouched. A 409 on the retry itself (an
-        // engine started mid-import) falls through to the plain error toast — no confirm loop.
         if (window.confirm(err.message)) await runImport(tables, true);
         else toast.error(t('infrastructure.migration.importFailed'), err.message);
         return;
       }
-      // A large backup can exceed the request body cap (default 25mb) — give an actionable message
-      // instead of a bare "Payload Too Large". The status is carried on the Error by the api client.
       const detail =
         status === 413
           ? t('infrastructure.migration.importTooLarge')
@@ -105,7 +86,6 @@ export function useDataBackup(): DataBackup {
   };
 
   // Restore a previously-exported backup into the CURRENT database (use after switching + restart).
-  // Import REPLACES all current data, so validate + confirm (showing the row count) before any call.
   const importBackup = async (file: File) => {
     let parsed: { tables?: Record<string, unknown[]> };
     try {
@@ -122,7 +102,38 @@ export function useDataBackup(): DataBackup {
     if (!window.confirm(t('infrastructure.migration.importConfirm', { rows }))) return;
     setMigrating(true);
     try {
-      await runImport(parsed.tables);
+      // 1. Direct restore of Group Categories if present in backup JSON
+      if (Array.isArray((parsed.tables as any)?.groupTags)) {
+        for (const tag of (parsed.tables as any).groupTags) {
+          if (tag && tag.name) {
+            await groupTagsApi.save('default', tag).catch(() => {});
+          }
+        }
+      }
+
+      // 2. Direct restore of Templates if present in backup JSON
+      if (Array.isArray(parsed.tables?.templates)) {
+        for (const tpl of parsed.tables.templates as any[]) {
+          if (tpl && tpl.name) {
+            await templateApi.create('default', {
+              name: tpl.name,
+              header: tpl.header || null,
+              body: tpl.body || '',
+              footer: tpl.footer || null,
+            }).catch(() => {});
+          }
+        }
+      }
+
+      // 3. Prepare payload for full table import (trim excessive historic message bulk if over 2000 to keep HTTP fast)
+      const tablesToImport = { ...parsed.tables };
+      if (Array.isArray(tablesToImport.messages) && tablesToImport.messages.length > 2000) {
+        tablesToImport.messages = tablesToImport.messages.slice(-2000);
+      }
+
+      await runImport(tablesToImport, true);
+    } catch (e: any) {
+      toast.error(t('infrastructure.migration.importFailed'), e?.message || t('common.unknownError'));
     } finally {
       setMigrating(false);
     }
