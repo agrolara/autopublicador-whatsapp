@@ -97,7 +97,7 @@ export function isDashboardCspUpgradeTrapLikely(env: {
 const BODY_LIMIT_PATTERN = /^\d+(\.\d+)?\s?(b|kb|mb|gb|tb|pb)?$/i;
 export function resolveBodyLimit(bodySizeEnv?: string): string {
   const trimmed = bodySizeEnv?.trim();
-  return trimmed && BODY_LIMIT_PATTERN.test(trimmed) ? trimmed : '25mb';
+  return trimmed && BODY_LIMIT_PATTERN.test(trimmed) ? trimmed : '150mb';
 }
 
 /** Known weak/default/placeholder secret values that must never reach production. */
