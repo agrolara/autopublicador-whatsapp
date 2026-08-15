@@ -331,12 +331,9 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
   }
 
   /** Record removal + engine retirement + credential purge: owned by the lifecycle service. */
-  async delete(id: string): Promise<void> {
-    // Set the tearing-down mark SYNCHRONOUSLY, before the ownership fence's awaited query. The
-    // pre-initialize retirement race needs this mark visible to an in-flight start()'s
-    // post-INITIALIZING check by the time that write settles; awaiting anything first — the fence's
-    // COUNT, or delete()'s own requireSession — would let the mark land after that window. A mark
-    // left behind when the fence refuses (409) is harmless and is cleared by the next start().
+  async delete(idOrName: string): Promise<void> {
+    const session = await this.findOne(idOrName);
+    const id = session.id;
     this.engineLifecycle.markStopping(id);
     if (this.ownership) await this.assertNotHeldElsewhere(id);
     await this.engineLifecycle.delete(id);
@@ -359,14 +356,13 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     }
   }
 
-  async start(id: string): Promise<Session> {
+  async start(idOrName: string): Promise<Session> {
+    const session = await this.findOne(idOrName);
+    const id = session.id;
     // Claimed before the engine is launched, never after: launching first and discovering the
     // session belongs elsewhere would already have opened a second connection to the account.
     if (this.ownership && !(await this.ownership.claim(id))) {
-      // The claim is a conditional UPDATE, so an id that does not exist also matches zero rows —
-      // surface the route's documented 404 for that case instead of a misleading 409.
-      await this.findOne(id);
-      throw new ConflictException(`Session ${id} is running on another node`);
+      throw new ConflictException(`Session ${idOrName} is running on another node`);
     }
     try {
       return await this.engineLifecycle.start(id);
@@ -380,41 +376,38 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     }
   }
 
-  async stop(id: string): Promise<Session> {
+  async stop(idOrName: string): Promise<Session> {
+    const session = await this.findOne(idOrName);
+    const id = session.id;
     // Synchronous stop-mark before the awaited fence — see delete() for why.
     this.engineLifecycle.markStopping(id);
     if (this.ownership) await this.assertNotHeldElsewhere(id);
-    const session = await this.engineLifecycle.stop(id);
-    // Handed back on the way out so a peer can pick it up immediately rather than waiting for the
-    // lease to lapse. Stop is the deliberate end of this process's ownership — but a start() that
-    // began before this stop and is still mid-launch owns the claim now, so the same
-    // engine-liveness guard the failure paths use applies here: releasing under an in-flight start
-    // would leave a live engine on an unclaimed row that no heartbeat renews and any peer may
-    // start a second time.
+    const updated = await this.engineLifecycle.stop(id);
     await this.releaseUnlessEngineActive(id);
-    return session;
+    return updated;
   }
 
   /** See SessionEngineLifecycle.logout() for the full unlink/502 contract. */
-  async logout(id: string): Promise<Session> {
+  async logout(idOrName: string): Promise<Session> {
+    const session = await this.findOne(idOrName);
+    const id = session.id;
     try {
-      const session = await this.engineLifecycle.logout(id);
-      // Torn down locally on the 200 path — hand the claim back the way stop() does.
+      const updated = await this.engineLifecycle.logout(id);
       await this.releaseUnlessEngineActive(id);
-      return session;
+      return updated;
     } catch (error) {
-      // The 502-incomplete path tears the engine down too, and a "not started" refusal never had
-      // one — either way a claim that no longer covers an engine must not survive the call.
       await this.releaseUnlessEngineActive(id);
       throw error;
     }
   }
 
-  async forceKill(id: string): Promise<Session> {
+  async forceKill(idOrName: string): Promise<Session> {
+    const session = await this.findOne(idOrName);
+    const id = session.id;
     try {
-      const session = await this.engineLifecycle.forceKill(id);
+      const updated = await this.engineLifecycle.forceKill(id);
       await this.releaseUnlessEngineActive(id);
-      return session;
+      return updated;
     } catch (error) {
       await this.releaseUnlessEngineActive(id);
       throw error;
