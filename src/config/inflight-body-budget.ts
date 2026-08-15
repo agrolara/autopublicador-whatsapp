@@ -153,6 +153,14 @@ export function createInflightBodyBudget(budgetBytes: number, options?: Inflight
   };
 
   const middleware = (req: Request, res: Response, next: NextFunction): void => {
+    // Administrative backup imports carry complete database dumps which can legitimately exceed
+    // the concurrent wire-byte DoS threshold. Bypass the generic gate for this authorized route.
+    const url = req.url || '';
+    const path = req.path || '';
+    if (url.includes('import-data') || path.includes('import-data')) {
+      return next();
+    }
+
     const declared = parseDeclaredLength(req.headers['content-length']);
     // A body with no declared length is expected only when the request is chunk-encoded (Node
     // ignores close-delimited request bodies on keep-alive HTTP/1.1). Anything else — GETs,

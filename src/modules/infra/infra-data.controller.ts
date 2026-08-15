@@ -1,4 +1,6 @@
 import { Controller, Get, Post, Body, ConflictException, HttpCode, HttpStatus, Optional } from '@nestjs/common';
+import * as fs from 'fs';
+import * as path from 'path';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 import { InfraExportDataResponseDto, InfraImportDataResponseDto } from './dto/infra-response.dto';
 import { ConfigService } from '@nestjs/config';
@@ -420,6 +422,16 @@ export class InfraDataController {
     const statusUpdates = await queryOptionalTable<StatusUpdateRow>('status_updates');
     const automationRules = await queryOptionalTable<AutomationRuleRow>('automation_rules');
 
+    let groupTags: any[] = [];
+    try {
+      const groupTagsPath = path.join(process.cwd(), 'data', 'group-tags.json');
+      if (fs.existsSync(groupTagsPath)) {
+        groupTags = JSON.parse(fs.readFileSync(groupTagsPath, 'utf8'));
+      }
+    } catch {
+      groupTags = [];
+    }
+
     const counts = {
       sessions: sessions.length,
       webhooks: webhooks.length,
@@ -435,6 +447,7 @@ export class InfraDataController {
       integrationDeliveryFailures: integrationDeliveryFailures.length,
       statusUpdates: statusUpdates.length,
       automationRules: automationRules.length,
+      groupTags: groupTags.length,
     };
 
     // Audit the full-DB export: this payload carries webhook + plugin-instance secrets, so WHO pulled
@@ -460,7 +473,8 @@ export class InfraDataController {
         integrationDeliveryFailures,
         statusUpdates,
         automationRules,
-      },
+        groupTags,
+      } as any,
       counts,
       skippedTables,
       omittedInlineMedia: {
@@ -879,6 +893,30 @@ export class InfraDataController {
         }
 
         await queryRunner.commitTransaction();
+
+        // Restore group-tags file and templates backup file if present in the imported payload
+        if (data.tables && (data.tables as any).groupTags) {
+          try {
+            const groupTagsPath = path.join(process.cwd(), 'data', 'group-tags.json');
+            const dir = path.dirname(groupTagsPath);
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(groupTagsPath, JSON.stringify((data.tables as any).groupTags, null, 2), 'utf8');
+            this.logger.log(`Restored ${(data.tables as any).groupTags.length} group categories to data/group-tags.json`);
+          } catch (err: any) {
+            this.logger.error('Failed to restore group tags from backup:', err?.message);
+          }
+        }
+        if (data.tables && data.tables.templates) {
+          try {
+            const templatesPath = path.join(process.cwd(), 'data', 'templates.json');
+            const dir = path.dirname(templatesPath);
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(templatesPath, JSON.stringify(data.tables.templates, null, 2), 'utf8');
+            this.logger.log(`Restored ${data.tables.templates.length} templates to data/templates.json`);
+          } catch (err: any) {
+            this.logger.error('Failed to sync templates backup file on import:', err?.message);
+          }
+        }
 
         // Runtime reconciliation, part 2 (post-commit): the in-memory lid->phone mirror was warmed from
         // the OLD lid_mappings rows and is write-through only, so the just-restored table would never
