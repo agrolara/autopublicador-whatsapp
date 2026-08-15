@@ -58,6 +58,10 @@ chrome/
 *.sqlite
 *.sqlite3
 
+# Backups
+openwa-backup-*.json
+openwa_backup_*.json
+
 # Docker
 .docker/
 

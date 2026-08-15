@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, ConflictException, HttpCode, HttpStatus, Optional } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, ConflictException, HttpCode, HttpStatus, Optional } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
@@ -331,7 +331,9 @@ export class InfraDataController {
   @RequireRole(ApiKeyRole.ADMIN)
   @ApiOperation({ summary: 'Export all data from Data DB for migration' })
   @ApiResponse({ status: 200, description: 'Exported data as JSON', type: InfraExportDataResponseDto })
-  async exportData(): Promise<{
+  async exportData(
+    @Query('includeMessages') includeMessagesQuery?: string,
+  ): Promise<{
     exportedAt: string;
     dataDbType: string;
     tables: MigrationTables;
@@ -360,17 +362,11 @@ export class InfraDataController {
      */
     omittedInlineMedia: { messages: number; messageBatches: number };
   }> {
+    const includeMessages = includeMessagesQuery !== 'false';
     // Get all entities from Data DB
     const sessions = await this.dataDataSource.query<SessionRow[]>('SELECT * FROM sessions');
     const webhooks = await this.dataDataSource.query<WebhookRow[]>('SELECT * FROM webhooks');
 
-    // The tables below may legitimately not exist yet (created by migrations an older DB has not run).
-    // Only a GENUINE missing-table error (isMissingTableError) may be tolerated — anything else (lock,
-    // I/O, timeout, aborted connection) must FAIL the export. The old blind `catch { debug-log }`
-    // pattern reported those as "table is empty", producing a 200 "complete" backup that was actually
-    // partial — which the import then treated as authoritative and DELETEd the missing tables' rows.
-    // A skipped table is surfaced in `skippedTables` (and logged as a warning) so an operator can tell
-    // "not migrated yet" apart from "exported empty".
     const skippedTables: string[] = [];
     const queryOptionalTable = async <T>(table: string): Promise<T[]> => {
       try {
@@ -388,22 +384,15 @@ export class InfraDataController {
     const inlineMediaBudget = createInlineMediaBudget();
     const exceedsBudget = inlineMediaBudget.exceeds;
 
-    const messages = await queryOptionalTable<MessageRow>('messages');
-    // Postgres carries a STORED generated tsvector column `body_ts` (FTS) that `SELECT *` picks up.
-    // It is a server-maintained index artifact, not payload: strip it so backups stay dialect-neutral
-    // (and small). The import's explicit column list already ignores it in older archives.
+    const messages = includeMessages ? await queryOptionalTable<MessageRow>('messages') : [];
     for (const row of messages) {
       delete row.body_ts;
     }
     for (const row of newestFirst(messages, row => Number(row.timestamp))) {
       stripInlineMediaPayload(row, exceedsBudget);
     }
-    // Snapshot between the two loops so the report can say WHICH table lost payloads — messages are
-    // served first, batches spend what is left.
     const omittedMessageMedia = inlineMediaBudget.droppedPayloads();
-    const messageBatches = await queryOptionalTable<MessageBatchRow>('message_batches');
-    // Batches spend what the messages left, and by the same newest-first rule: a run left PROCESSING
-    // keeps its payloads indefinitely, so a stale one must not outbid a current one.
+    const messageBatches = includeMessages ? await queryOptionalTable<MessageBatchRow>('message_batches') : [];
     for (const row of newestFirst(messageBatches, row => Date.parse(row.created_at))) {
       stripBatchInlineMedia(row, exceedsBudget);
     }

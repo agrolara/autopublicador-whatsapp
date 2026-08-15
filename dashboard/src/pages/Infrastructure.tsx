@@ -50,6 +50,7 @@ export function Infrastructure() {
   const configForm = useInfraConfigForm(infraStatus, savedConfig);
   const restartFlow = useRestartFlow();
   const dataBackup = useDataBackup();
+  const [includeMessagesInBackup, setIncludeMessagesInBackup] = useState(false);
 
   // Reads dbConfig/storageConfig (from configForm) plus infraStatus/savedConfig to decide whether the
   // just-saved config crosses to a different backend, then hands the restart flow everything it needs
@@ -418,11 +419,22 @@ export function Infrastructure() {
             <div>
               <strong>{t('infrastructure.migration.backupTitle')}</strong>
               <small>{t('infrastructure.migration.backupHint')}</small>
+              <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <input
+                  type="checkbox"
+                  id="includeMessagesBackup"
+                  checked={includeMessagesInBackup}
+                  onChange={e => setIncludeMessagesInBackup(e.target.checked)}
+                />
+                <label htmlFor="includeMessagesBackup" style={{ fontSize: '12px', color: '#8b949e', cursor: 'pointer' }}>
+                  Incluir historial masivo de mensajes (pesado)
+                </label>
+              </div>
             </div>
             <div className="data-migration-actions">
               <button
                 className="btn-secondary btn-sm"
-                onClick={dataBackup.exportBackup}
+                onClick={() => dataBackup.exportBackup(includeMessagesInBackup)}
                 disabled={dataBackup.migrating}
               >
                 {dataBackup.migrating ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}

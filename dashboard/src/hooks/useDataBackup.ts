@@ -6,7 +6,7 @@ import { useToast } from './useToast';
 
 export interface DataBackup {
   migrating: boolean;
-  exportBackup: () => Promise<void>;
+  exportBackup: (includeMessages?: boolean) => Promise<void>;
   importBackup: (file: File) => Promise<void>;
 }
 
@@ -20,12 +20,11 @@ export function useDataBackup(): DataBackup {
   const toast = useToast();
   const [migrating, setMigrating] = useState(false);
 
-  // Download a JSON backup of all Data-DB tables. Called BEFORE a DB switch (while still on the old
-  // database) so the data can be re-imported into the new one — switching otherwise starts empty (#488).
-  const exportBackup = async () => {
+  // Download a JSON backup of all Data-DB tables.
+  const exportBackup = async (includeMessages = false) => {
     setMigrating(true);
     try {
-      const dump = await infraApi.exportData();
+      const dump = await infraApi.exportData(includeMessages);
       const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
