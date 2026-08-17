@@ -1103,6 +1103,20 @@ export const messageApi = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  updateScheduledBroadcast: (
+    sessionId: string,
+    id: string,
+    data: Partial<{
+      scheduledTime: string;
+      frequency: 'once' | 'daily' | 'twice_daily';
+      payload: SendBulkPayload;
+      name: string;
+    }>,
+  ) =>
+    request<ScheduledBroadcastItem>(`/sessions/${sessionId}/messages/scheduled-broadcasts/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
   deleteScheduledBroadcast: (sessionId: string, id: string) =>
     request<{ success: boolean }>(`/sessions/${sessionId}/messages/scheduled-broadcasts/${id}`, {
       method: 'DELETE',

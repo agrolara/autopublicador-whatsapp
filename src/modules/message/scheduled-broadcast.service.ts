@@ -127,6 +127,23 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
     return false;
   }
 
+  updateBroadcast(sessionId: string, id: string, dto: {
+    scheduledTime?: string;
+    frequency?: 'once' | 'daily' | 'twice_daily';
+    payload?: SendBulkMessageDto;
+    name?: string;
+  }): ScheduledBroadcast | null {
+    const item = this.items.find(i => i.sessionId === sessionId && i.id === id);
+    if (!item) return null;
+    if (dto.name !== undefined) item.name = dto.name;
+    if (dto.scheduledTime !== undefined) item.scheduledTime = dto.scheduledTime;
+    if (dto.frequency !== undefined) item.frequency = dto.frequency;
+    if (dto.payload !== undefined) item.payload = dto.payload;
+    this.saveToFile();
+    this.logger.log(`Updated scheduled broadcast ${id} (${item.name})`);
+    return item;
+  }
+
   private async processDueBroadcasts() {
     const { hour: nowH, minute: nowM, ymd: todayYMD, hhmm: currentHHMM } = getLocalChileTime();
 

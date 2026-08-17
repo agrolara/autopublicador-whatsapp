@@ -421,6 +421,16 @@ export class InfraDataController {
       groupTags = [];
     }
 
+    let scheduledBroadcasts: any[] = [];
+    try {
+      const schedPath = path.join(process.cwd(), 'data', 'scheduled-broadcasts.json');
+      if (fs.existsSync(schedPath)) {
+        scheduledBroadcasts = JSON.parse(fs.readFileSync(schedPath, 'utf8'));
+      }
+    } catch {
+      scheduledBroadcasts = [];
+    }
+
     const counts = {
       sessions: sessions.length,
       webhooks: webhooks.length,
@@ -437,6 +447,7 @@ export class InfraDataController {
       statusUpdates: statusUpdates.length,
       automationRules: automationRules.length,
       groupTags: groupTags.length,
+      scheduledBroadcasts: scheduledBroadcasts.length,
     };
 
     // Audit the full-DB export: this payload carries webhook + plugin-instance secrets, so WHO pulled
@@ -463,6 +474,7 @@ export class InfraDataController {
         statusUpdates,
         automationRules,
         groupTags,
+        scheduledBroadcasts,
       } as any,
       counts,
       skippedTables,
@@ -904,6 +916,17 @@ export class InfraDataController {
             this.logger.log(`Restored ${data.tables.templates.length} templates to data/templates.json`);
           } catch (err: any) {
             this.logger.error('Failed to sync templates backup file on import:', err?.message);
+          }
+        }
+        if (data.tables && (data.tables as any).scheduledBroadcasts) {
+          try {
+            const schedPath = path.join(process.cwd(), 'data', 'scheduled-broadcasts.json');
+            const dir = path.dirname(schedPath);
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(schedPath, JSON.stringify((data.tables as any).scheduledBroadcasts, null, 2), 'utf8');
+            this.logger.log(`Restored ${(data.tables as any).scheduledBroadcasts.length} scheduled broadcasts to data/scheduled-broadcasts.json`);
+          } catch (err: any) {
+            this.logger.error('Failed to restore scheduled broadcasts from backup:', err?.message);
           }
         }
 

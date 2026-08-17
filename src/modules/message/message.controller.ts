@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Delete, Param, Body, Query, Res, HttpCode, HttpStatus, StreamableFile } from '@nestjs/common';
+import { Controller, Post, Get, Put, Delete, Param, Body, Query, Res, HttpCode, HttpStatus, StreamableFile } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery, ApiBody } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { MessageService } from './message.service';
@@ -697,6 +697,24 @@ export class MessageController {
     },
   ) {
     return this.scheduledBroadcastService.addBroadcast(sessionId, dto);
+  }
+
+  @Put('scheduled-broadcasts/:id')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Update a scheduled broadcast campaign' })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiParam({ name: 'id', description: 'Scheduled broadcast ID' })
+  updateScheduledBroadcast(
+    @Param('sessionId') sessionId: string,
+    @Param('id') id: string,
+    @Body() dto: {
+      scheduledTime?: string;
+      frequency?: 'once' | 'daily' | 'twice_daily';
+      payload?: SendBulkMessageDto;
+      name?: string;
+    },
+  ) {
+    return this.scheduledBroadcastService.updateBroadcast(sessionId, id, dto);
   }
 
   @Delete('scheduled-broadcasts/:id')
