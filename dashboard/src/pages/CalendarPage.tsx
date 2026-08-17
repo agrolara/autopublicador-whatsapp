@@ -135,13 +135,20 @@ export function CalendarPage() {
       ? item.scheduledTime.split('T')[0]
       : item.createdAt ? item.createdAt.split('T')[0] : new Date().toISOString().split('T')[0];
 
-    let text = item.payload?.messages?.[0]?.message?.text || item.payload?.messages?.[0]?.message?.caption || '';
-    if (!text && (item.payload as any)?.text) text = (item.payload as any).text;
-    if (!text && (item as any).text) text = (item as any).text;
+    const firstMsg = item.payload?.messages?.[0];
+    let text = (firstMsg as any)?.content?.text
+      || (firstMsg as any)?.content?.caption
+      || (firstMsg as any)?.message?.text
+      || (firstMsg as any)?.message?.caption
+      || (item.payload as any)?.text
+      || (item as any)?.text
+      || '';
 
     let recipients: string[] = [];
     if (Array.isArray(item.payload?.messages)) {
-      recipients = item.payload.messages.map(m => m.to).filter(Boolean);
+      recipients = item.payload.messages
+        .map(m => (m as any).chatId || (m as any).to)
+        .filter(Boolean);
     } else if (Array.isArray((item.payload as any)?.recipients)) {
       recipients = (item.payload as any).recipients;
     }
@@ -235,8 +242,11 @@ export function CalendarPage() {
       ? `${formDate}T${formTime}:00`
       : formTime;
 
-    const messages = recipientList.map(to => ({
-      to,
+    const messages = recipientList.map(target => ({
+      chatId: target,
+      to: target,
+      type: 'text' as const,
+      content: { text: formText.trim() },
       message: { text: formText.trim() },
     }));
 
