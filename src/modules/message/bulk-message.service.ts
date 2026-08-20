@@ -726,6 +726,10 @@ export class BulkMessageService implements OnApplicationBootstrap {
       const stripped = stripBase64DataUri(base64);
       if (stripped) return stripped;
       if (!url) return '';
+      const strippedUrl = stripBase64DataUri(url);
+      if (url.startsWith('data:') && strippedUrl) {
+        return strippedUrl;
+      }
       if (url.startsWith('/')) {
         const port = process.env.PORT || '2785';
         return `http://127.0.0.1:${port}${url}`;

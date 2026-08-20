@@ -1,4 +1,6 @@
 import sharp from 'sharp';
+import * as fs from 'fs';
+import * as path from 'path';
 import type * as BaileysLib from '@whiskeysockets/baileys';
 import type { AnyMessageContent, MiscMessageGenerationOptions, WAMessage, WASocket } from '@whiskeysockets/baileys';
 import { generateSafeLinkPreview } from './safe-link-preview';
@@ -111,21 +113,45 @@ async function toWebpSticker(data: Buffer, mimetype: string): Promise<Buffer> {
   }
 }
 
-/** Resolve a MediaInput's data (Buffer | base64 string | http(s) URL) to bytes + mimetype. */
+/** Resolve a MediaInput's data (Buffer | base64 string | http(s) URL | local file) to bytes + mimetype. */
 export async function resolveMediaBuffer(media: MediaInput): Promise<{ data: Buffer; mimetype: string }> {
   if (Buffer.isBuffer(media.data)) {
     return { data: media.data, mimetype: media.mimetype };
   }
-  if (/^https?:\/\//i.test(media.data)) {
-    const fetched = await loadRemoteMediaBuffer(media.data);
-    // A generic placeholder mimetype (buildMediaInput's 'application/octet-stream' default when the
-    // caller supplied none) carries no real signal — defer to the fetched response content-type,
-    // which was sniffed from the actual bytes. This fixes URL-based sends where the caller has no
-    // mimetype to pass through the conversation-send facade (e.g. chatwoot-adapter outbound relay).
+  let str = typeof media.data === 'string' ? media.data.trim() : '';
+
+  // 1. Data-URI scheme (data:image/...;base64,....)
+  if (str.startsWith('data:') && str.includes(';base64,')) {
+    const comma = str.indexOf(',');
+    const header = str.substring(5, comma);
+    const mime = header.split(';')[0] || media.mimetype;
+    const cleanB64 = str.substring(comma + 1).replace(/\s/g, '');
+    return { data: Buffer.from(cleanB64, 'base64'), mimetype: mime };
+  }
+
+  // 2. Direct check for local uploads folder reference (bypass network / SSRF)
+  const mediaFileMatch = str.match(/\/media-file\/([^/?#]+)/i);
+  if (mediaFileMatch) {
+    const filename = path.basename(mediaFileMatch[1]);
+    const localUploadPath = path.join(process.cwd(), 'data', 'uploads', filename);
+    if (fs.existsSync(localUploadPath)) {
+      const buffer = fs.readFileSync(localUploadPath);
+      const ext = path.extname(filename).toLowerCase().replace('.', '');
+      const mime = ext === 'png' ? 'image/png' : ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'mp4' ? 'video/mp4' : media.mimetype;
+      return { data: buffer, mimetype: mime };
+    }
+  }
+
+  // 3. Remote URL (http/https)
+  if (/^https?:\/\//i.test(str)) {
+    const fetched = await loadRemoteMediaBuffer(str);
     const callerMimetype = media.mimetype && media.mimetype !== 'application/octet-stream' ? media.mimetype : null;
     return { data: fetched.data, mimetype: callerMimetype ?? fetched.mimetype };
   }
-  return { data: Buffer.from(media.data, 'base64'), mimetype: media.mimetype };
+
+  // 4. Raw Base64 string
+  const cleanB64 = str.replace(/\s/g, '');
+  return { data: Buffer.from(cleanB64, 'base64'), mimetype: media.mimetype };
 }
 
 export class BaileysMessaging {

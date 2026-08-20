@@ -189,7 +189,7 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
       if (!firstMsg) return;
 
       const msgType = firstMsg?.type || (firstMsg?.content?.image ? 'image' : firstMsg?.content?.video ? 'video' : 'text');
-      const mediaUrl = firstMsg?.content?.[msgType]?.url || firstMsg?.mediaUrl;
+      const mediaData = firstMsg?.content?.[msgType]?.data || firstMsg?.content?.[msgType]?.base64 || firstMsg?.content?.[msgType]?.url || firstMsg?.mediaUrl;
       const caption = firstMsg?.content?.caption || firstMsg?.content?.text || firstMsg?.text || (typeof firstMsg?.message === 'string' ? firstMsg.message : '') || '';
 
       // Get contacts for recipients list (needed for Baileys allow-list)
@@ -208,12 +208,12 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
 
       const statusOptions: any = { caption: caption.trim(), recipients };
 
-      if (msgType === 'image' && mediaUrl) {
+      if (msgType === 'image' && mediaData) {
         this.logger.log(`📲 Posting image status for session ${item.sessionId}...`);
-        await engine.postImageStatus({ mimetype: 'image/jpeg', data: mediaUrl }, statusOptions);
-      } else if (msgType === 'video' && mediaUrl) {
+        await engine.postImageStatus({ mimetype: 'image/jpeg', data: mediaData }, statusOptions);
+      } else if (msgType === 'video' && mediaData) {
         this.logger.log(`📲 Posting video status for session ${item.sessionId}...`);
-        await engine.postVideoStatus({ mimetype: 'video/mp4', data: mediaUrl }, statusOptions);
+        await engine.postVideoStatus({ mimetype: 'video/mp4', data: mediaData }, statusOptions);
       } else if (caption.trim()) {
         this.logger.log(`📲 Posting text status for session ${item.sessionId}...`);
         await engine.postTextStatus(caption.trim(), statusOptions);
