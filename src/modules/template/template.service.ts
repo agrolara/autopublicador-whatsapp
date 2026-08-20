@@ -19,7 +19,18 @@ export class TemplateService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
+    await this.ensureColumns();
     await this.restoreFromBackup();
+  }
+
+  private async ensureColumns() {
+    try {
+      await this.templateRepository.query(`ALTER TABLE templates ADD COLUMN mediaType varchar(20) DEFAULT 'text'`).catch(() => {});
+      await this.templateRepository.query(`ALTER TABLE templates ADD COLUMN mediaUrl text`).catch(() => {});
+      await this.templateRepository.query(`ALTER TABLE templates ADD COLUMN mediaFileName varchar(255)`).catch(() => {});
+    } catch (e: any) {
+      this.logger.warn('Column auto-migration skipped or already present:', e?.message);
+    }
   }
 
   private async syncBackup() {
