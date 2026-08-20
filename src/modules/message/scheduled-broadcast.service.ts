@@ -94,7 +94,9 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
   }
 
   getBroadcasts(sessionId: string): ScheduledBroadcast[] {
-    return this.items.filter(item => item.sessionId === sessionId);
+    return this.items
+      .filter(item => item.sessionId === sessionId)
+      .sort((a, b) => (a.scheduledTime || '').localeCompare(b.scheduledTime || ''));
   }
 
   addBroadcast(sessionId: string, dto: {

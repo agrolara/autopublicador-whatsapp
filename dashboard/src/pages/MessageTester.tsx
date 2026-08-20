@@ -1794,7 +1794,9 @@ export function MessageTester() {
                 </tr>
               </thead>
               <tbody>
-                {scheduledList.map(item => {
+                {[...scheduledList]
+                  .sort((a, b) => (a.scheduledTime || '').localeCompare(b.scheduledTime || ''))
+                  .map(item => {
                   const firstMsg = item.payload?.messages?.[0] || {};
                   const msgText = firstMsg?.content?.caption || firstMsg?.content?.text || firstMsg?.text || (typeof firstMsg?.message === 'string' ? firstMsg.message : '') || '';
                   const msgType = firstMsg?.type || (firstMsg?.content?.image ? 'image' : firstMsg?.content?.video ? 'video' : 'text');
