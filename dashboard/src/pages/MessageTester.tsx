@@ -153,9 +153,21 @@ export function MessageTester() {
   const [sendMode, setSendMode] = useState<'now' | 'scheduled'>('now');
   const [scheduledTime, setScheduledTime] = useState('09:00');
   const [scheduledFrequency, setScheduledFrequency] = useState<'once' | 'daily' | 'twice_daily'>('twice_daily');
+  const [scheduledEndDate, setScheduledEndDate] = useState('');
   const [scheduledList, setScheduledList] = useState<ScheduledBroadcastItem[]>([]);
   const [newGroupsFound, setNewGroupsFound] = useState<{ id: string; name?: string }[]>([]);
   const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+
+  // Edit Schedule Modal States
+  const [showEditScheduleModal, setShowEditScheduleModal] = useState(false);
+  const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
+  const [editSchedName, setEditSchedName] = useState('');
+  const [editSchedTime, setEditSchedTime] = useState('');
+  const [editSchedFrequency, setEditSchedFrequency] = useState<'once' | 'daily' | 'twice_daily'>('daily');
+  const [editSchedStatus, setEditSchedStatus] = useState<'active' | 'paused'>('active');
+  const [editSchedEndDate, setEditSchedEndDate] = useState('');
+  const [editSchedContent, setEditSchedContent] = useState('');
+  const [editSchedRecipients, setEditSchedRecipients] = useState('');
 
   const [savedImages, setSavedImages] = useState<{ id: string; name: string; base64: string; mimetype: string; filename: string }[]>(() => {
     try {
@@ -188,6 +200,84 @@ export function MessageTester() {
     const updated = savedImages.filter(item => item.id !== id);
     setSavedImages(updated);
     localStorage.setItem('openwa_saved_images', JSON.stringify(updated));
+  };
+
+  const openEditScheduleModal = (item: ScheduledBroadcastItem) => {
+    setEditingScheduleId(item.id);
+    setEditSchedName(item.name || `Envío Masivo (${item.scheduledTime})`);
+    setEditSchedTime(item.scheduledTime || '10:00');
+    setEditSchedFrequency(item.frequency || 'daily');
+    setEditSchedStatus(item.status || 'active');
+    setEditSchedEndDate(item.endDate || '');
+
+    const firstMsg = item.payload?.messages?.[0] || {};
+    const msgText = firstMsg?.content?.caption || firstMsg?.content?.text || firstMsg?.text || (typeof firstMsg?.message === 'string' ? firstMsg.message : '') || '';
+    setEditSchedContent(msgText);
+
+    const recips = (item.payload?.messages || []).map(m => m.chatId || (m as any).to).filter(Boolean).join('\n');
+    setEditSchedRecipients(recips);
+
+    setShowEditScheduleModal(true);
+  };
+
+  const handleSaveEditedSchedule = async () => {
+    if (!editingScheduleId || !session) return;
+    if (!editSchedTime) {
+      alert('Ingresa una hora válida (HH:MM).');
+      return;
+    }
+    const recipList = editSchedRecipients.split('\n').map(s => s.trim()).filter(Boolean);
+    if (recipList.length === 0) {
+      alert('Debe tener al menos 1 destinatario.');
+      return;
+    }
+
+    const orig = scheduledList.find(s => s.id === editingScheduleId);
+    const origFirst = orig?.payload?.messages?.[0] || {};
+    const mType = origFirst?.type || (origFirst?.content?.image ? 'image' : origFirst?.content?.video ? 'video' : 'text');
+    const mUrl = origFirst?.content?.[mType]?.url || origFirst?.mediaUrl || '';
+
+    const messages = recipList.map(target => {
+      if (mType && mType !== 'text' && mUrl) {
+        return {
+          chatId: target,
+          to: target,
+          type: mType,
+          content: {
+            [mType]: { url: mUrl },
+            caption: editSchedContent.trim(),
+          },
+          mediaUrl: mUrl,
+          caption: editSchedContent.trim(),
+        };
+      }
+      return {
+        chatId: target,
+        to: target,
+        type: 'text' as const,
+        content: { text: editSchedContent.trim() },
+        message: { text: editSchedContent.trim() },
+      };
+    });
+
+    try {
+      await messageApi.updateScheduledBroadcast(session, editingScheduleId, {
+        name: editSchedName.trim(),
+        scheduledTime: editSchedTime,
+        frequency: editSchedFrequency,
+        status: editSchedStatus,
+        endDate: editSchedEndDate || '',
+        payload: {
+          messages,
+          options: orig?.payload?.options || { delayBetweenMessages: 8000 },
+        },
+      });
+      setToast({ type: 'success', message: '✨ Campaña programada actualizada exitosamente.' });
+      setShowEditScheduleModal(false);
+      loadSchedules();
+    } catch (err: any) {
+      alert(`Error al actualizar campaña: ${err?.message || 'Error desconocido'}`);
+    }
   };
 
   const [groupTags, setGroupTags] = useState<GroupTagItem[]>([]);
@@ -494,6 +584,8 @@ export function MessageTester() {
             frequency: scheduledFrequency,
             payload: bulkPayload,
             name: `Envío Masivo (${scheduledTime})`,
+            status: 'active',
+            endDate: scheduledEndDate || undefined,
           });
           setToast({
             type: 'success',
@@ -1564,6 +1656,16 @@ export function MessageTester() {
                         <option value="once">Solo una vez a esta hora</option>
                       </select>
                     </div>
+                    <div className="form-group">
+                      <label>📅 Fecha Límite de Envío (Opcional)</label>
+                      <input
+                        type="date"
+                        value={scheduledEndDate}
+                        onChange={e => setScheduledEndDate(e.target.value)}
+                        style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                      />
+                      <span className="hint">Opcional. Si se deja vacía, se ejecutará todos los días indefinidamente.</span>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1681,9 +1783,11 @@ export function MessageTester() {
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-color, #e2e8f0)', color: 'var(--text-secondary, #64748b)' }}>
                   <th style={{ padding: '8px 12px' }}>Hora</th>
+                  <th style={{ padding: '8px 12px' }}>Estado</th>
                   <th style={{ padding: '8px 12px' }}>🏷️ Plantilla / Campaña</th>
                   <th style={{ padding: '8px 12px' }}>📄 Vista previa</th>
                   <th style={{ padding: '8px 12px' }}>Frecuencia</th>
+                  <th style={{ padding: '8px 12px' }}>📅 Vigencia</th>
                   <th style={{ padding: '8px 12px' }}>Destinatarios</th>
                   <th style={{ padding: '8px 12px' }}>Último envío</th>
                   <th style={{ padding: '8px 12px' }}>Acciones</th>
@@ -1694,7 +1798,10 @@ export function MessageTester() {
                   const firstMsg = item.payload?.messages?.[0] || {};
                   const msgText = firstMsg?.content?.caption || firstMsg?.content?.text || firstMsg?.text || (typeof firstMsg?.message === 'string' ? firstMsg.message : '') || '';
                   const msgType = firstMsg?.type || (firstMsg?.content?.image ? 'image' : firstMsg?.content?.video ? 'video' : 'text');
-                  
+                  const isPaused = item.status === 'paused';
+                  const todayYMD = new Date().toISOString().split('T')[0];
+                  const isExpired = item.endDate && item.endDate < todayYMD;
+
                   const matchedTemplate = templates.find(t => {
                     if (item.name && item.name.toLowerCase().includes(t.name.toLowerCase())) return true;
                     if (msgText && msgText.toLowerCase().includes(t.name.toLowerCase())) return true;
@@ -1705,25 +1812,40 @@ export function MessageTester() {
                   const displayTemplateName = matchedTemplate ? matchedTemplate.name : (item.name || 'Personalizado');
 
                   return (
-                    <tr key={item.id} style={{ borderBottom: '1px solid var(--border-color, #f1f5f9)' }}>
+                    <tr key={item.id} style={{ borderBottom: '1px solid var(--border-color, #f1f5f9)', opacity: isPaused ? 0.75 : 1 }}>
                       <td style={{ padding: '10px 12px', fontWeight: 700, whiteSpace: 'nowrap' }}>
                         ⏰ {item.scheduledTime} hrs
                       </td>
                       <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                        {isPaused ? (
+                          <span style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d', padding: '3px 8px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 700 }}>
+                            ⏸️ Pausado
+                          </span>
+                        ) : isExpired ? (
+                          <span style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5', padding: '3px 8px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 700 }}>
+                            ⌛ Finalizado
+                          </span>
+                        ) : (
+                          <span style={{ background: '#dcfce7', color: '#166534', border: '1px solid #86efac', padding: '3px 8px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 700 }}>
+                            🟢 Activo
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
                         <span style={{
-                          background: '#dcfce7',
+                          background: '#f0fdf4',
                           color: '#166534',
                           padding: '4px 10px',
                           borderRadius: '12px',
                           fontSize: '0.8rem',
                           fontWeight: 700,
                           display: 'inline-block',
-                          border: '1px solid #86efac'
+                          border: '1px solid #bbf7d0'
                         }}>
                           🏷️ {displayTemplateName}
                         </span>
                       </td>
-                      <td style={{ padding: '10px 12px', maxWidth: '260px' }}>
+                      <td style={{ padding: '10px 12px', maxWidth: '240px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
                           <span style={{
                             fontSize: '0.72rem',
@@ -1737,7 +1859,7 @@ export function MessageTester() {
                           </span>
                         </div>
                         <div style={{ fontSize: '0.8rem', color: '#475569', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={msgText}>
-                          {msgText ? msgText.slice(0, 50) + (msgText.length > 50 ? '...' : '') : 'Sin texto'}
+                          {msgText ? msgText.slice(0, 45) + (msgText.length > 45 ? '...' : '') : 'Sin texto'}
                         </div>
                       </td>
                       <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
@@ -1745,39 +1867,236 @@ export function MessageTester() {
                         {item.frequency === 'daily' && 'Todos los días'}
                         {item.frequency === 'once' && 'Una sola vez'}
                       </td>
+                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', fontSize: '0.8rem', color: item.endDate ? '#0f172a' : '#64748b' }}>
+                        {item.endDate ? `📅 Hasta: ${item.endDate}` : '♾️ Indefinido'}
+                      </td>
                       <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{item.payload.messages.length} grupos</td>
                       <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
                         {item.lastRunAt ? new Date(item.lastRunAt).toLocaleString() : 'Pendiente'}
                       </td>
-                      <td style={{ padding: '10px 12px' }}>
-                        <button
-                          type="button"
-                          style={{
-                            background: '#ef4444',
-                            color: '#fff',
-                            border: 'none',
-                            padding: '6px 12px',
-                            borderRadius: '6px',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '4px',
-                            fontSize: '0.85rem',
-                          }}
-                          onClick={async () => {
-                            await messageApi.deleteScheduledBroadcast(session, item.id);
-                            setToast({ type: 'success', message: 'Programación eliminada exitosamente' });
-                            loadSchedules();
-                          }}
-                        >
-                          <Trash2 size={14} /> Eliminar
-                        </button>
+                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                          <button
+                            type="button"
+                            style={{
+                              background: isPaused ? '#16a34a' : '#f59e0b',
+                              color: '#fff',
+                              border: 'none',
+                              padding: '5px 9px',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              fontSize: '0.78rem',
+                              fontWeight: 600,
+                            }}
+                            onClick={async () => {
+                              await messageApi.toggleScheduledBroadcast(session, item.id);
+                              setToast({
+                                type: isPaused ? 'success' : 'info',
+                                message: isPaused ? '▶️ Campaña reanudada con éxito.' : '⏸️ Campaña pausada.',
+                              });
+                              loadSchedules();
+                            }}
+                            title={isPaused ? 'Reanudar campaña' : 'Pausar temporalmente'}
+                          >
+                            {isPaused ? '▶️ Reanudar' : '⏸️ Pausar'}
+                          </button>
+                          <button
+                            type="button"
+                            style={{
+                              background: '#2563eb',
+                              color: '#fff',
+                              border: 'none',
+                              padding: '5px 9px',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              fontSize: '0.78rem',
+                              fontWeight: 600,
+                            }}
+                            onClick={() => openEditScheduleModal(item)}
+                            title="Editar hora, mensaje o grupos de esta campaña"
+                          >
+                            ✏️ Editar
+                          </button>
+                          <button
+                            type="button"
+                            style={{
+                              background: '#ef4444',
+                              color: '#fff',
+                              border: 'none',
+                              padding: '5px 9px',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              fontSize: '0.78rem',
+                            }}
+                            onClick={async () => {
+                              if (window.confirm(`¿Estás seguro de eliminar la campaña programada "${item.name || item.scheduledTime}"?`)) {
+                                await messageApi.deleteScheduledBroadcast(session, item.id);
+                                setToast({ type: 'success', message: 'Programación eliminada exitosamente' });
+                                loadSchedules();
+                              }
+                            }}
+                            title="Eliminar campaña"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+      {showEditScheduleModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'var(--bg-primary, #ffffff)', padding: '24px', borderRadius: '12px', width: '90%', maxWidth: '580px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', maxHeight: '90vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0, fontSize: '1.2rem', color: 'var(--text-main, #0f172a)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                ✏️ Editar Campaña Programada
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowEditScheduleModal(false)}
+                style={{ background: 'none', border: 'none', fontSize: '1.3rem', cursor: 'pointer', color: '#64748b' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="form-group" style={{ marginBottom: '12px' }}>
+              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                Nombre de la Campaña:
+              </label>
+              <input
+                type="text"
+                value={editSchedName}
+                onChange={e => setEditSchedName(e.target.value)}
+                style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+              />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+              <div className="form-group">
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                  ⏰ Hora de Envío (HH:MM):
+                </label>
+                <input
+                  type="time"
+                  value={editSchedTime}
+                  onChange={e => setEditSchedTime(e.target.value)}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: 600, fontSize: '1rem' }}
+                />
+              </div>
+              <div className="form-group">
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                  Estado:
+                </label>
+                <select
+                  value={editSchedStatus}
+                  onChange={e => setEditSchedStatus(e.target.value as any)}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                >
+                  <option value="active">🟢 Activo (Enviando)</option>
+                  <option value="paused">⏸️ Pausado (Detenido)</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+              <div className="form-group">
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                  Frecuencia:
+                </label>
+                <select
+                  value={editSchedFrequency}
+                  onChange={e => setEditSchedFrequency(e.target.value as any)}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                >
+                  <option value="twice_daily">Cada 12 Horas (2 veces al día)</option>
+                  <option value="daily">Todos los días a esta hora</option>
+                  <option value="once">Una sola vez</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                  📅 Fecha Límite (Opcional):
+                </label>
+                <input
+                  type="date"
+                  value={editSchedEndDate}
+                  onChange={e => setEditSchedEndDate(e.target.value)}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                />
+              </div>
+            </div>
+
+            <div className="form-group" style={{ marginBottom: '12px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#334155', margin: 0 }}>
+                  Mensaje / Texto:
+                </label>
+                {templates.length > 0 && (
+                  <select
+                    style={{ fontSize: '0.78rem', padding: '2px 6px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                    onChange={e => {
+                      const found = templates.find(t => t.id === e.target.value);
+                      if (found) {
+                        const fullText = [found.header, found.body, found.footer].filter(Boolean).join('\n\n');
+                        setEditSchedContent(fullText);
+                      }
+                    }}
+                    defaultValue=""
+                  >
+                    <option value="" disabled>-- Cargar desde plantilla guardada --</option>
+                    {templates.map(t => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              <textarea
+                value={editSchedContent}
+                onChange={e => setEditSchedContent(e.target.value)}
+                rows={4}
+                style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                placeholder="Escribe el mensaje de la campaña..."
+              />
+            </div>
+
+            <div className="form-group" style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                Destinatarios ({editSchedRecipients.split('\n').filter(Boolean).length} grupos/chats):
+              </label>
+              <textarea
+                value={editSchedRecipients}
+                onChange={e => setEditSchedRecipients(e.target.value)}
+                rows={3}
+                style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.8rem', fontFamily: 'monospace' }}
+                placeholder="Uno por línea..."
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button
+                type="button"
+                onClick={() => setShowEditScheduleModal(false)}
+                style={{ padding: '8px 14px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 500 }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveEditedSchedule}
+                style={{ padding: '8px 18px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600 }}
+              >
+                💾 Guardar Cambios
+              </button>
+            </div>
           </div>
         </div>
       )}

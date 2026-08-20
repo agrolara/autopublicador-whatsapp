@@ -48,6 +48,8 @@ export function CalendarPage() {
   const [formText, setFormText] = useState('');
   const [formMessageType, setFormMessageType] = useState<'text' | 'image' | 'video' | 'audio' | 'document'>('text');
   const [formMediaUrl, setFormMediaUrl] = useState('');
+  const [formStatus, setFormStatus] = useState<'active' | 'paused'>('active');
+  const [formEndDate, setFormEndDate] = useState('');
   const [formRecipients, setFormRecipients] = useState<string[]>([]);
   const [manualRecipientsInput, setManualRecipientsInput] = useState('');
   const [selectedTagId, setSelectedTagId] = useState<string>('');
@@ -170,6 +172,8 @@ export function CalendarPage() {
     setFormDate(targetDateStr);
     setFormTime('10:00');
     setFormFrequency('once');
+    setFormStatus('active');
+    setFormEndDate('');
     setFormText('');
     setFormMessageType('text');
     setFormMediaUrl('');
@@ -188,6 +192,8 @@ export function CalendarPage() {
     setFormDate(dateOnly);
     setFormTime(timeOnly);
     setFormFrequency(item.frequency || 'once');
+    setFormStatus(item.status || 'active');
+    setFormEndDate(item.endDate || '');
     setFormText(text);
     setFormMessageType(mediaType as any || 'text');
     setFormMediaUrl(mediaUrl || '');
@@ -195,6 +201,21 @@ export function CalendarPage() {
     setManualRecipientsInput(recipients.join('\n'));
     setModalMode('view');
     setShowModal(true);
+  };
+
+  // Toggle active / paused on active item
+  const handleToggleActiveItem = async () => {
+    if (!activeItem || !session) return;
+    try {
+      await messageApi.toggleScheduledBroadcast(session, activeItem.id);
+      const nextStatus = activeItem.status === 'paused' ? 'active' : 'paused';
+      setActiveItem({ ...activeItem, status: nextStatus });
+      setFormStatus(nextStatus);
+      showNotification('success', nextStatus === 'active' ? '▶️ Campaña reanudada con éxito.' : '⏸️ Campaña pausada.');
+      loadData();
+    } catch (err: any) {
+      showNotification('error', `Error al cambiar estado: ${err?.message}`);
+    }
   };
 
   // Switch to Edit Mode
@@ -285,6 +306,8 @@ export function CalendarPage() {
           name: formName.trim() || `Envío Masivo (${formTime})`,
           scheduledTime: fullScheduledTime,
           frequency: formFrequency,
+          status: formStatus,
+          endDate: formEndDate || '',
           payload,
         });
         showNotification('success', '✨ Publicación programada actualizada correctamente.');
@@ -293,6 +316,8 @@ export function CalendarPage() {
           name: formName.trim() || `Envío Masivo (${formTime})`,
           scheduledTime: fullScheduledTime,
           frequency: formFrequency,
+          status: formStatus,
+          endDate: formEndDate || undefined,
           payload,
         });
         showNotification('success', modalMode === 'duplicate'
@@ -764,6 +789,24 @@ export function CalendarPage() {
 
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <button
+                      onClick={handleToggleActiveItem}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '8px 16px',
+                        borderRadius: '8px',
+                        border: formStatus === 'paused' ? '1px solid #86efac' : '1px solid #fcd34d',
+                        background: formStatus === 'paused' ? '#f0fdf4' : '#fef3c7',
+                        color: formStatus === 'paused' ? '#166534' : '#92400e',
+                        fontWeight: 600,
+                        fontSize: '0.85rem',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {formStatus === 'paused' ? '▶️ Reanudar' : '⏸️ Pausar'}
+                    </button>
+                    <button
                       onClick={handleStartDuplicate}
                       style={{
                         display: 'flex',
@@ -797,27 +840,27 @@ export function CalendarPage() {
                         cursor: 'pointer',
                       }}
                     >
-                      <Edit3 size={16} /> Modificar / Editar
+                      <Edit3 size={16} /> Editar
                     </button>
                   </div>
                 </div>
               </div>
             ) : (
-              /* Create, Edit, or Duplicate Form */
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              /* Create / Edit / Duplicate Form */
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 {/* Campaign Name */}
                 <div>
                   <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '6px' }}>
-                    🏷️ Nombre / Tema de la Campaña:
+                    🏷️ Nombre / Título de la Difusión:
                   </label>
                   <input
                     type="text"
-                    placeholder="Ej: Promo Fin de Semana Pizza 2x1..."
                     value={formName}
                     onChange={e => setFormName(e.target.value)}
+                    placeholder="Ej: Promo Pizza Familiar, Mensaje Quilicura"
                     style={{
                       width: '100%',
-                      padding: '10px',
+                      padding: '8px 12px',
                       borderRadius: '8px',
                       border: '1px solid var(--border-color, #cbd5e1)',
                       background: 'var(--bg-secondary, #ffffff)',
@@ -827,8 +870,8 @@ export function CalendarPage() {
                   />
                 </div>
 
-                {/* Date & Time & Frequency */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+                {/* Date & Time */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
                   <div>
                     <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '6px' }}>
                       📅 Fecha:
@@ -845,6 +888,7 @@ export function CalendarPage() {
                         background: 'var(--bg-secondary, #ffffff)',
                         color: 'var(--text-color, #334155)',
                         fontSize: '0.88rem',
+                        fontWeight: 600,
                       }}
                     />
                   </div>
@@ -864,9 +908,14 @@ export function CalendarPage() {
                         background: 'var(--bg-secondary, #ffffff)',
                         color: 'var(--text-color, #334155)',
                         fontSize: '0.88rem',
+                        fontWeight: 600,
                       }}
                     />
                   </div>
+                </div>
+
+                {/* Frequency & Status & End Date */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
                   <div>
                     <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '6px' }}>
                       🔄 Frecuencia:
@@ -888,6 +937,46 @@ export function CalendarPage() {
                       <option value="daily">Diario (Todos los días)</option>
                       <option value="twice_daily">2 veces al día (cada 12h)</option>
                     </select>
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '6px' }}>
+                      Estado:
+                    </label>
+                    <select
+                      value={formStatus}
+                      onChange={e => setFormStatus(e.target.value as any)}
+                      style={{
+                        width: '100%',
+                        padding: '8px 10px',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border-color, #cbd5e1)',
+                        background: 'var(--bg-secondary, #ffffff)',
+                        color: 'var(--text-color, #334155)',
+                        fontSize: '0.88rem',
+                      }}
+                    >
+                      <option value="active">🟢 Activo</option>
+                      <option value="paused">⏸️ Pausado</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '6px' }}>
+                      📅 Fecha Límite (Opcional):
+                    </label>
+                    <input
+                      type="date"
+                      value={formEndDate}
+                      onChange={e => setFormEndDate(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '8px 10px',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border-color, #cbd5e1)',
+                        background: 'var(--bg-secondary, #ffffff)',
+                        color: 'var(--text-color, #334155)',
+                        fontSize: '0.88rem',
+                      }}
+                    />
                   </div>
                 </div>
 

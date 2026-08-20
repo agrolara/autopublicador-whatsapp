@@ -443,6 +443,9 @@ export interface ScheduledBroadcastItem {
   scheduledTime: string;
   frequency: 'once' | 'daily' | 'twice_daily';
   payload: SendBulkPayload;
+  status?: 'active' | 'paused';
+  startDate?: string;
+  endDate?: string;
   lastRunAt?: string;
   createdAt: string;
 }
@@ -1103,6 +1106,9 @@ export const messageApi = {
       frequency: 'once' | 'daily' | 'twice_daily';
       payload: SendBulkPayload;
       name?: string;
+      status?: 'active' | 'paused';
+      startDate?: string;
+      endDate?: string;
     },
   ) =>
     request<ScheduledBroadcastItem>(`/sessions/${sessionId}/messages/scheduled-broadcasts`, {
@@ -1117,11 +1123,18 @@ export const messageApi = {
       frequency: 'once' | 'daily' | 'twice_daily';
       payload: SendBulkPayload;
       name: string;
+      status: 'active' | 'paused';
+      startDate: string;
+      endDate: string;
     }>,
   ) =>
     request<ScheduledBroadcastItem>(`/sessions/${sessionId}/messages/scheduled-broadcasts/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
+    }),
+  toggleScheduledBroadcast: (sessionId: string, id: string) =>
+    request<ScheduledBroadcastItem>(`/sessions/${sessionId}/messages/scheduled-broadcasts/${id}/toggle`, {
+      method: 'PATCH',
     }),
   deleteScheduledBroadcast: (sessionId: string, id: string) =>
     request<{ success: boolean }>(`/sessions/${sessionId}/messages/scheduled-broadcasts/${id}`, {

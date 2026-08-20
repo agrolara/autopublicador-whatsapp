@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Put, Delete, Param, Body, Query, Res, HttpCode, HttpStatus, StreamableFile } from '@nestjs/common';
+import { Controller, Post, Get, Put, Patch, Delete, Param, Body, Query, Res, HttpCode, HttpStatus, StreamableFile } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery, ApiBody } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { MessageService } from './message.service';
@@ -694,6 +694,9 @@ export class MessageController {
       frequency: 'once' | 'daily' | 'twice_daily';
       payload: SendBulkMessageDto;
       name?: string;
+      status?: 'active' | 'paused';
+      startDate?: string;
+      endDate?: string;
     },
   ) {
     return this.scheduledBroadcastService.addBroadcast(sessionId, dto);
@@ -712,9 +715,24 @@ export class MessageController {
       frequency?: 'once' | 'daily' | 'twice_daily';
       payload?: SendBulkMessageDto;
       name?: string;
+      status?: 'active' | 'paused';
+      startDate?: string;
+      endDate?: string;
     },
   ) {
     return this.scheduledBroadcastService.updateBroadcast(sessionId, id, dto);
+  }
+
+  @Patch('scheduled-broadcasts/:id/toggle')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Toggle pause/resume for a scheduled broadcast' })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiParam({ name: 'id', description: 'Scheduled broadcast ID' })
+  toggleScheduledBroadcast(
+    @Param('sessionId') sessionId: string,
+    @Param('id') id: string,
+  ) {
+    return this.scheduledBroadcastService.toggleBroadcastStatus(sessionId, id);
   }
 
   @Delete('scheduled-broadcasts/:id')

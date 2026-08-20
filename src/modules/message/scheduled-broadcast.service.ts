@@ -11,6 +11,9 @@ export interface ScheduledBroadcast {
   scheduledTime: string; // e.g. "09:00", "21:00"
   frequency: 'once' | 'daily' | 'twice_daily'; // once, daily, twice_daily (every 12h)
   payload: SendBulkMessageDto;
+  status?: 'active' | 'paused';
+  startDate?: string;
+  endDate?: string;
   lastRunAt?: string;
   createdAt: string;
 }
@@ -99,6 +102,9 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
     frequency: 'once' | 'daily' | 'twice_daily';
     payload: SendBulkMessageDto;
     name?: string;
+    status?: 'active' | 'paused';
+    startDate?: string;
+    endDate?: string;
   }): ScheduledBroadcast {
     const newBroadcast: ScheduledBroadcast = {
       id: `sched_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -107,6 +113,9 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
       scheduledTime: dto.scheduledTime,
       frequency: dto.frequency,
       payload: dto.payload,
+      status: dto.status || 'active',
+      startDate: dto.startDate || undefined,
+      endDate: dto.endDate || undefined,
       createdAt: new Date().toISOString(),
     };
 
@@ -132,6 +141,9 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
     frequency?: 'once' | 'daily' | 'twice_daily';
     payload?: SendBulkMessageDto;
     name?: string;
+    status?: 'active' | 'paused';
+    startDate?: string;
+    endDate?: string;
   }): ScheduledBroadcast | null {
     const item = this.items.find(i => i.sessionId === sessionId && i.id === id);
     if (!item) return null;
@@ -139,8 +151,20 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
     if (dto.scheduledTime !== undefined) item.scheduledTime = dto.scheduledTime;
     if (dto.frequency !== undefined) item.frequency = dto.frequency;
     if (dto.payload !== undefined) item.payload = dto.payload;
+    if (dto.status !== undefined) item.status = dto.status;
+    if (dto.startDate !== undefined) item.startDate = dto.startDate || undefined;
+    if (dto.endDate !== undefined) item.endDate = dto.endDate || undefined;
     this.saveToFile();
-    this.logger.log(`Updated scheduled broadcast ${id} (${item.name})`);
+    this.logger.log(`Updated scheduled broadcast ${id} (${item.name}) - Status: ${item.status || 'active'}`);
+    return item;
+  }
+
+  toggleBroadcastStatus(sessionId: string, id: string): ScheduledBroadcast | null {
+    const item = this.items.find(i => i.sessionId === sessionId && i.id === id);
+    if (!item) return null;
+    item.status = item.status === 'paused' ? 'active' : 'paused';
+    this.saveToFile();
+    this.logger.log(`Toggled broadcast ${id} status to: ${item.status}`);
     return item;
   }
 
@@ -148,6 +172,19 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
     const { hour: nowH, minute: nowM, ymd: todayYMD, hhmm: currentHHMM } = getLocalChileTime();
 
     for (const item of [...this.items]) {
+      // 1. Skip if paused
+      if (item.status === 'paused') {
+        continue;
+      }
+
+      // 2. Check date range (startDate / endDate)
+      if (item.startDate && todayYMD < item.startDate) {
+        continue;
+      }
+      if (item.endDate && todayYMD > item.endDate) {
+        continue;
+      }
+
       let isDue = false;
       const targetHHMM = item.scheduledTime.padStart(5, '0');
 
