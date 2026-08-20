@@ -697,6 +697,7 @@ export class MessageController {
       status?: 'active' | 'paused';
       startDate?: string;
       endDate?: string;
+      postToStatus?: boolean;
     },
   ) {
     return this.scheduledBroadcastService.addBroadcast(sessionId, dto);
@@ -718,6 +719,7 @@ export class MessageController {
       status?: 'active' | 'paused';
       startDate?: string;
       endDate?: string;
+      postToStatus?: boolean;
     },
   ) {
     return this.scheduledBroadcastService.updateBroadcast(sessionId, id, dto);

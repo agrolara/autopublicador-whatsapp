@@ -50,6 +50,7 @@ export function CalendarPage() {
   const [formMediaUrl, setFormMediaUrl] = useState('');
   const [formStatus, setFormStatus] = useState<'active' | 'paused'>('active');
   const [formEndDate, setFormEndDate] = useState('');
+  const [formPostToStatus, setFormPostToStatus] = useState(false);
   const [formRecipients, setFormRecipients] = useState<string[]>([]);
   const [manualRecipientsInput, setManualRecipientsInput] = useState('');
   const [selectedTagId, setSelectedTagId] = useState<string>('');
@@ -174,6 +175,7 @@ export function CalendarPage() {
     setFormFrequency('once');
     setFormStatus('active');
     setFormEndDate('');
+    setFormPostToStatus(false);
     setFormText('');
     setFormMessageType('text');
     setFormMediaUrl('');
@@ -194,6 +196,7 @@ export function CalendarPage() {
     setFormFrequency(item.frequency || 'once');
     setFormStatus(item.status || 'active');
     setFormEndDate(item.endDate || '');
+    setFormPostToStatus(item.postToStatus ?? false);
     setFormText(text);
     setFormMessageType(mediaType as any || 'text');
     setFormMediaUrl(mediaUrl || '');
@@ -308,6 +311,7 @@ export function CalendarPage() {
           frequency: formFrequency,
           status: formStatus,
           endDate: formEndDate || '',
+          postToStatus: formPostToStatus,
           payload,
         });
         showNotification('success', '✨ Publicación programada actualizada correctamente.');
@@ -318,6 +322,7 @@ export function CalendarPage() {
           frequency: formFrequency,
           status: formStatus,
           endDate: formEndDate || undefined,
+          postToStatus: formPostToStatus,
           payload,
         });
         showNotification('success', modalMode === 'duplicate'
@@ -978,6 +983,37 @@ export function CalendarPage() {
                       }}
                     />
                   </div>
+                </div>
+
+                {/* WhatsApp Status Toggle */}
+                <div
+                  style={{
+                    background: formPostToStatus ? '#eff6ff' : 'var(--bg-secondary, #f8fafc)',
+                    padding: '12px 14px',
+                    borderRadius: '8px',
+                    border: formPostToStatus ? '1px solid #93c5fd' : '1px solid var(--border-color, #e2e8f0)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    cursor: 'pointer',
+                  }}
+                  onClick={() => setFormPostToStatus(!formPostToStatus)}
+                >
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: '0.88rem', color: formPostToStatus ? '#1e40af' : 'var(--text-color, #334155)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      📲 Publicar también en Mis Estados de WhatsApp (Historias 24 hrs)
+                    </div>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary, #64748b)' }}>
+                      Sube automáticamente el contenido multimedia / texto a tu historia de WhatsApp a la misma hora.
+                    </span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={formPostToStatus}
+                    onChange={e => setFormPostToStatus(e.target.checked)}
+                    style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#2563eb' }}
+                    onClick={e => e.stopPropagation()}
+                  />
                 </div>
 
                 {/* Templates Selector */}

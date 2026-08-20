@@ -446,6 +446,7 @@ export interface ScheduledBroadcastItem {
   status?: 'active' | 'paused';
   startDate?: string;
   endDate?: string;
+  postToStatus?: boolean;
   lastRunAt?: string;
   createdAt: string;
 }
@@ -1109,6 +1110,7 @@ export const messageApi = {
       status?: 'active' | 'paused';
       startDate?: string;
       endDate?: string;
+      postToStatus?: boolean;
     },
   ) =>
     request<ScheduledBroadcastItem>(`/sessions/${sessionId}/messages/scheduled-broadcasts`, {
@@ -1126,6 +1128,7 @@ export const messageApi = {
       status: 'active' | 'paused';
       startDate: string;
       endDate: string;
+      postToStatus: boolean;
     }>,
   ) =>
     request<ScheduledBroadcastItem>(`/sessions/${sessionId}/messages/scheduled-broadcasts/${id}`, {

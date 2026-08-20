@@ -154,6 +154,7 @@ export function MessageTester() {
   const [scheduledTime, setScheduledTime] = useState('09:00');
   const [scheduledFrequency, setScheduledFrequency] = useState<'once' | 'daily' | 'twice_daily'>('twice_daily');
   const [scheduledEndDate, setScheduledEndDate] = useState('');
+  const [scheduledPostToStatus, setScheduledPostToStatus] = useState(false);
   const [scheduledList, setScheduledList] = useState<ScheduledBroadcastItem[]>([]);
   const [newGroupsFound, setNewGroupsFound] = useState<{ id: string; name?: string }[]>([]);
   const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
@@ -166,6 +167,7 @@ export function MessageTester() {
   const [editSchedFrequency, setEditSchedFrequency] = useState<'once' | 'daily' | 'twice_daily'>('daily');
   const [editSchedStatus, setEditSchedStatus] = useState<'active' | 'paused'>('active');
   const [editSchedEndDate, setEditSchedEndDate] = useState('');
+  const [editSchedPostToStatus, setEditSchedPostToStatus] = useState(false);
   const [editSchedContent, setEditSchedContent] = useState('');
   const [editSchedRecipients, setEditSchedRecipients] = useState('');
 
@@ -209,6 +211,7 @@ export function MessageTester() {
     setEditSchedFrequency(item.frequency || 'daily');
     setEditSchedStatus(item.status || 'active');
     setEditSchedEndDate(item.endDate || '');
+    setEditSchedPostToStatus(item.postToStatus ?? false);
 
     const firstMsg = item.payload?.messages?.[0] || {};
     const msgText = firstMsg?.content?.caption || firstMsg?.content?.text || firstMsg?.text || (typeof firstMsg?.message === 'string' ? firstMsg.message : '') || '';
@@ -267,6 +270,7 @@ export function MessageTester() {
         frequency: editSchedFrequency,
         status: editSchedStatus,
         endDate: editSchedEndDate || '',
+        postToStatus: editSchedPostToStatus,
         payload: {
           messages,
           options: orig?.payload?.options || { delayBetweenMessages: 8000 },
@@ -586,6 +590,7 @@ export function MessageTester() {
             name: `Envío Masivo (${scheduledTime})`,
             status: 'active',
             endDate: scheduledEndDate || undefined,
+            postToStatus: scheduledPostToStatus,
           });
           setToast({
             type: 'success',
@@ -1666,6 +1671,23 @@ export function MessageTester() {
                       />
                       <span className="hint">Opcional. Si se deja vacía, se ejecutará todos los días indefinidamente.</span>
                     </div>
+                    <div className="form-group" style={{ gridColumn: '1 / -1', background: scheduledPostToStatus ? '#eff6ff' : '#f8fafc', padding: '12px 16px', borderRadius: '8px', border: scheduledPostToStatus ? '1px solid #93c5fd' : '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', transition: 'all 0.2s' }} onClick={() => setScheduledPostToStatus(!scheduledPostToStatus)}>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '0.92rem', color: scheduledPostToStatus ? '#1e40af' : '#334155', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          📲 Publicar también en Mis Estados de WhatsApp (Historias 24 hrs)
+                        </div>
+                        <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                          A la misma hora programada, el contenido multimedia o texto se publicará automáticamente en tu Estado de WhatsApp para todos tus contactos.
+                        </span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={scheduledPostToStatus}
+                        onChange={e => setScheduledPostToStatus(e.target.checked)}
+                        style={{ width: '20px', height: '20px', cursor: 'pointer', accentColor: '#2563eb' }}
+                        onClick={e => e.stopPropagation()}
+                      />
+                    </div>
                   </div>
                 )}
               </div>
@@ -1872,7 +1894,16 @@ export function MessageTester() {
                       <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', fontSize: '0.8rem', color: item.endDate ? '#0f172a' : '#64748b' }}>
                         {item.endDate ? `📅 Hasta: ${item.endDate}` : '♾️ Indefinido'}
                       </td>
-                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{item.payload.messages.length} grupos</td>
+                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                        <div>{item.payload.messages.length} grupos</div>
+                        {item.postToStatus && (
+                          <div style={{ marginTop: '2px' }}>
+                            <span style={{ background: '#dbeafe', color: '#1e40af', padding: '2px 6px', borderRadius: '10px', fontSize: '0.72rem', fontWeight: 600 }}>
+                              📲 +Estados
+                            </span>
+                          </div>
+                        )}
+                      </td>
                       <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
                         {item.lastRunAt ? new Date(item.lastRunAt).toLocaleString() : 'Pendiente'}
                       </td>
@@ -2035,6 +2066,24 @@ export function MessageTester() {
                   style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
                 />
               </div>
+            </div>
+
+            <div className="form-group" style={{ marginBottom: '12px', background: editSchedPostToStatus ? '#eff6ff' : '#f8fafc', padding: '10px 14px', borderRadius: '8px', border: editSchedPostToStatus ? '1px solid #93c5fd' : '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }} onClick={() => setEditSchedPostToStatus(!editSchedPostToStatus)}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: '0.88rem', color: editSchedPostToStatus ? '#1e40af' : '#334155', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  📲 Publicar también en Mis Estados de WhatsApp
+                </div>
+                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                  Sube el contenido multimedia / texto a tu historia de WhatsApp a esta hora.
+                </span>
+              </div>
+              <input
+                type="checkbox"
+                checked={editSchedPostToStatus}
+                onChange={e => setEditSchedPostToStatus(e.target.checked)}
+                style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#2563eb' }}
+                onClick={e => e.stopPropagation()}
+              />
             </div>
 
             <div className="form-group" style={{ marginBottom: '12px' }}>

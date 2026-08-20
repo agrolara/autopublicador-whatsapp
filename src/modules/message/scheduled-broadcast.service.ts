@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { BulkMessageService } from './bulk-message.service';
 import { SendBulkMessageDto } from './dto/bulk-message.dto';
+import { EngineRegistry } from '../../engine/engine-registry.service';
 
 export interface ScheduledBroadcast {
   id: string;
@@ -14,6 +15,7 @@ export interface ScheduledBroadcast {
   status?: 'active' | 'paused';
   startDate?: string;
   endDate?: string;
+  postToStatus?: boolean; // Publish to WhatsApp Status (24h story)
   lastRunAt?: string;
   createdAt: string;
 }
@@ -53,6 +55,7 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
   constructor(
     @Inject(forwardRef(() => BulkMessageService))
     private readonly bulkMessageService: BulkMessageService,
+    private readonly engines: EngineRegistry,
   ) {
     this.loadFromFile();
   }
@@ -107,6 +110,7 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
     status?: 'active' | 'paused';
     startDate?: string;
     endDate?: string;
+    postToStatus?: boolean;
   }): ScheduledBroadcast {
     const newBroadcast: ScheduledBroadcast = {
       id: `sched_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -118,12 +122,13 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
       status: dto.status || 'active',
       startDate: dto.startDate || undefined,
       endDate: dto.endDate || undefined,
+      postToStatus: dto.postToStatus ?? false,
       createdAt: new Date().toISOString(),
     };
 
     this.items.push(newBroadcast);
     this.saveToFile();
-    this.logger.log(`Created scheduled broadcast ${newBroadcast.id} at ${newBroadcast.scheduledTime} (${newBroadcast.frequency}) [Chile Time]`);
+    this.logger.log(`Created scheduled broadcast ${newBroadcast.id} at ${newBroadcast.scheduledTime} (${newBroadcast.frequency}) [Chile Time] (Status: ${newBroadcast.postToStatus ? 'Yes' : 'No'})`);
     return newBroadcast;
   }
 
@@ -146,6 +151,7 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
     status?: 'active' | 'paused';
     startDate?: string;
     endDate?: string;
+    postToStatus?: boolean;
   }): ScheduledBroadcast | null {
     const item = this.items.find(i => i.sessionId === sessionId && i.id === id);
     if (!item) return null;
@@ -156,8 +162,9 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
     if (dto.status !== undefined) item.status = dto.status;
     if (dto.startDate !== undefined) item.startDate = dto.startDate || undefined;
     if (dto.endDate !== undefined) item.endDate = dto.endDate || undefined;
+    if (dto.postToStatus !== undefined) item.postToStatus = dto.postToStatus;
     this.saveToFile();
-    this.logger.log(`Updated scheduled broadcast ${id} (${item.name}) - Status: ${item.status || 'active'}`);
+    this.logger.log(`Updated scheduled broadcast ${id} (${item.name}) - Status: ${item.status || 'active'} - PostToStatus: ${item.postToStatus ? 'Yes' : 'No'}`);
     return item;
   }
 
@@ -168,6 +175,53 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
     this.saveToFile();
     this.logger.log(`Toggled broadcast ${id} status to: ${item.status}`);
     return item;
+  }
+
+  private async publishStatusForBroadcast(item: ScheduledBroadcast) {
+    try {
+      const engine = this.engines.get(item.sessionId);
+      if (!engine) {
+        this.logger.warn(`Cannot publish status for broadcast ${item.id}: engine for session ${item.sessionId} not found`);
+        return;
+      }
+
+      const firstMsg = item.payload?.messages?.[0] as any;
+      if (!firstMsg) return;
+
+      const msgType = firstMsg?.type || (firstMsg?.content?.image ? 'image' : firstMsg?.content?.video ? 'video' : 'text');
+      const mediaUrl = firstMsg?.content?.[msgType]?.url || firstMsg?.mediaUrl;
+      const caption = firstMsg?.content?.caption || firstMsg?.content?.text || firstMsg?.text || (typeof firstMsg?.message === 'string' ? firstMsg.message : '') || '';
+
+      // Get contacts for recipients list (needed for Baileys allow-list)
+      let recipients: string[] | undefined;
+      try {
+        const contacts = await engine.getContacts?.();
+        if (Array.isArray(contacts)) {
+          const validContacts = contacts.map(c => c.id).filter(id => id && !id.endsWith('@g.us'));
+          if (validContacts.length > 0) {
+            recipients = validContacts;
+          }
+        }
+      } catch (e: any) {
+        this.logger.debug(`Could not fetch contacts for status: ${e?.message}`);
+      }
+
+      const statusOptions: any = { caption: caption.trim(), recipients };
+
+      if (msgType === 'image' && mediaUrl) {
+        this.logger.log(`📲 Posting image status for session ${item.sessionId}...`);
+        await engine.postImageStatus({ mimetype: 'image/jpeg', data: mediaUrl }, statusOptions);
+      } else if (msgType === 'video' && mediaUrl) {
+        this.logger.log(`📲 Posting video status for session ${item.sessionId}...`);
+        await engine.postVideoStatus({ mimetype: 'video/mp4', data: mediaUrl }, statusOptions);
+      } else if (caption.trim()) {
+        this.logger.log(`📲 Posting text status for session ${item.sessionId}...`);
+        await engine.postTextStatus(caption.trim(), statusOptions);
+      }
+      this.logger.log(`✅ Successfully published status for broadcast ${item.id} (${item.name})`);
+    } catch (err: any) {
+      this.logger.error(`❌ Failed to publish status for broadcast ${item.id}:`, err?.message);
+    }
   }
 
   private async processDueBroadcasts() {
@@ -215,11 +269,19 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
           item.lastRunAt = `${todayYMD}T${currentHHMM}:00Z`;
           this.saveToFile();
 
+          // 1. Send group broadcast messages (if any recipients)
           try {
-            await this.bulkMessageService.createBatch(item.sessionId, item.payload);
-            this.logger.log(`✅ Successfully launched batch for scheduled broadcast ${item.id}`);
+            if (item.payload?.messages?.length > 0) {
+              await this.bulkMessageService.createBatch(item.sessionId, item.payload);
+              this.logger.log(`✅ Successfully launched batch for scheduled broadcast ${item.id}`);
+            }
           } catch (err: any) {
             this.logger.error(`❌ Failed to execute scheduled broadcast ${item.id}:`, err?.message);
+          }
+
+          // 2. Publish to WhatsApp Status (Stories) if enabled
+          if (item.postToStatus) {
+            await this.publishStatusForBroadcast(item);
           }
 
           if (item.frequency === 'once') {
