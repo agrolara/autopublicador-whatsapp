@@ -43,6 +43,13 @@ export class GroupVaultController {
     return this.vaultService.startAutoJoin(sessionId, dto || {});
   }
 
+  @Get('auto-join/active')
+  @RequireRole(ApiKeyRole.VIEWER)
+  @ApiOperation({ summary: 'Get the currently active or latest auto-join job' })
+  getActiveJob(@Query('sessionId') sessionId?: string) {
+    return this.vaultService.getActiveJob(sessionId) || null;
+  }
+
   @Get('auto-join/status/:jobId')
   @RequireRole(ApiKeyRole.VIEWER)
   @ApiOperation({ summary: 'Get status and progress logs of an auto-join job' })

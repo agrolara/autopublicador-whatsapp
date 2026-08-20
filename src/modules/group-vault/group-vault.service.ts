@@ -362,6 +362,14 @@ export class GroupVaultService implements OnModuleInit {
     this.jobTimeouts.set(jobId, timeout);
   }
 
+  getActiveJob(sessionId?: string): AutoJoinJob | undefined {
+    const jobs = Array.from(this.activeJobs.values());
+    if (sessionId) {
+      return jobs.filter(j => j.targetSessionId === sessionId).reverse()[0];
+    }
+    return jobs.filter(j => j.status === 'running').reverse()[0] || jobs.reverse()[0];
+  }
+
   getJobStatus(jobId: string): AutoJoinJob | undefined {
     return this.activeJobs.get(jobId);
   }

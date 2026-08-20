@@ -1524,6 +1524,8 @@ export const groupVaultApi = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  getActiveJob: (sessionId?: string) =>
+    request<AutoJoinJob | null>(`/group-vault/auto-join/active${sessionId ? `?sessionId=${sessionId}` : ''}`),
   getJobStatus: (jobId: string) => request<AutoJoinJob>(`/group-vault/auto-join/status/${jobId}`),
   cancelJob: (jobId: string) => request<{ success: boolean }>(`/group-vault/auto-join/cancel/${jobId}`, { method: 'POST' }),
   deleteGroup: (id: string) => request<{ success: boolean }>(`/group-vault/${id}`, { method: 'DELETE' }),

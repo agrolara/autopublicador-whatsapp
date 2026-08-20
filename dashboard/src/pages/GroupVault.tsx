@@ -54,12 +54,16 @@ export function GroupVault() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [vaultGroups, sessionList] = await Promise.all([
+      const [vaultGroups, sessionList, latestJob] = await Promise.all([
         groupVaultApi.list().catch(() => []),
         sessionApi.list().catch(() => []),
+        groupVaultApi.getActiveJob().catch(() => null),
       ]);
       setGroups(vaultGroups);
       setSessions(sessionList);
+      if (latestJob) {
+        setActiveJob(latestJob);
+      }
 
       const readySess = sessionList.find(s => s.status === 'ready');
       if (readySess && !syncingSessionId) {
