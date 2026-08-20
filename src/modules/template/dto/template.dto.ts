@@ -45,6 +45,28 @@ export class CreateTemplateDto {
   @IsString()
   @MaxLength(HEADER_FOOTER_MAX_LENGTH)
   footer?: string;
+
+  @ApiPropertyOptional({
+    description: 'Media type (text, image, video, audio, document)',
+    example: 'image',
+  })
+  @IsOptional()
+  @IsString()
+  mediaType?: string;
+
+  @ApiPropertyOptional({
+    description: 'URL or data URI for the attached media',
+  })
+  @IsOptional()
+  @IsString()
+  mediaUrl?: string;
+
+  @ApiPropertyOptional({
+    description: 'Optional filename for document/media attachments',
+  })
+  @IsOptional()
+  @IsString()
+  mediaFileName?: string;
 }
 
 export class UpdateTemplateDto {
@@ -73,6 +95,21 @@ export class UpdateTemplateDto {
   @IsString()
   @MaxLength(HEADER_FOOTER_MAX_LENGTH)
   footer?: string;
+
+  @ApiPropertyOptional({ description: 'Media type (text, image, video, audio, document)' })
+  @IsOptional()
+  @IsString()
+  mediaType?: string;
+
+  @ApiPropertyOptional({ description: 'URL or data URI for media' })
+  @IsOptional()
+  @IsString()
+  mediaUrl?: string;
+
+  @ApiPropertyOptional({ description: 'Optional filename for media' })
+  @IsOptional()
+  @IsString()
+  mediaFileName?: string;
 }
 
 export class TemplateResponseDto {
@@ -93,6 +130,15 @@ export class TemplateResponseDto {
 
   @ApiPropertyOptional({ type: String, nullable: true })
   footer?: string | null;
+
+  @ApiPropertyOptional({ type: String, nullable: true })
+  mediaType?: string | null;
+
+  @ApiPropertyOptional({ type: String, nullable: true })
+  mediaUrl?: string | null;
+
+  @ApiPropertyOptional({ type: String, nullable: true })
+  mediaFileName?: string | null;
 
   @ApiProperty()
   createdAt!: Date;

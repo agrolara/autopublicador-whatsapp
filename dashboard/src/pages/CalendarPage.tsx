@@ -46,6 +46,8 @@ export function CalendarPage() {
   const [formTime, setFormTime] = useState('10:00');
   const [formFrequency, setFormFrequency] = useState<'once' | 'daily' | 'twice_daily'>('once');
   const [formText, setFormText] = useState('');
+  const [formMessageType, setFormMessageType] = useState<'text' | 'image' | 'video' | 'audio' | 'document'>('text');
+  const [formMediaUrl, setFormMediaUrl] = useState('');
   const [formRecipients, setFormRecipients] = useState<string[]>([]);
   const [manualRecipientsInput, setManualRecipientsInput] = useState('');
   const [selectedTagId, setSelectedTagId] = useState<string>('');
@@ -144,6 +146,9 @@ export function CalendarPage() {
       || (item as any)?.text
       || '';
 
+    const mediaType = (firstMsg as any)?.type || (firstMsg?.content?.image ? 'image' : firstMsg?.content?.video ? 'video' : 'text');
+    const mediaUrl = (firstMsg as any)?.content?.[mediaType]?.url || (firstMsg as any)?.mediaUrl || '';
+
     let recipients: string[] = [];
     if (Array.isArray(item.payload?.messages)) {
       recipients = item.payload.messages
@@ -153,7 +158,7 @@ export function CalendarPage() {
       recipients = (item.payload as any).recipients;
     }
 
-    return { timeOnly, dateOnly, text, recipients };
+    return { timeOnly, dateOnly, text, recipients, mediaType, mediaUrl };
   };
 
   // Open Create Modal for specific date
@@ -166,6 +171,8 @@ export function CalendarPage() {
     setFormTime('10:00');
     setFormFrequency('once');
     setFormText('');
+    setFormMessageType('text');
+    setFormMediaUrl('');
     setFormRecipients([]);
     setManualRecipientsInput('');
     setSelectedTagId('');
@@ -176,12 +183,14 @@ export function CalendarPage() {
   const handleOpenItemModal = (item: ScheduledBroadcastItem, e: React.MouseEvent) => {
     e.stopPropagation();
     setActiveItem(item);
-    const { timeOnly, dateOnly, text, recipients } = getItemDetails(item);
+    const { timeOnly, dateOnly, text, recipients, mediaType, mediaUrl } = getItemDetails(item);
     setFormName(item.name || `Publicación (${timeOnly})`);
     setFormDate(dateOnly);
     setFormTime(timeOnly);
     setFormFrequency(item.frequency || 'once');
     setFormText(text);
+    setFormMessageType(mediaType as any || 'text');
+    setFormMediaUrl(mediaUrl || '');
     setFormRecipients(recipients);
     setManualRecipientsInput(recipients.join('\n'));
     setModalMode('view');
@@ -242,13 +251,28 @@ export function CalendarPage() {
       ? `${formDate}T${formTime}:00`
       : formTime;
 
-    const messages = recipientList.map(target => ({
-      chatId: target,
-      to: target,
-      type: 'text' as const,
-      content: { text: formText.trim() },
-      message: { text: formText.trim() },
-    }));
+    const messages = recipientList.map(target => {
+      if (formMessageType && formMessageType !== 'text' && formMediaUrl) {
+        return {
+          chatId: target,
+          to: target,
+          type: formMessageType,
+          content: {
+            [formMessageType]: { url: formMediaUrl },
+            caption: formText.trim(),
+          },
+          mediaUrl: formMediaUrl,
+          caption: formText.trim(),
+        };
+      }
+      return {
+        chatId: target,
+        to: target,
+        type: 'text' as const,
+        content: { text: formText.trim() },
+        message: { text: formText.trim() },
+      };
+    });
 
     const payload = {
       messages,
@@ -291,6 +315,15 @@ export function CalendarPage() {
       const fullText = [tpl.header, tpl.body, tpl.footer].filter(Boolean).join('\n\n') || (tpl as any).content || '';
       setFormText(fullText);
       if (!formName) setFormName(tpl.name);
+      if (tpl.mediaType && tpl.mediaType !== 'text') {
+        setFormMessageType(tpl.mediaType);
+        if (tpl.mediaUrl) {
+          setFormMediaUrl(tpl.mediaUrl);
+        }
+      } else {
+        setFormMessageType('text');
+        setFormMediaUrl('');
+      }
     }
   };
 

@@ -728,6 +728,14 @@ export function MessageTester() {
                   if (tpl) {
                     const fullText = [tpl.header, tpl.body, tpl.footer].filter(Boolean).join('\n\n');
                     setContent(fullText);
+                    if (tpl.mediaType && tpl.mediaType !== 'text') {
+                      setMessageType(tpl.mediaType as any);
+                      if (tpl.mediaUrl) {
+                        setMediaUrl(tpl.mediaUrl);
+                      }
+                    } else {
+                      setMessageType('text');
+                    }
                   }
                 }}
               >
@@ -892,6 +900,14 @@ export function MessageTester() {
                       if (found) {
                         const fullText = [found.header, found.body, found.footer].filter(Boolean).join('\n\n');
                         setContent(fullText);
+                        if (found.mediaType && found.mediaType !== 'text') {
+                          setMessageType(found.mediaType as any);
+                          if (found.mediaUrl) {
+                            setMediaUrl(found.mediaUrl);
+                          }
+                        } else {
+                          setMessageType('text');
+                        }
                         setToast({ type: 'success', message: `✨ Carga exitosa de plantilla: "${found.name}"` });
                       }
                     }}
@@ -1664,7 +1680,9 @@ export function MessageTester() {
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-color, #e2e8f0)', color: 'var(--text-secondary, #64748b)' }}>
-                  <th style={{ padding: '8px 12px' }}>Hora de disparo</th>
+                  <th style={{ padding: '8px 12px' }}>Hora</th>
+                  <th style={{ padding: '8px 12px' }}>🏷️ Plantilla / Campaña</th>
+                  <th style={{ padding: '8px 12px' }}>📄 Vista previa</th>
                   <th style={{ padding: '8px 12px' }}>Frecuencia</th>
                   <th style={{ padding: '8px 12px' }}>Destinatarios</th>
                   <th style={{ padding: '8px 12px' }}>Último envío</th>
@@ -1672,46 +1690,92 @@ export function MessageTester() {
                 </tr>
               </thead>
               <tbody>
-                {scheduledList.map(item => (
-                  <tr key={item.id} style={{ borderBottom: '1px solid var(--border-color, #f1f5f9)' }}>
-                    <td style={{ padding: '10px 12px', fontWeight: 600 }}>
-                      ⏰ {item.scheduledTime} hrs
-                    </td>
-                    <td style={{ padding: '10px 12px' }}>
-                      {item.frequency === 'twice_daily' && 'Cada 12 Horas'}
-                      {item.frequency === 'daily' && 'Todos los días'}
-                      {item.frequency === 'once' && 'Una sola vez'}
-                    </td>
-                    <td style={{ padding: '10px 12px' }}>{item.payload.messages.length} grupos</td>
-                    <td style={{ padding: '10px 12px' }}>
-                      {item.lastRunAt ? new Date(item.lastRunAt).toLocaleString() : 'Pendiente'}
-                    </td>
-                    <td style={{ padding: '10px 12px' }}>
-                      <button
-                        type="button"
-                        style={{
-                          background: '#ef4444',
-                          color: '#fff',
-                          border: 'none',
-                          padding: '6px 12px',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                          fontSize: '0.85rem',
-                        }}
-                        onClick={async () => {
-                          await messageApi.deleteScheduledBroadcast(session, item.id);
-                          setToast({ type: 'success', message: 'Programación eliminada exitosamente' });
-                          loadSchedules();
-                        }}
-                      >
-                        <Trash2 size={14} /> Eliminar
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {scheduledList.map(item => {
+                  const firstMsg = item.payload?.messages?.[0] || {};
+                  const msgText = firstMsg?.content?.caption || firstMsg?.content?.text || firstMsg?.text || (typeof firstMsg?.message === 'string' ? firstMsg.message : '') || '';
+                  const msgType = firstMsg?.type || (firstMsg?.content?.image ? 'image' : firstMsg?.content?.video ? 'video' : 'text');
+                  
+                  const matchedTemplate = templates.find(t => {
+                    if (item.name && item.name.toLowerCase().includes(t.name.toLowerCase())) return true;
+                    if (msgText && msgText.toLowerCase().includes(t.name.toLowerCase())) return true;
+                    if (t.body && msgText.includes(t.body.slice(0, 30))) return true;
+                    if (t.header && msgText.includes(t.header.slice(0, 20))) return true;
+                    return false;
+                  });
+                  const displayTemplateName = matchedTemplate ? matchedTemplate.name : (item.name || 'Personalizado');
+
+                  return (
+                    <tr key={item.id} style={{ borderBottom: '1px solid var(--border-color, #f1f5f9)' }}>
+                      <td style={{ padding: '10px 12px', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                        ⏰ {item.scheduledTime} hrs
+                      </td>
+                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                        <span style={{
+                          background: '#dcfce7',
+                          color: '#166534',
+                          padding: '4px 10px',
+                          borderRadius: '12px',
+                          fontSize: '0.8rem',
+                          fontWeight: 700,
+                          display: 'inline-block',
+                          border: '1px solid #86efac'
+                        }}>
+                          🏷️ {displayTemplateName}
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px 12px', maxWidth: '260px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
+                          <span style={{
+                            fontSize: '0.72rem',
+                            fontWeight: 600,
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            background: msgType === 'image' ? '#dbeafe' : msgType === 'video' ? '#fce7f3' : msgType === 'document' ? '#fef3c7' : '#f1f5f9',
+                            color: msgType === 'image' ? '#1e40af' : msgType === 'video' ? '#9d174d' : msgType === 'document' ? '#92400e' : '#475569'
+                          }}>
+                            {msgType === 'image' ? '🖼️ Imagen' : msgType === 'video' ? '🎥 Video' : msgType === 'document' ? '📄 Doc' : '📝 Texto'}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '0.8rem', color: '#475569', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={msgText}>
+                          {msgText ? msgText.slice(0, 50) + (msgText.length > 50 ? '...' : '') : 'Sin texto'}
+                        </div>
+                      </td>
+                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                        {item.frequency === 'twice_daily' && 'Cada 12 Horas'}
+                        {item.frequency === 'daily' && 'Todos los días'}
+                        {item.frequency === 'once' && 'Una sola vez'}
+                      </td>
+                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{item.payload.messages.length} grupos</td>
+                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                        {item.lastRunAt ? new Date(item.lastRunAt).toLocaleString() : 'Pendiente'}
+                      </td>
+                      <td style={{ padding: '10px 12px' }}>
+                        <button
+                          type="button"
+                          style={{
+                            background: '#ef4444',
+                            color: '#fff',
+                            border: 'none',
+                            padding: '6px 12px',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            fontSize: '0.85rem',
+                          }}
+                          onClick={async () => {
+                            await messageApi.deleteScheduledBroadcast(session, item.id);
+                            setToast({ type: 'success', message: 'Programación eliminada exitosamente' });
+                            loadSchedules();
+                          }}
+                        >
+                          <Trash2 size={14} /> Eliminar
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

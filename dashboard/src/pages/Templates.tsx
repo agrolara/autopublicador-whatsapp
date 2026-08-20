@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, Check, Copy, FileText, Loader2, Plus, Search, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Check, Copy, FileText, Loader2, Plus, Search, Trash2, X, Image as ImageIcon, Video, Music, FileUp, Globe } from 'lucide-react';
 import { type MessageTemplate, type TemplatePayload } from '../services/api';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { useRole } from '../hooks/useRole';
@@ -21,6 +21,9 @@ type TemplateForm = {
   header: string;
   body: string;
   footer: string;
+  mediaType: 'text' | 'image' | 'video' | 'audio' | 'document';
+  mediaUrl: string;
+  mediaFileName: string;
 };
 
 const emptyForm: TemplateForm = {
@@ -28,6 +31,9 @@ const emptyForm: TemplateForm = {
   header: '',
   body: '',
   footer: '',
+  mediaType: 'text',
+  mediaUrl: '',
+  mediaFileName: '',
 };
 
 function extractPlaceholders(template: TemplateForm | MessageTemplate) {
@@ -41,6 +47,9 @@ function toPayload(form: TemplateForm): TemplatePayload {
     header: form.header.trim() || null,
     body: form.body.trim(),
     footer: form.footer.trim() || null,
+    mediaType: form.mediaType || 'text',
+    mediaUrl: form.mediaUrl.trim() || null,
+    mediaFileName: form.mediaFileName.trim() || null,
   };
 }
 
@@ -121,6 +130,9 @@ export function Templates() {
       header: template.header || '',
       body: template.body,
       footer: template.footer || '',
+      mediaType: template.mediaType || 'text',
+      mediaUrl: template.mediaUrl || '',
+      mediaFileName: template.mediaFileName || '',
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -268,6 +280,7 @@ export function Templates() {
                 {filteredTemplates.map(template => {
                   const templatePlaceholders = extractPlaceholders(template);
                   const isSelected = editingTemplate?.id === template.id;
+                  const mType = template.mediaType || 'text';
                   return (
                     <button
                       key={template.id}
@@ -275,7 +288,20 @@ export function Templates() {
                       onClick={() => openEdit(template)}
                       type="button"
                     >
-                      <span className="template-list-title">{template.name}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
+                        <span className="template-list-title" style={{ margin: 0 }}>{template.name}</span>
+                        <span style={{
+                          fontSize: '0.72rem',
+                          fontWeight: 600,
+                          padding: '2px 8px',
+                          borderRadius: '12px',
+                          whiteSpace: 'nowrap',
+                          background: mType === 'image' ? '#dbeafe' : mType === 'video' ? '#fce7f3' : mType === 'document' ? '#fef3c7' : mType === 'audio' ? '#e0e7ff' : '#f1f5f9',
+                          color: mType === 'image' ? '#1e40af' : mType === 'video' ? '#9d174d' : mType === 'document' ? '#92400e' : mType === 'audio' ? '#3730a3' : '#475569'
+                        }}>
+                          {mType === 'image' ? '🖼️ Imagen' : mType === 'video' ? '🎥 Video' : mType === 'document' ? '📄 Documento' : mType === 'audio' ? '🎵 Audio' : '📝 Texto'}
+                        </span>
+                      </div>
                       <span className="template-list-body">{template.body}</span>
                       <span className="template-list-meta">
                         {templatePlaceholders.length > 0
@@ -329,6 +355,122 @@ export function Templates() {
                   disabled={!canWrite}
                 />
               </div>
+
+              {/* Selector de Tipo de Mensaje / Multimedia */}
+              <div className="form-group" style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', fontWeight: 600, fontSize: '0.85rem', marginBottom: '6px', color: '#1e293b' }}>
+                  📁 Tipo de Mensaje / Multimedia:
+                </label>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  {[
+                    { type: 'text', label: '📝 Solo Texto / Link' },
+                    { type: 'image', label: '🖼️ Imagen' },
+                    { type: 'video', label: '🎥 Video' },
+                    { type: 'audio', label: '🎵 Audio' },
+                    { type: 'document', label: '📄 Documento' },
+                  ].map(item => (
+                    <button
+                      key={item.type}
+                      type="button"
+                      onClick={() => setForm({ ...form, mediaType: item.type as any })}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: '6px',
+                        fontSize: '0.82rem',
+                        fontWeight: form.mediaType === item.type ? 600 : 400,
+                        border: form.mediaType === item.type ? '2px solid #10b981' : '1px solid #cbd5e1',
+                        background: form.mediaType === item.type ? '#ecfdf5' : '#ffffff',
+                        color: form.mediaType === item.type ? '#065f46' : '#334155',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Opciones de Archivo Multimedia */}
+              {form.mediaType !== 'text' && (
+                <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '16px' }}>
+                  <label style={{ display: 'block', fontWeight: 600, fontSize: '0.83rem', color: '#1e293b', marginBottom: '6px' }}>
+                    📎 Archivo o Enlace de {form.mediaType === 'image' ? 'Imagen' : form.mediaType === 'video' ? 'Video' : form.mediaType === 'audio' ? 'Audio' : 'Documento'}:
+                  </label>
+                  
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '10px' }}>
+                    <label style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '6px 14px',
+                      background: '#10b981',
+                      color: '#ffffff',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '0.82rem',
+                      fontWeight: 600
+                    }}>
+                      <FileUp size={15} /> Subir desde tu PC
+                      <input
+                        type="file"
+                        accept={form.mediaType === 'image' ? 'image/*' : form.mediaType === 'video' ? 'video/*' : form.mediaType === 'audio' ? 'audio/*' : '*/*'}
+                        style={{ display: 'none' }}
+                        onChange={e => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onload = () => {
+                              setForm({
+                                ...form,
+                                mediaUrl: reader.result as string,
+                                mediaFileName: file.name,
+                              });
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                      />
+                    </label>
+                    {form.mediaFileName && (
+                      <span style={{ fontSize: '0.8rem', color: '#059669', fontWeight: 600 }}>
+                        ✓ {form.mediaFileName}
+                      </span>
+                    )}
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.78rem', color: '#64748b', marginBottom: '3px' }}>
+                      O ingresar URL directa / Enlace público:
+                    </label>
+                    <input
+                      type="text"
+                      value={form.mediaUrl.startsWith('data:') ? '' : form.mediaUrl}
+                      onChange={e => setForm({ ...form, mediaUrl: e.target.value, mediaFileName: '' })}
+                      placeholder="https://ejemplo.com/archivo.jpg"
+                      style={{ width: '100%', padding: '6px 10px', fontSize: '0.82rem', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                    />
+                  </div>
+
+                  {form.mediaUrl && (
+                    <div style={{ marginTop: '10px' }}>
+                      {form.mediaType === 'image' && (
+                        <img
+                          src={form.mediaUrl}
+                          alt="Preview"
+                          style={{ maxHeight: '120px', borderRadius: '6px', border: '1px solid #e2e8f0', objectFit: 'contain' }}
+                        />
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setForm({ ...form, mediaUrl: '', mediaFileName: '' })}
+                        style={{ display: 'block', marginTop: '6px', fontSize: '0.78rem', color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 500 }}
+                      >
+                        ✕ Quitar archivo adjunto
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="template-message-fields">
                 <div className="form-group">

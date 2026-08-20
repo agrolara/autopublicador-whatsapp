@@ -35,6 +35,15 @@ export class Template {
   @Column({ type: 'text', nullable: true })
   footer!: string | null;
 
+  @Column({ type: 'varchar', length: 20, default: 'text' })
+  mediaType!: string;
+
+  @Column({ type: 'text', nullable: true })
+  mediaUrl!: string | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  mediaFileName!: string | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 

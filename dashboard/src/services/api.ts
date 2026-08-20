@@ -148,6 +148,9 @@ export interface MessageTemplate {
   body: string;
   header?: string | null;
   footer?: string | null;
+  mediaType?: 'text' | 'image' | 'video' | 'audio' | 'document' | null;
+  mediaUrl?: string | null;
+  mediaFileName?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -157,6 +160,9 @@ export interface TemplatePayload {
   body: string;
   header?: string | null;
   footer?: string | null;
+  mediaType?: 'text' | 'image' | 'video' | 'audio' | 'document' | null;
+  mediaUrl?: string | null;
+  mediaFileName?: string | null;
 }
 
 export interface ApiKey {

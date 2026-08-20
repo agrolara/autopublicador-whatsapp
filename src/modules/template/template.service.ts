@@ -60,6 +60,9 @@ export class TemplateService implements OnModuleInit {
       body: dto.body,
       header: dto.header ?? null,
       footer: dto.footer ?? null,
+      mediaType: dto.mediaType || 'text',
+      mediaUrl: dto.mediaUrl ?? null,
+      mediaFileName: dto.mediaFileName ?? null,
     });
 
     try {
@@ -116,6 +119,9 @@ export class TemplateService implements OnModuleInit {
     if (dto.body !== undefined) template.body = dto.body;
     if (dto.header !== undefined) template.header = dto.header;
     if (dto.footer !== undefined) template.footer = dto.footer;
+    if (dto.mediaType !== undefined) template.mediaType = dto.mediaType;
+    if (dto.mediaUrl !== undefined) template.mediaUrl = dto.mediaUrl;
+    if (dto.mediaFileName !== undefined) template.mediaFileName = dto.mediaFileName;
 
     try {
       const saved = await this.templateRepository.save(template);
