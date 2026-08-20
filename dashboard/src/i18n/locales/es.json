@@ -64,7 +64,9 @@
     "infrastructure": "Infraestructura",
     "plugins": "Plugins",
     "logs": "Registros",
-    "templates": "Plantillas"
+    "templates": "Plantillas",
+    "calendar": "Calendario",
+    "groupVault": "Catálogo de Grupos"
   },
   "chats": {
     "media": {

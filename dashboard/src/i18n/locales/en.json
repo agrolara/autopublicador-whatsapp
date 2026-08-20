@@ -64,7 +64,9 @@
     "messageTester": "Message Tester",
     "infrastructure": "Infrastructure",
     "plugins": "Plugins",
-    "logs": "Logs"
+    "logs": "Logs",
+    "calendar": "Calendar",
+    "groupVault": "Group Vault"
   },
   "chats": {
     "media": {

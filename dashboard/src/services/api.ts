@@ -1469,3 +1469,62 @@ export const statsApi = {
   getOverview: () => request<OverviewStats>('/stats/overview'),
   getMessages: (period: StatsPeriod) => request<MessageStats>(`/stats/messages?period=${period}`),
 };
+
+// =============================================================================
+// Group Vault API (Central group catalog & auto-joiner)
+// =============================================================================
+
+export interface VaultGroupItem {
+  id: string;
+  name: string;
+  inviteCode?: string;
+  inviteUrl?: string;
+  memberCount?: number;
+  description?: string;
+  sourceSessionId?: string;
+  lastSyncedAt: string;
+  tags?: string[];
+  status?: 'active' | 'revoked' | 'unknown';
+}
+
+export interface AutoJoinLog {
+  timestamp: string;
+  groupName: string;
+  status: 'joined' | 'already_member' | 'failed';
+  message: string;
+}
+
+export interface AutoJoinJob {
+  id: string;
+  targetSessionId: string;
+  total: number;
+  completed: number;
+  joined: number;
+  alreadyMember: number;
+  failed: number;
+  status: 'running' | 'completed' | 'cancelled' | 'failed';
+  currentGroupName?: string;
+  logs: AutoJoinLog[];
+  intervalSeconds: number;
+  startedAt: string;
+  finishedAt?: string;
+}
+
+export const groupVaultApi = {
+  list: () => request<VaultGroupItem[]>('/group-vault'),
+  syncFromSession: (sessionId: string) =>
+    request<{ total: number; withLinks: number; newAdded: number }>(`/group-vault/sync/${sessionId}`, { method: 'POST' }),
+  importLinks: (links: string[]) =>
+    request<{ imported: number; updated: number }>('/group-vault/import', {
+      method: 'POST',
+      body: JSON.stringify({ links }),
+    }),
+  startAutoJoin: (sessionId: string, data: { groupIds?: string[]; intervalSeconds?: number }) =>
+    request<AutoJoinJob>(`/group-vault/auto-join/${sessionId}`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getJobStatus: (jobId: string) => request<AutoJoinJob>(`/group-vault/auto-join/status/${jobId}`),
+  cancelJob: (jobId: string) => request<{ success: boolean }>(`/group-vault/auto-join/cancel/${jobId}`, { method: 'POST' }),
+  deleteGroup: (id: string) => request<{ success: boolean }>(`/group-vault/${id}`, { method: 'DELETE' }),
+};
