@@ -72,11 +72,64 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
     }
   }
 
+  private normalizePayloadMedia(sessionId: string, payload: SendBulkMessageDto): SendBulkMessageDto {
+    if (!payload?.messages || payload.messages.length === 0) return payload;
+
+    const firstMsg = payload.messages[0] as any;
+    const msgType = firstMsg?.type || (firstMsg?.content?.image ? 'image' : firstMsg?.content?.video ? 'video' : 'text');
+    const mediaObj = firstMsg?.content?.[msgType];
+    const rawData = mediaObj?.url || mediaObj?.base64 || firstMsg?.mediaUrl;
+
+    if (typeof rawData === 'string' && rawData.startsWith('data:') && rawData.includes(';base64,')) {
+      try {
+        const comma = rawData.indexOf(',');
+        const header = rawData.substring(5, comma);
+        const mime = header.split(';')[0] || (msgType === 'video' ? 'video/mp4' : 'image/jpeg');
+        const ext = mime.split('/')[1]?.split('+')[0] || (msgType === 'video' ? 'mp4' : 'jpeg');
+        const cleanB64 = rawData.substring(comma + 1).replace(/\s/g, '');
+        const buffer = Buffer.from(cleanB64, 'base64');
+
+        const uploadsDir = path.join(process.cwd(), 'data', 'uploads');
+        if (!fs.existsSync(uploadsDir)) {
+          fs.mkdirSync(uploadsDir, { recursive: true });
+        }
+        const filename = `media_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+        const filePath = path.join(uploadsDir, filename);
+        fs.writeFileSync(filePath, buffer);
+
+        const mediaFileUrl = `/api/sessions/${sessionId}/messages/media-file/${filename}`;
+
+        for (const msg of payload.messages as any[]) {
+          if (msg.content?.[msgType]) {
+            msg.content[msgType] = { url: mediaFileUrl, mimetype: mime };
+          }
+          if (msg.mediaUrl) {
+            msg.mediaUrl = mediaFileUrl;
+          }
+        }
+      } catch (err: any) {
+        this.logger.warn(`Could not persist inline media to disk: ${err?.message}`);
+      }
+    }
+    return payload;
+  }
+
   private loadFromFile() {
     try {
       if (fs.existsSync(this.filePath)) {
         const raw = fs.readFileSync(this.filePath, 'utf8');
         this.items = JSON.parse(raw);
+        let changed = false;
+        for (const item of this.items) {
+          if (item.payload) {
+            const before = JSON.stringify(item.payload).length;
+            item.payload = this.normalizePayloadMedia(item.sessionId, item.payload);
+            if (JSON.stringify(item.payload).length !== before) changed = true;
+          }
+        }
+        if (changed) {
+          this.saveToFile();
+        }
       }
     } catch (e: any) {
       this.logger.error('Failed to load scheduled broadcasts:', e?.message);
@@ -99,7 +152,28 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
   getBroadcasts(sessionId: string): ScheduledBroadcast[] {
     return this.items
       .filter(item => item.sessionId === sessionId)
-      .sort((a, b) => (a.scheduledTime || '').localeCompare(b.scheduledTime || ''));
+      .sort((a, b) => (a.scheduledTime || '').localeCompare(b.scheduledTime || ''))
+      .map(item => {
+        if (!item.payload?.messages || item.payload.messages.length <= 1) {
+          return item;
+        }
+        const lightweightMessages = item.payload.messages.map((m: any, idx: number) => {
+          if (idx === 0) return m;
+          return {
+            chatId: m.chatId,
+            type: m.type,
+            content: { text: m.content?.text || m.content?.caption || '' },
+          };
+        });
+
+        return {
+          ...item,
+          payload: {
+            ...item.payload,
+            messages: lightweightMessages as any,
+          },
+        };
+      });
   }
 
   addBroadcast(sessionId: string, dto: {
@@ -112,13 +186,14 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
     endDate?: string;
     postToStatus?: boolean;
   }): ScheduledBroadcast {
+    const normalizedPayload = this.normalizePayloadMedia(sessionId, dto.payload);
     const newBroadcast: ScheduledBroadcast = {
       id: `sched_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       sessionId,
       name: dto.name || `Envío Masivo (${dto.scheduledTime})`,
       scheduledTime: dto.scheduledTime,
       frequency: dto.frequency,
-      payload: dto.payload,
+      payload: normalizedPayload,
       status: dto.status || 'active',
       startDate: dto.startDate || undefined,
       endDate: dto.endDate || undefined,
@@ -158,7 +233,9 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
     if (dto.name !== undefined) item.name = dto.name;
     if (dto.scheduledTime !== undefined) item.scheduledTime = dto.scheduledTime;
     if (dto.frequency !== undefined) item.frequency = dto.frequency;
-    if (dto.payload !== undefined) item.payload = dto.payload;
+    if (dto.payload !== undefined) {
+      item.payload = this.normalizePayloadMedia(sessionId, dto.payload);
+    }
     if (dto.status !== undefined) item.status = dto.status;
     if (dto.startDate !== undefined) item.startDate = dto.startDate || undefined;
     if (dto.endDate !== undefined) item.endDate = dto.endDate || undefined;
