@@ -36,7 +36,7 @@ COPY scripts/postinstall.js ./scripts/
 # variable, so docker-compose.yml's `NODE_ENV=${NODE_ENV:-production}` leaks NODE_ENV=production
 # into this stage and a bare `npm ci` would skip @nestjs/cli → `sh: 1: nest: not found` (exit 127).
 # (docker-compose.dev.yml hardcodes NODE_ENV=development, which is why the dev build never hit this.)
-RUN npm ci --include=dev
+RUN npm config set fetch-retries 5 && npm config set fetch-retry-mintimeout 20000 && npm config set fetch-retry-maxtimeout 120000 && npm ci --include=dev
 
 # Copy source code
 COPY . .
@@ -127,7 +127,7 @@ COPY scripts/postinstall.js scripts/patch-wwebjs-201832.js scripts/wwebjs-201832
 # scripts/dockerfile-patchers.spec.js derives this list from scripts/patch-*.js and fails if a
 # patcher is added without being copied AND run here — a hand-written list loses one silently, and
 # the Baileys one shipped in postinstall for a whole release without ever reaching the image.
-RUN npm ci --omit=dev \
+RUN npm config set fetch-retries 5 && npm config set fetch-retry-mintimeout 20000 && npm config set fetch-retry-maxtimeout 120000 && npm ci --omit=dev \
     && node scripts/patch-wwebjs-201832.js \
     && node scripts/patch-wwebjs-newsletter-preview.js \
     && node scripts/patch-wwebjs-status.js \
