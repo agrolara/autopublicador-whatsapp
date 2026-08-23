@@ -20,6 +20,9 @@ import { useRole } from '../hooks/useRole';
 import { useSessionsQuery, useSessionGroupsQuery, useTemplatesQuery } from '../hooks/queries';
 import { parseBulkRecipients, BULK_MAX_RECIPIENTS } from '../utils/bulkRecipients';
 import { PageHeader } from '../components/PageHeader';
+import { EditScheduleModal } from '../components/message-tester/EditScheduleModal';
+import { GroupTagModal } from '../components/message-tester/GroupTagModal';
+import { SavedGallerySection } from '../components/message-tester/SavedGallerySection';
 import './MessageTester.css';
 
 interface ApiResponse {
@@ -920,70 +923,17 @@ export function MessageTester() {
                   onChange={handleFileChange}
                 />
 
-                {mediaFile && (
-                  <button
-                    type="button"
-                    onClick={saveCurrentImage}
-                    style={{
-                      marginTop: '6px',
-                      fontSize: '0.8rem',
-                      background: '#10b981',
-                      color: '#fff',
-                      border: 'none',
-                      padding: '5px 12px',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                      fontWeight: 600,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                    }}
-                  >
-                    ⭐ Guardar esta imagen en mi Galería Frecuente
-                  </button>
-                )}
-
-                {savedImages.length > 0 && (
-                  <div style={{ marginTop: '12px', background: 'var(--bg-secondary, #f8fafc)', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border-color, #e2e8f0)' }}>
-                    <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-main, #334155)', display: 'block', marginBottom: '8px' }}>
-                      🖼️ Mis Imágenes Frecuentes Guardadas (Selección en 1 Clic):
-                    </span>
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                      {savedImages.map(img => (
-                        <div
-                          key={img.id}
-                          onClick={() => {
-                            setMediaFile({ base64: img.base64, mimetype: img.mimetype, filename: img.filename });
-                            setMediaUrl('');
-                            setToast({ type: 'info', message: `Seleccionada: "${img.name}"` });
-                          }}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                            background: 'var(--bg-primary, #ffffff)',
-                            padding: '4px 10px',
-                            borderRadius: '6px',
-                            border: '1px solid #cbd5e1',
-                            cursor: 'pointer',
-                            fontSize: '0.8rem',
-                            fontWeight: 500,
-                          }}
-                        >
-                          <span>🖼️ {img.name}</span>
-                          <button
-                            type="button"
-                            onClick={e => deleteSavedImage(img.id, e)}
-                            style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '0 2px' }}
-                            title="Eliminar de mi galería"
-                          >
-                            ❌
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                <SavedGallerySection
+                  savedImages={savedImages}
+                  onSelectImage={img => {
+                    setMediaFile({ base64: img.base64, mimetype: img.mimetype, filename: img.filename });
+                    setMediaUrl('');
+                    setToast({ type: 'info', message: `Seleccionada: "${img.name}"` });
+                  }}
+                  onDeleteImage={deleteSavedImage}
+                  onSaveCurrentImage={saveCurrentImage}
+                  hasCurrentMedia={!!mediaFile}
+                />
               </div>
 
               {templates.length > 0 && (
@@ -1985,335 +1935,50 @@ export function MessageTester() {
           </div>
         </div>
       )}
-      {showEditScheduleModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'var(--bg-primary, #ffffff)', padding: '24px', borderRadius: '12px', width: '90%', maxWidth: '580px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', maxHeight: '90vh', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h3 style={{ margin: 0, fontSize: '1.2rem', color: 'var(--text-main, #0f172a)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                ✏️ Editar Campaña Programada
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShowEditScheduleModal(false)}
-                style={{ background: 'none', border: 'none', fontSize: '1.3rem', cursor: 'pointer', color: '#64748b' }}
-              >
-                ✕
-              </button>
-            </div>
+      <EditScheduleModal
+        isOpen={showEditScheduleModal}
+        onClose={() => setShowEditScheduleModal(false)}
+        editSchedName={editSchedName}
+        setEditSchedName={setEditSchedName}
+        editSchedTime={editSchedTime}
+        setEditSchedTime={setEditSchedTime}
+        editSchedStatus={editSchedStatus}
+        setEditSchedStatus={setEditSchedStatus}
+        editSchedFrequency={editSchedFrequency}
+        setEditSchedFrequency={setEditSchedFrequency}
+        editSchedEndDate={editSchedEndDate}
+        setEditSchedEndDate={setEditSchedEndDate}
+        editSchedPostToStatus={editSchedPostToStatus}
+        setEditSchedPostToStatus={setEditSchedPostToStatus}
+        editSchedContent={editSchedContent}
+        setEditSchedContent={setEditSchedContent}
+        editSchedRecipients={editSchedRecipients}
+        setEditSchedRecipients={setEditSchedRecipients}
+        templates={templates}
+        onSave={handleSaveEditedSchedule}
+      />
 
-            <div className="form-group" style={{ marginBottom: '12px' }}>
-              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
-                Nombre de la Campaña:
-              </label>
-              <input
-                type="text"
-                value={editSchedName}
-                onChange={e => setEditSchedName(e.target.value)}
-                style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
-              />
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
-              <div className="form-group">
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
-                  ⏰ Hora de Envío (HH:MM):
-                </label>
-                <input
-                  type="time"
-                  value={editSchedTime}
-                  onChange={e => setEditSchedTime(e.target.value)}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: 600, fontSize: '1rem' }}
-                />
-              </div>
-              <div className="form-group">
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
-                  Estado:
-                </label>
-                <select
-                  value={editSchedStatus}
-                  onChange={e => setEditSchedStatus(e.target.value as any)}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
-                >
-                  <option value="active">🟢 Activo (Enviando)</option>
-                  <option value="paused">⏸️ Pausado (Detenido)</option>
-                </select>
-              </div>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
-              <div className="form-group">
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
-                  Frecuencia:
-                </label>
-                <select
-                  value={editSchedFrequency}
-                  onChange={e => setEditSchedFrequency(e.target.value as any)}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
-                >
-                  <option value="twice_daily">Cada 12 Horas (2 veces al día)</option>
-                  <option value="daily">Todos los días a esta hora</option>
-                  <option value="once">Una sola vez</option>
-                </select>
-              </div>
-              <div className="form-group">
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
-                  📅 Fecha Límite (Opcional):
-                </label>
-                <input
-                  type="date"
-                  value={editSchedEndDate}
-                  onChange={e => setEditSchedEndDate(e.target.value)}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
-                />
-              </div>
-            </div>
-
-            <div className="form-group" style={{ marginBottom: '12px', background: editSchedPostToStatus ? '#eff6ff' : '#f8fafc', padding: '10px 14px', borderRadius: '8px', border: editSchedPostToStatus ? '1px solid #93c5fd' : '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }} onClick={() => setEditSchedPostToStatus(!editSchedPostToStatus)}>
-              <div>
-                <div style={{ fontWeight: 600, fontSize: '0.88rem', color: editSchedPostToStatus ? '#1e40af' : '#334155', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  📲 Publicar también en Mis Estados de WhatsApp
-                </div>
-                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                  Sube el contenido multimedia / texto a tu historia de WhatsApp a esta hora.
-                </span>
-              </div>
-              <input
-                type="checkbox"
-                checked={editSchedPostToStatus}
-                onChange={e => setEditSchedPostToStatus(e.target.checked)}
-                style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#2563eb' }}
-                onClick={e => e.stopPropagation()}
-              />
-            </div>
-
-            <div className="form-group" style={{ marginBottom: '12px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#334155', margin: 0 }}>
-                  Mensaje / Texto:
-                </label>
-                {templates.length > 0 && (
-                  <select
-                    style={{ fontSize: '0.78rem', padding: '2px 6px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
-                    onChange={e => {
-                      const found = templates.find(t => t.id === e.target.value);
-                      if (found) {
-                        const fullText = [found.header, found.body, found.footer].filter(Boolean).join('\n\n');
-                        setEditSchedContent(fullText);
-                      }
-                    }}
-                    defaultValue=""
-                  >
-                    <option value="" disabled>-- Cargar desde plantilla guardada --</option>
-                    {templates.map(t => (
-                      <option key={t.id} value={t.id}>{t.name}</option>
-                    ))}
-                  </select>
-                )}
-              </div>
-              <textarea
-                value={editSchedContent}
-                onChange={e => setEditSchedContent(e.target.value)}
-                rows={4}
-                style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
-                placeholder="Escribe el mensaje de la campaña..."
-              />
-            </div>
-
-            <div className="form-group" style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
-                Destinatarios ({editSchedRecipients.split('\n').filter(Boolean).length} grupos/chats):
-              </label>
-              <textarea
-                value={editSchedRecipients}
-                onChange={e => setEditSchedRecipients(e.target.value)}
-                rows={3}
-                style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.8rem', fontFamily: 'monospace' }}
-                placeholder="Uno por línea..."
-              />
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-              <button
-                type="button"
-                onClick={() => setShowEditScheduleModal(false)}
-                style={{ padding: '8px 14px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 500 }}
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveEditedSchedule}
-                style={{ padding: '8px 18px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600 }}
-              >
-                💾 Guardar Cambios
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {showTagModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'var(--bg-primary, #ffffff)', padding: '20px', borderRadius: '12px', width: '90%', maxWidth: '540px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', maxHeight: '90vh', overflowY: 'auto' }}>
-            <h3 style={{ margin: '0 0 12px 0', fontSize: '1.1rem', color: 'var(--text-main, #0f172a)' }}>
-              🏷️ {editingTagId ? 'Editar Categoría de Grupos' : 'Crear Nueva Categoría de Grupos'}
-            </h3>
-            <p style={{ fontSize: '0.83rem', color: '#64748b', margin: '0 0 16px 0' }}>
-              Selecciona los grupos de tu WhatsApp que pertenecerán a esta categoría ({selectedGroupIdsForTag.size} seleccionados).
-            </p>
-
-            <div style={{ marginBottom: '12px' }}>
-              <label style={{ display: 'block', fontSize: '0.83rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>Nombre de la Categoría:</label>
-              <input
-                type="text"
-                value={newTagName}
-                onChange={e => setNewTagName(e.target.value)}
-                placeholder="ej: Ventas Santiago, Inmobiliaria, Oferta Pro"
-                style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
-              />
-            </div>
-
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '0.83rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>Color de Identificación:</label>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                {['#10b981', '#0284c7', '#8b5cf6', '#ec4899', '#f59e0b', '#ef4444'].map(color => (
-                  <div
-                    key={color}
-                    onClick={() => setNewTagColor(color)}
-                    style={{
-                      width: '24px',
-                      height: '24px',
-                      borderRadius: '50%',
-                      background: color,
-                      cursor: 'pointer',
-                      border: newTagColor === color ? '3px solid #0f172a' : 'none',
-                    }}
-                  />
-                ))}
-              </div>
-            </div>
-
-            <div style={{ marginBottom: '16px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                <label style={{ fontSize: '0.83rem', fontWeight: 600, color: '#334155', margin: 0 }}>
-                  Grupos de tu WhatsApp ({selectedGroupIdsForTag.size} de {groups.length}):
-                </label>
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedGroupIdsForTag(new Set(groups.map(g => g.id)))}
-                    style={{ fontSize: '0.75rem', background: '#e2e8f0', border: 'none', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer', fontWeight: 500 }}
-                  >
-                    Marcar todos
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedGroupIdsForTag(new Set())}
-                    style={{ fontSize: '0.75rem', background: '#e2e8f0', border: 'none', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer', fontWeight: 500 }}
-                  >
-                    Desmarcar
-                  </button>
-                </div>
-              </div>
-
-              <input
-                type="text"
-                value={groupSearchQuery}
-                onChange={e => setGroupSearchQuery(e.target.value)}
-                placeholder="🔍 Buscar grupo por nombre..."
-                style={{ width: '100%', padding: '6px 10px', fontSize: '0.82rem', borderRadius: '6px', border: '1px solid #cbd5e1', marginBottom: '8px' }}
-              />
-
-              <div style={{ maxHeight: '220px', overflowY: 'auto', border: '1px solid #cbd5e1', borderRadius: '6px', background: '#fafafa', padding: '6px' }}>
-                {groups.length === 0 ? (
-                  <p style={{ margin: '8px', fontSize: '0.8rem', color: '#64748b', textAlign: 'center' }}>
-                    Sincronizando chats de WhatsApp... Aguarda unos segundos.
-                  </p>
-                ) : (
-                  groups
-                    .filter(g => (g.name || g.id).toLowerCase().includes(groupSearchQuery.toLowerCase()))
-                    .map(g => {
-                      const isChecked = selectedGroupIdsForTag.has(g.id);
-                      const otherCategory = groupTags.find(t => t.id !== editingTagId && t.groupIds.includes(g.id));
-                      return (
-                        <label
-                          key={g.id}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '8px',
-                            padding: '6px 8px',
-                            borderRadius: '4px',
-                            cursor: 'pointer',
-                            background: isChecked ? '#e0f2fe' : 'transparent',
-                            borderBottom: '1px solid #f1f5f9',
-                            fontSize: '0.82rem',
-                          }}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={e => {
-                              const next = new Set(selectedGroupIdsForTag);
-                              if (e.target.checked) next.add(g.id);
-                              else next.delete(g.id);
-                              setSelectedGroupIdsForTag(next);
-                            }}
-                          />
-                          <div style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            <strong style={{ color: '#0f172a' }}>{g.name || '👥 Grupo WhatsApp'}</strong>
-                            <span style={{ fontSize: '0.74rem', color: '#64748b', marginLeft: '6px' }}>({g.id})</span>
-                          </div>
-                          {otherCategory && (
-                            <span style={{ fontSize: '0.7rem', padding: '2px 6px', borderRadius: '10px', background: otherCategory.color || '#94a3b8', color: '#fff', fontWeight: 600 }}>
-                              {otherCategory.name}
-                            </span>
-                          )}
-                        </label>
-                      );
-                    })
-                )}
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-              <button
-                type="button"
-                onClick={() => setShowTagModal(false)}
-                style={{ padding: '6px 12px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 500 }}
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  if (!newTagName.trim()) {
-                    alert('Ingresa un nombre para la categoría.');
-                    return;
-                  }
-                  if (selectedGroupIdsForTag.size === 0) {
-                    alert('Selecciona al menos 1 grupo para agregar a esta categoría.');
-                    return;
-                  }
-                  const tagPayload = {
-                    ...(editingTagId ? { id: editingTagId } : {}),
-                    name: newTagName.trim(),
-                    color: newTagColor,
-                    groupIds: Array.from(selectedGroupIdsForTag),
-                  };
-                  await groupTagsApi.save(session, tagPayload);
-                  loadGroupTags();
-                  setNewTagName('');
-                  setShowTagModal(false);
-                  setToast({ type: 'success', message: `✨ Categoría "${newTagName}" guardada con ${selectedGroupIdsForTag.size} grupos.` });
-                }}
-                style={{ padding: '6px 14px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600 }}
-              >
-                Guardar Categoría
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <GroupTagModal
+        isOpen={showTagModal}
+        onClose={() => setShowTagModal(false)}
+        session={session}
+        editingTagId={editingTagId}
+        newTagName={newTagName}
+        setNewTagName={setNewTagName}
+        newTagColor={newTagColor}
+        setNewTagColor={setNewTagColor}
+        selectedGroupIdsForTag={selectedGroupIdsForTag}
+        setSelectedGroupIdsForTag={setSelectedGroupIdsForTag}
+        groups={groups}
+        groupTags={groupTags}
+        groupSearchQuery={groupSearchQuery}
+        setGroupSearchQuery={setGroupSearchQuery}
+        onSaved={(tagName, count) => {
+          loadGroupTags();
+          setNewTagName('');
+          setToast({ type: 'success', message: `✨ Categoría "${tagName}" guardada con ${count} grupos.` });
+        }}
+      />
       {toast && (
         <div style={{
           position: 'fixed',
