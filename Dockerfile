@@ -197,8 +197,8 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 EXPOSE 2785
 
 # Health check
-HEALTHCHECK --interval=20s --timeout=10s --start-period=60s --retries=5 \
-    CMD curl -f http://localhost:2785/api/health/ready || exit 1
+HEALTHCHECK --interval=20s --timeout=10s --start-period=120s --retries=5 \
+    CMD curl -f http://localhost:2785/api/health/live || exit 1
 
 # dumb-init is PID 1 and handles signal forwarding.
 # It execs docker-entrypoint.sh (as root), which fixes volume ownership and
