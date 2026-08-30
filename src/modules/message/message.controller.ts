@@ -683,6 +683,14 @@ export class MessageController {
     return this.scheduledBroadcastService.getBroadcasts(sessionId);
   }
 
+  @Get('scheduled-broadcasts/:id/report')
+  @ApiOperation({ summary: 'Get execution report and metrics for a scheduled broadcast' })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiParam({ name: 'id', description: 'Scheduled broadcast ID' })
+  getScheduledBroadcastReport(@Param('sessionId') sessionId: string, @Param('id') id: string) {
+    return this.scheduledBroadcastService.getBroadcastReport(sessionId, id);
+  }
+
   @Post('scheduled-broadcasts')
   @RequireRole(ApiKeyRole.OPERATOR)
   @ApiOperation({ summary: 'Create a new scheduled bulk broadcast campaign' })

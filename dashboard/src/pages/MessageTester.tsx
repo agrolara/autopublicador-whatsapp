@@ -23,6 +23,7 @@ import { PageHeader } from '../components/PageHeader';
 import { EditScheduleModal } from '../components/message-tester/EditScheduleModal';
 import { GroupTagModal } from '../components/message-tester/GroupTagModal';
 import { SavedGallerySection } from '../components/message-tester/SavedGallerySection';
+import { BroadcastReportModal } from '../components/message-tester/BroadcastReportModal';
 import './MessageTester.css';
 
 interface ApiResponse {
@@ -161,6 +162,20 @@ export function MessageTester() {
   const [scheduledList, setScheduledList] = useState<ScheduledBroadcastItem[]>([]);
   const [newGroupsFound, setNewGroupsFound] = useState<{ id: string; name?: string }[]>([]);
   const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+
+  // Report Modal State
+  const [reportModalItem, setReportModalItem] = useState<ScheduledBroadcastItem | null>(null);
+
+  const handleRetryFailedRecipients = (failedChatIds: string[]) => {
+    if (!failedChatIds || failedChatIds.length === 0) return;
+    setRecipients(failedChatIds.join('\n'));
+    setIsBulk(true);
+    setToast({
+      type: 'info',
+      message: `📋 Se han cargado los ${failedChatIds.length} grupos fallidos en el formulario para reintento.`,
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   // Edit Schedule Modal States
   const [showEditScheduleModal, setShowEditScheduleModal] = useState(false);
@@ -1855,10 +1870,56 @@ export function MessageTester() {
                         )}
                       </td>
                       <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
-                        {item.lastRunAt ? new Date(item.lastRunAt).toLocaleString() : 'Pendiente'}
+                        <div style={{ fontWeight: 600, color: '#0f172a' }}>
+                          {item.lastRunAt ? new Date(item.lastRunAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : 'Pendiente'}
+                        </div>
+                        {item.lastSummary ? (
+                          <div style={{ marginTop: '3px' }}>
+                            {item.lastSummary.status === 'processing' ? (
+                              <span style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', padding: '2px 6px', borderRadius: '10px', fontSize: '0.72rem', fontWeight: 600 }}>
+                                ⏳ Enviando ({item.lastSummary.sent}/{item.lastSummary.total})
+                              </span>
+                            ) : item.lastSummary.failed > 0 ? (
+                              <span style={{ background: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca', padding: '2px 6px', borderRadius: '10px', fontSize: '0.72rem', fontWeight: 700 }}>
+                                🟢 {item.lastSummary.sent} / 🔴 {item.lastSummary.failed}
+                              </span>
+                            ) : (
+                              <span style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', padding: '2px 6px', borderRadius: '10px', fontSize: '0.72rem', fontWeight: 600 }}>
+                                🟢 {item.lastSummary.sent} éxito ({Math.round(((item.lastSummary.sent) / (item.lastSummary.total || 1)) * 100)}%)
+                              </span>
+                            )}
+                          </div>
+                        ) : item.lastRunAt ? (
+                          <div style={{ marginTop: '2px' }}>
+                            <span style={{ background: '#f0fdf4', color: '#166534', padding: '2px 6px', borderRadius: '10px', fontSize: '0.72rem', fontWeight: 600 }}>
+                              🟢 Ejecutado
+                            </span>
+                          </div>
+                        ) : null}
                       </td>
                       <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
                         <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                          <button
+                            type="button"
+                            style={{
+                              background: '#6366f1',
+                              color: '#fff',
+                              border: 'none',
+                              padding: '5px 9px',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              fontSize: '0.78rem',
+                              fontWeight: 600,
+                              boxShadow: '0 1px 2px rgba(99, 102, 241, 0.2)',
+                            }}
+                            onClick={() => setReportModalItem(item)}
+                            title="Ver reporte detallado de éxito, fallos y grupos"
+                          >
+                            📊 Reporte
+                          </button>
                           <button
                             type="button"
                             style={{
@@ -1978,6 +2039,15 @@ export function MessageTester() {
           setNewTagName('');
           setToast({ type: 'success', message: `✨ Categoría "${tagName}" guardada con ${count} grupos.` });
         }}
+      />
+
+      <BroadcastReportModal
+        isOpen={!!reportModalItem}
+        onClose={() => setReportModalItem(null)}
+        item={reportModalItem}
+        session={session}
+        groups={groups}
+        onRetryFailed={handleRetryFailedRecipients}
       />
       {toast && (
         <div style={{

@@ -436,6 +436,25 @@ export interface BatchMessageResult {
   sentAt?: string;
 }
 
+export interface BroadcastResultDetail {
+  chatId: string;
+  groupName?: string;
+  status: 'sent' | 'failed';
+  messageId?: string;
+  error?: string;
+}
+
+export interface BroadcastExecutionSummary {
+  timestamp: string;
+  batchId?: string;
+  total: number;
+  sent: number;
+  failed: number;
+  status: 'completed' | 'failed' | 'processing';
+  durationSeconds?: number;
+  details?: BroadcastResultDetail[];
+}
+
 export interface ScheduledBroadcastItem {
   id: string;
   sessionId: string;
@@ -448,6 +467,8 @@ export interface ScheduledBroadcastItem {
   endDate?: string;
   postToStatus?: boolean;
   lastRunAt?: string;
+  lastBatchId?: string;
+  lastSummary?: BroadcastExecutionSummary;
   createdAt: string;
 }
 
@@ -1100,6 +1121,8 @@ export const messageApi = {
     }),
   getScheduledBroadcasts: (sessionId: string) =>
     request<ScheduledBroadcastItem[]>(`/sessions/${sessionId}/messages/scheduled-broadcasts`),
+  getScheduledBroadcastReport: (sessionId: string, id: string) =>
+    request<any>(`/sessions/${sessionId}/messages/scheduled-broadcasts/${id}/report`),
   createScheduledBroadcast: (
     sessionId: string,
     data: {

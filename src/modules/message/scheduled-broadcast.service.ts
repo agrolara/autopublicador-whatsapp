@@ -5,6 +5,25 @@ import { BulkMessageService } from './bulk-message.service';
 import { SendBulkMessageDto } from './dto/bulk-message.dto';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 
+export interface BroadcastResultDetail {
+  chatId: string;
+  groupName?: string;
+  status: 'sent' | 'failed';
+  messageId?: string;
+  error?: string;
+}
+
+export interface BroadcastExecutionSummary {
+  timestamp: string;
+  batchId?: string;
+  total: number;
+  sent: number;
+  failed: number;
+  status: 'completed' | 'failed' | 'processing';
+  durationSeconds?: number;
+  details?: BroadcastResultDetail[];
+}
+
 export interface ScheduledBroadcast {
   id: string;
   sessionId: string;
@@ -17,6 +36,9 @@ export interface ScheduledBroadcast {
   endDate?: string;
   postToStatus?: boolean; // Publish to WhatsApp Status (24h story)
   lastRunAt?: string;
+  lastBatchId?: string;
+  lastSummary?: BroadcastExecutionSummary;
+  history?: BroadcastExecutionSummary[];
   createdAt: string;
 }
 
@@ -149,6 +171,15 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
     }
   }
 
+  private formatError(err: any): string | undefined {
+    if (!err) return undefined;
+    if (typeof err === 'string') return err;
+    if (typeof err === 'object') {
+      return err.message || err.code || JSON.stringify(err);
+    }
+    return String(err);
+  }
+
   getBroadcasts(sessionId: string): ScheduledBroadcast[] {
     return this.items
       .filter(item => item.sessionId === sessionId)
@@ -174,6 +205,59 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
           },
         };
       });
+  }
+
+  async getBroadcastReport(sessionId: string, id: string): Promise<any> {
+    const broadcast = this.items.find(item => item.sessionId === sessionId && item.id === id);
+    if (!broadcast) {
+      return null;
+    }
+
+    if (broadcast.lastBatchId) {
+      try {
+        const batch = await this.bulkMessageService.getBatchStatus(sessionId, broadcast.lastBatchId);
+        if (batch) {
+          const isFinished = batch.status === 'completed' || batch.status === 'failed' || batch.status === 'cancelled';
+          const durationSeconds = batch.completedAt && batch.startedAt
+            ? Math.round((new Date(batch.completedAt).getTime() - new Date(batch.startedAt).getTime()) / 1000)
+            : undefined;
+
+          broadcast.lastSummary = {
+            timestamp: batch.startedAt ? new Date(batch.startedAt).toISOString() : (broadcast.lastRunAt || new Date().toISOString()),
+            batchId: batch.batchId,
+            total: batch.progress.total,
+            sent: batch.progress.sent,
+            failed: batch.progress.failed,
+            status: isFinished ? (batch.progress.failed > 0 && batch.progress.sent === 0 ? 'failed' : 'completed') : 'processing',
+            durationSeconds,
+            details: (batch.results || []).map(r => ({
+              chatId: r.chatId,
+              status: r.status as 'sent' | 'failed',
+              messageId: r.messageId,
+              error: this.formatError(r.error),
+            })),
+          };
+          this.saveToFile();
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    return {
+      broadcast: {
+        id: broadcast.id,
+        name: broadcast.name,
+        scheduledTime: broadcast.scheduledTime,
+        frequency: broadcast.frequency,
+        status: broadcast.status,
+        lastRunAt: broadcast.lastRunAt,
+        totalRecipients: broadcast.payload?.messages?.length || 0,
+        payload: broadcast.payload,
+      },
+      summary: broadcast.lastSummary || null,
+      history: broadcast.history || [],
+    };
   }
 
   addBroadcast(sessionId: string, dto: {
@@ -349,10 +433,34 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
           // 1. Send group broadcast messages (if any recipients)
           try {
             if (item.payload?.messages?.length > 0) {
-              await this.bulkMessageService.createBatch(item.sessionId, item.payload);
-              this.logger.log(`✅ Successfully launched batch for scheduled broadcast ${item.id}`);
+              const batch = await this.bulkMessageService.createBatch(item.sessionId, item.payload);
+              item.lastBatchId = batch.batchId;
+              item.lastSummary = {
+                timestamp: new Date().toISOString(),
+                batchId: batch.batchId,
+                total: item.payload.messages.length,
+                sent: 0,
+                failed: 0,
+                status: 'processing',
+                details: [],
+              };
+              this.saveToFile();
+              this.logger.log(`✅ Successfully launched batch ${batch.batchId} for scheduled broadcast ${item.id}`);
             }
           } catch (err: any) {
+            item.lastSummary = {
+              timestamp: new Date().toISOString(),
+              total: item.payload?.messages?.length || 0,
+              sent: 0,
+              failed: item.payload?.messages?.length || 0,
+              status: 'failed',
+              details: (item.payload?.messages || []).map(m => ({
+                chatId: m.chatId,
+                status: 'failed',
+                error: err?.message || 'Error al iniciar lote de envío',
+              })),
+            };
+            this.saveToFile();
             this.logger.error(`❌ Failed to execute scheduled broadcast ${item.id}:`, err?.message);
           }
 
