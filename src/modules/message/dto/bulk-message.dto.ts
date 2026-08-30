@@ -11,6 +11,7 @@ import {
   MaxLength,
   Min,
   Max,
+  ArrayMinSize,
   ArrayMaxSize,
 } from 'class-validator';
 import { Type } from 'class-transformer';
