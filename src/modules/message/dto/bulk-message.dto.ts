@@ -107,18 +107,18 @@ class BulkMessageItemDto {
 
 class BulkMessageOptionsDto {
   @ApiPropertyOptional({
-    description: 'Delay between messages in ms.',
-    default: 3000,
+    description: 'Delay between messages in ms. Defaults to humanized random (4000 - 12000ms).',
+    default: 5000,
     minimum: 1000,
-    maximum: 60000,
+    maximum: 120000,
   })
   @IsOptional()
   @IsNumber()
   @Min(1000)
-  @Max(60000)
+  @Max(120000)
   delayBetweenMessages?: number;
 
-  @ApiPropertyOptional({ description: 'Add random 0-2s to delay', default: true })
+  @ApiPropertyOptional({ description: 'Randomize delay between 4s and 12s for anti-ban protection', default: true })
   @ToStrictBoolean()
   @IsOptional()
   @IsBoolean()
@@ -139,11 +139,12 @@ export class SendBulkMessageDto {
 
   @ApiProperty({
     description:
-      'Array of messages (max 100 per request; exact duplicate entries are collapsed — first occurrence wins)',
+      'Array of messages (unlimited recipients per request; exact duplicate entries are collapsed)',
     type: [BulkMessageItemDto],
   })
   @IsArray()
-  @ArrayMaxSize(100)
+  @ArrayMinSize(1)
+  @ArrayMaxSize(10000)
   @ValidateNested({ each: true })
   @Type(() => BulkMessageItemDto)
   messages!: BulkMessageItemDto[];

@@ -1,5 +1,5 @@
-// The backend caps a bulk batch at 100 messages (ArrayMaxSize on SendBulkMessageDto).
-export const BULK_MAX_RECIPIENTS = 100;
+// Unlimited bulk recipients capacity (supporting thousands of groups)
+export const BULK_MAX_RECIPIENTS = 10000;
 
 /**
  * Parse the bulk-recipients textarea (one entry per line) into chat IDs: trims whitespace,

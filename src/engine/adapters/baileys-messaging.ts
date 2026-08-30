@@ -139,6 +139,8 @@ export async function resolveMediaBuffer(media: MediaInput): Promise<{ data: Buf
       const ext = path.extname(filename).toLowerCase().replace('.', '');
       const mime = ext === 'png' ? 'image/png' : ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'mp4' ? 'video/mp4' : media.mimetype;
       return { data: buffer, mimetype: mime };
+    } else {
+      throw new BadRequestException(`El archivo multimedia "${filename}" ya no existe en el servidor. Por favor reasigna o sube la imagen nuevamente desde el panel.`);
     }
   }
 

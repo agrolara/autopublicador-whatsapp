@@ -225,7 +225,7 @@ export class BulkMessageService implements OnApplicationBootstrap {
       throw new BadRequestException(`Too many bulk batches in progress (max ${maxConcurrentBatches}); retry shortly`);
     }
     const options = {
-      delayBetweenMessages: dto.options?.delayBetweenMessages ?? 3000,
+      delayBetweenMessages: dto.options?.delayBetweenMessages ?? 5000,
       randomizeDelay: dto.options?.randomizeDelay ?? true,
       stopOnError: dto.options?.stopOnError ?? false,
     };
@@ -771,11 +771,12 @@ export class BulkMessageService implements OnApplicationBootstrap {
   }
 
   private calculateDelay(options: { delayBetweenMessages: number; randomizeDelay: boolean }): number {
-    let delay = options.delayBetweenMessages;
-    if (options.randomizeDelay) {
-      delay += Math.random() * 2000; // Add 0-2 seconds random
+    const minDelay = 4000;
+    const maxDelay = 12000;
+    if (options.randomizeDelay !== false) {
+      return Math.floor(minDelay + Math.random() * (maxDelay - minDelay + 1));
     }
-    return delay;
+    return options.delayBetweenMessages || Math.floor(minDelay + Math.random() * (maxDelay - minDelay + 1));
   }
 
   private sleep(ms: number): Promise<void> {

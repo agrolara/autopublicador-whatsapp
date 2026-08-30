@@ -1559,13 +1559,13 @@ export function MessageTester() {
                 <input
                   type="number"
                   min={1000}
-                  max={60000}
+                  max={120000}
                   step={500}
                   value={bulkDelay}
                   onChange={e => setBulkDelay(e.target.value)}
-                  placeholder="3000"
+                  placeholder="Aleatorio 4s - 12s (Recomendado)"
                 />
-                <span className="hint">{t('messageTester.bulkDelayHint')}</span>
+                <span className="hint">Cadencia humanizada anti-baneo: pausa aleatoria automática entre 4 y 12 segundos por mensaje.</span>
               </div>
 
               <div className="form-group" style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border-color, #e2e8f0)' }}>

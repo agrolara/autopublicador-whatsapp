@@ -56,10 +56,10 @@ export function Contacts() {
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
   const [targetAudience, setTargetAudience] = useState<'selected' | 'all' | 'saved' | 'unsaved'>('selected');
   const [minDelay, setMinDelay] = useState<number>(4);
-  const [maxDelay, setMaxDelay] = useState<number>(10);
+  const [maxDelay, setMaxDelay] = useState<number>(12);
   const [batchRestInterval, setBatchRestInterval] = useState<number>(30); // Pause after N msgs
   const [batchRestDuration, setBatchRestDuration] = useState<number>(3); // Pause duration in mins
-  const [maxCap, setMaxCap] = useState<number>(100);
+  const [maxCap, setMaxCap] = useState<number>(5000);
 
   // Schedule options
   const [isScheduled, setIsScheduled] = useState<boolean>(false);
@@ -743,7 +743,7 @@ export function Contacts() {
                       min={1}
                       max={5000}
                       value={maxCap}
-                      onChange={e => setMaxCap(parseInt(e.target.value, 10) || 100)}
+                      onChange={e => setMaxCap(parseInt(e.target.value, 10) || 5000)}
                     />
                   </div>
                 </div>
