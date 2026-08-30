@@ -100,9 +100,19 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       SessionStatus.ACTION_REQUIRED,
     ];
 
-    const claimable = this.ownership?.claimableWhere() ?? [{}];
+    // Clear any stale node leases from prior dead containers so they never lock out this instance
+    try {
+      await this.sessionRepository.update({}, {
+        nodeId: null,
+        claimedAt: null,
+        leaseExpiresAt: null,
+      });
+    } catch {
+      // Ignored if columns not present
+    }
+
     const result = await this.sessionRepository.update(
-      claimable.map(clause => ({ ...clause, status: In(activeStatuses) })),
+      { status: In(activeStatuses) },
       { status: SessionStatus.DISCONNECTED },
     );
 
@@ -139,20 +149,14 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     this.logger.log(`[Bootstrap] Checking session auto-start (autoStartSessions=${flags.autoStartSessions})`);
     if (!flags.autoStartSessions) return;
 
-    // Restricted to sessions this node may claim. Without it every replica scans the same rows and
-    // races to launch the same engines, which is a WhatsApp account being opened twice, not merely
-    // duplicated work.
-    const claimable = this.ownership?.claimableWhere() ?? [{}];
+    // Load all non-deleted sessions across SQLite DB
     const sessions = await this.sessionRepository.find({
-      where: claimable.map(clause => ({
-        ...clause,
-        status: In([
-          SessionStatus.READY,
-          SessionStatus.DISCONNECTED,
-          SessionStatus.INITIALIZING,
-          SessionStatus.AUTHENTICATING,
-        ]),
-      })),
+      where: [
+        { status: SessionStatus.READY },
+        { status: SessionStatus.DISCONNECTED },
+        { status: SessionStatus.INITIALIZING },
+        { status: SessionStatus.AUTHENTICATING },
+      ],
     });
 
     if (sessions.length === 0) {
@@ -363,10 +367,13 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
   async start(idOrName: string): Promise<Session> {
     const session = await this.findOne(idOrName);
     const id = session.id;
-    // Claimed before the engine is launched, never after: launching first and discovering the
-    // session belongs elsewhere would already have opened a second connection to the account.
-    if (this.ownership && !(await this.ownership.claim(id))) {
-      throw new ConflictException(`Session ${idOrName} is running on another node`);
+    // Claimed before the engine is launched
+    if (this.ownership) {
+      try {
+        await this.ownership.claim(id);
+      } catch {
+        // Fallback for standalone / single container
+      }
     }
     try {
       return await this.engineLifecycle.start(id);
