@@ -135,7 +135,9 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     // same way and must keep its lease alive.
     this.ownership?.startHeartbeat();
 
-    if (!resolveFeatureFlags(this.configService).autoStartSessions) return;
+    const flags = resolveFeatureFlags(this.configService);
+    this.logger.log(`[Bootstrap] Checking session auto-start (autoStartSessions=${flags.autoStartSessions})`);
+    if (!flags.autoStartSessions) return;
 
     // Restricted to sessions this node may claim. Without it every replica scans the same rows and
     // races to launch the same engines, which is a WhatsApp account being opened twice, not merely
@@ -144,7 +146,6 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     const sessions = await this.sessionRepository.find({
       where: claimable.map(clause => ({
         ...clause,
-        phone: Not(IsNull()),
         status: In([
           SessionStatus.READY,
           SessionStatus.DISCONNECTED,
@@ -154,9 +155,12 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       })),
     });
 
-    if (sessions.length === 0) return;
+    if (sessions.length === 0) {
+      this.logger.log('[Bootstrap] No sessions found to auto-start');
+      return;
+    }
 
-    this.logger.log(`Auto-starting ${sessions.length} previously authenticated session(s)`, {
+    this.logger.log(`Auto-starting ${sessions.length} session(s) on bootstrap`, {
       action: 'auto_start',
       count: sessions.length,
     });

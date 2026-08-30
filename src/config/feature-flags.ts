@@ -7,7 +7,7 @@ import { ConfigService } from '@nestjs/config';
  * validated at boot (see `env.validation.ts`).
  */
 export interface FeatureFlags {
-  /** Auto-start previously-authenticated sessions on boot. Opt-in — default OFF. */
+  /** Auto-start previously-authenticated sessions on boot. Default ON. */
   autoStartSessions: boolean;
   /** Persist + dispatch incoming disappearing-message-timer messages. Default ON. */
   storeEphemeralMessages: boolean;
@@ -30,7 +30,7 @@ export interface FeatureFlags {
  */
 export function computeFeatureFlags(env: NodeJS.ProcessEnv = process.env): FeatureFlags {
   return {
-    autoStartSessions: env.AUTO_START_SESSIONS === 'true',
+    autoStartSessions: env.AUTO_START_SESSIONS !== 'false',
     storeEphemeralMessages: env.STORE_EPHEMERAL_MESSAGES !== 'false',
     resolveLidToPhone: env.RESOLVE_LID_TO_PHONE === 'true',
     simulateTyping: env.SIMULATE_TYPING !== 'false',
