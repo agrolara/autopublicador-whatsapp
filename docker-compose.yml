@@ -279,12 +279,12 @@ services:
           'CMD',
           'node',
           '-e',
-          "require('http').get('http://localhost:2785/api/health/live', (r) => process.exit(r.statusCode === 200 ? 0 : 1))",
+          "require('http').get('http://127.0.0.1:2785/api/health/live', (r) => process.exit(r.statusCode === 200 ? 0 : 1))",
         ]
-      interval: 20s
-      timeout: 10s
+      interval: 15s
+      timeout: 5s
       retries: 5
-      start_period: 120s
+      start_period: 30s
     labels:
       - 'com.openwa.service=api'
       - 'com.openwa.core=true'
