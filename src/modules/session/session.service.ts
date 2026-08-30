@@ -164,31 +164,26 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       return;
     }
 
-    this.logger.log(`Auto-starting ${sessions.length} session(s) on bootstrap`, {
+    this.logger.log(`Auto-starting ${sessions.length} session(s) asynchronously in background`, {
       action: 'auto_start',
       count: sessions.length,
     });
 
-    for (let i = 0; i < sessions.length; i++) {
-      const session = sessions[i];
-      try {
-        await this.start(session.id);
-        this.logger.log(`Auto-started session: ${session.name}`, {
-          sessionId: session.id,
-          action: 'auto_start_success',
-        });
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        this.logger.error(`Auto-start failed for session: ${session.name}`, errorMessage, {
-          sessionId: session.id,
-          action: 'auto_start_failed',
-        });
+    setImmediate(async () => {
+      for (let i = 0; i < sessions.length; i++) {
+        const session = sessions[i];
+        try {
+          this.logger.log(`[AutoStart] Starting session: ${session.name || session.id}`);
+          await this.start(session.id);
+        } catch (error: unknown) {
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          this.logger.error(`Auto-start failed for session: ${session.name}`, errorMessage);
+        }
+        if (i < sessions.length - 1) {
+          await this.delay(2000);
+        }
       }
-      // Throttle between sequential Chromium launches; no need to wait after the last one.
-      if (i < sessions.length - 1) {
-        await this.delay(2000);
-      }
-    }
+    });
   }
 
   async onModuleDestroy(): Promise<void> {
