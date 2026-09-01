@@ -461,6 +461,8 @@ export interface ScheduledBroadcastItem {
   name?: string;
   scheduledTime: string;
   frequency: 'once' | 'daily' | 'twice_daily';
+  daysOfWeek?: number[];
+  mediaUrls?: string[];
   payload: SendBulkPayload;
   status?: 'active' | 'paused';
   startDate?: string;

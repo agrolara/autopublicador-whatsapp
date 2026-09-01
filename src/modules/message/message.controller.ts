@@ -702,6 +702,8 @@ export class MessageController {
       frequency: 'once' | 'daily' | 'twice_daily';
       payload: SendBulkMessageDto;
       name?: string;
+      daysOfWeek?: number[];
+      mediaUrls?: string[];
       status?: 'active' | 'paused';
       startDate?: string;
       endDate?: string;
@@ -724,6 +726,8 @@ export class MessageController {
       frequency?: 'once' | 'daily' | 'twice_daily';
       payload?: SendBulkMessageDto;
       name?: string;
+      daysOfWeek?: number[];
+      mediaUrls?: string[];
       status?: 'active' | 'paused';
       startDate?: string;
       endDate?: string;

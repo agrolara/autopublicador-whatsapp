@@ -8,7 +8,7 @@ interface BroadcastReportModalProps {
   item: ScheduledBroadcastItem | null;
   session: string;
   groups?: Array<{ id: string; name: string }>;
-  onRetryFailed?: (failedChatIds: string[]) => void;
+  onRetryFailed?: (item: ScheduledBroadcastItem, failedChatIds: string[]) => void;
 }
 
 export const BroadcastReportModal: React.FC<BroadcastReportModalProps> = ({
@@ -370,7 +370,7 @@ export const BroadcastReportModal: React.FC<BroadcastReportModalProps> = ({
                       boxShadow: '0 2px 4px rgba(217, 119, 6, 0.2)',
                     }}
                     onClick={() => {
-                      onRetryFailed(failedChatIds);
+                      onRetryFailed(item, failedChatIds);
                       onClose();
                     }}
                   >

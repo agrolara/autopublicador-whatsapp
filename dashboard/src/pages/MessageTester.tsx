@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, type ChangeEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Send, CheckCircle, XCircle, Loader2, Upload, X, Plus, Trash2, Clock } from 'lucide-react';
+import { Send, CheckCircle, XCircle, Loader2, Upload, X, Plus, Trash2, Clock, Link as LinkIcon, Calendar } from 'lucide-react';
 import {
   messageApi,
   contactApi,
@@ -22,9 +22,20 @@ import { parseBulkRecipients, BULK_MAX_RECIPIENTS } from '../utils/bulkRecipient
 import { PageHeader } from '../components/PageHeader';
 import { EditScheduleModal } from '../components/message-tester/EditScheduleModal';
 import { GroupTagModal } from '../components/message-tester/GroupTagModal';
-import { SavedGallerySection } from '../components/message-tester/SavedGallerySection';
+import { SavedGallerySection, type SavedImageItem } from '../components/message-tester/SavedGallerySection';
 import { BroadcastReportModal } from '../components/message-tester/BroadcastReportModal';
+import { WaLinkModal } from '../components/message-tester/WaLinkModal';
 import './MessageTester.css';
+
+const DAYS = [
+  { id: 1, label: 'Lun' },
+  { id: 2, label: 'Mar' },
+  { id: 3, label: 'Mié' },
+  { id: 4, label: 'Jue' },
+  { id: 5, label: 'Vie' },
+  { id: 6, label: 'Sáb' },
+  { id: 0, label: 'Dom' },
+];
 
 interface ApiResponse {
   success: boolean;
@@ -157,24 +168,71 @@ export function MessageTester() {
   const [sendMode, setSendMode] = useState<'now' | 'scheduled'>('now');
   const [scheduledTime, setScheduledTime] = useState('09:00');
   const [scheduledFrequency, setScheduledFrequency] = useState<'once' | 'daily' | 'twice_daily'>('twice_daily');
+  const [scheduledDaysOfWeek, setScheduledDaysOfWeek] = useState<number[]>([0, 1, 2, 3, 4, 5, 6]);
   const [scheduledEndDate, setScheduledEndDate] = useState('');
   const [scheduledPostToStatus, setScheduledPostToStatus] = useState(false);
   const [scheduledList, setScheduledList] = useState<ScheduledBroadcastItem[]>([]);
   const [newGroupsFound, setNewGroupsFound] = useState<{ id: string; name?: string }[]>([]);
   const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
 
+  // Link wa.me Modal State
+  const [showWaLinkModal, setShowWaLinkModal] = useState(false);
+
+  // Multi-image selection state
+  const [selectedGalleryImages, setSelectedGalleryImages] = useState<SavedImageItem[]>([]);
+
   // Report Modal State
   const [reportModalItem, setReportModalItem] = useState<ScheduledBroadcastItem | null>(null);
 
-  const handleRetryFailedRecipients = (failedChatIds: string[]) => {
+  const handleRetryFailedRecipients = (item: ScheduledBroadcastItem, failedChatIds: string[]) => {
     if (!failedChatIds || failedChatIds.length === 0) return;
-    setRecipients(failedChatIds.join('\n'));
-    setIsBulk(true);
+    setBulkRecipients(failedChatIds.join('\n'));
+    setRecipient(failedChatIds[0] || '');
+    setMessageType('bulk');
+
+    const firstMsg = item.payload?.messages?.[0] as any;
+    if (firstMsg) {
+      const msgType = firstMsg.type || (firstMsg.content?.image ? 'image' : firstMsg.content?.video ? 'video' : 'text');
+      setBulkMediaType(msgType);
+      const text = firstMsg.content?.caption || firstMsg.content?.text || firstMsg.text || (typeof firstMsg.message === 'string' ? firstMsg.message : '') || '';
+      setContent(text);
+      const mUrl = firstMsg.content?.[msgType]?.url || firstMsg.mediaUrl;
+      if (mUrl) {
+        setMediaUrl(mUrl);
+      }
+    }
+
     setToast({
       type: 'info',
-      message: `📋 Se han cargado los ${failedChatIds.length} grupos fallidos en el formulario para reintento.`,
+      message: `📋 Se ha cargado el contenido y los ${failedChatIds.length} grupos fallidos listos para reintento.`,
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleToggleGalleryImage = (img: SavedImageItem) => {
+    setSelectedGalleryImages(prev => {
+      const exists = prev.some(item => item.id === img.id);
+      if (exists) {
+        return prev.filter(item => item.id !== img.id);
+      }
+      if (prev.length >= 5) {
+        setToast({ type: 'error', message: 'Puedes seleccionar un máximo de 5 imágenes por envío.' });
+        return prev;
+      }
+      const updated = [...prev, img];
+      setBulkMediaType('image');
+      setToast({ type: 'info', message: `📸 ${updated.length} imagen(es) seleccionada(s) para el envío.` });
+      return updated;
+    });
+  };
+
+  const handleRemoveSelectedGalleryImage = (id: string) => {
+    setSelectedGalleryImages(prev => prev.filter(img => img.id !== id));
+  };
+
+  const handleInsertWaLink = (url: string) => {
+    setContent(prev => (prev ? `${prev}\n\n${url}` : url));
+    setToast({ type: 'success', message: '🔗 Enlace de WhatsApp insertado con éxito.' });
   };
 
   // Edit Schedule Modal States
@@ -183,13 +241,14 @@ export function MessageTester() {
   const [editSchedName, setEditSchedName] = useState('');
   const [editSchedTime, setEditSchedTime] = useState('');
   const [editSchedFrequency, setEditSchedFrequency] = useState<'once' | 'daily' | 'twice_daily'>('daily');
+  const [editSchedDaysOfWeek, setEditSchedDaysOfWeek] = useState<number[]>([0, 1, 2, 3, 4, 5, 6]);
   const [editSchedStatus, setEditSchedStatus] = useState<'active' | 'paused'>('active');
   const [editSchedEndDate, setEditSchedEndDate] = useState('');
   const [editSchedPostToStatus, setEditSchedPostToStatus] = useState(false);
   const [editSchedContent, setEditSchedContent] = useState('');
   const [editSchedRecipients, setEditSchedRecipients] = useState('');
 
-  const [savedImages, setSavedImages] = useState<{ id: string; name: string; base64: string; mimetype: string; filename: string }[]>(() => {
+  const [savedImages, setSavedImages] = useState<SavedImageItem[]>(() => {
     try {
       const raw = localStorage.getItem('openwa_saved_images');
       return raw ? JSON.parse(raw) : [];
@@ -202,7 +261,7 @@ export function MessageTester() {
     if (!mediaFile) return;
     const name = window.prompt('Escribe un nombre para guardar esta imagen en tu Galería Frecuente:', mediaFile.filename);
     if (!name) return;
-    const newItem = {
+    const newItem: SavedImageItem = {
       id: `img_${Date.now()}`,
       name,
       base64: mediaFile.base64,
@@ -219,6 +278,7 @@ export function MessageTester() {
     e.stopPropagation();
     const updated = savedImages.filter(item => item.id !== id);
     setSavedImages(updated);
+    setSelectedGalleryImages(prev => prev.filter(item => item.id !== id));
     localStorage.setItem('openwa_saved_images', JSON.stringify(updated));
   };
 
@@ -227,6 +287,7 @@ export function MessageTester() {
     setEditSchedName(item.name || `Envío Masivo (${item.scheduledTime})`);
     setEditSchedTime(item.scheduledTime || '10:00');
     setEditSchedFrequency(item.frequency || 'daily');
+    setEditSchedDaysOfWeek(Array.isArray(item.daysOfWeek) && item.daysOfWeek.length > 0 ? item.daysOfWeek : [0, 1, 2, 3, 4, 5, 6]);
     setEditSchedStatus(item.status || 'active');
     setEditSchedEndDate(item.endDate || '');
     setEditSchedPostToStatus(item.postToStatus ?? false);
@@ -286,6 +347,7 @@ export function MessageTester() {
         name: editSchedName.trim(),
         scheduledTime: editSchedTime,
         frequency: editSchedFrequency,
+        daysOfWeek: editSchedDaysOfWeek.length < 7 ? editSchedDaysOfWeek : undefined,
         status: editSchedStatus,
         endDate: editSchedEndDate || '',
         postToStatus: editSchedPostToStatus,
@@ -561,39 +623,61 @@ export function MessageTester() {
 
       // Bulk is a batch, not a single send: 202 + batchId, then poll progress until terminal.
       if (messageType === 'bulk') {
-        let finalMediaObj: BulkMediaPayload | null = null;
-        if (bulkMediaType !== 'text') {
+        const uploadedMediaObjs: BulkMediaPayload[] = [];
+        if (selectedGalleryImages.length > 0) {
+          setToast({ type: 'info', message: `Subiendo ${selectedGalleryImages.length} imágenes al servidor...` });
+          for (const img of selectedGalleryImages) {
+            const uploaded = await messageApi.uploadMedia(session, {
+              base64: img.base64,
+              mimetype: img.mimetype,
+              filename: img.filename,
+            });
+            uploadedMediaObjs.push({ url: uploaded.url });
+          }
+        } else if (bulkMediaType !== 'text') {
           if (mediaFile) {
             setToast({ type: 'info', message: 'Subiendo archivo multimedia al servidor...' });
             const uploaded = await messageApi.uploadMedia(session, {
               base64: mediaFile.base64,
               mimetype: mediaFile.mimetype,
-              filename: mediaFile.name,
+              filename: mediaFile.filename,
             });
-            finalMediaObj = { url: uploaded.url };
+            uploadedMediaObjs.push({ url: uploaded.url });
           } else if (mediaUrl) {
-            finalMediaObj = { url: mediaUrl };
+            uploadedMediaObjs.push({ url: mediaUrl });
           }
         }
 
-        const messages: BulkMessageItem[] = bulkRecipientList.map(recipientChatId => {
-          if (bulkMediaType === 'text' || !finalMediaObj) {
-            return {
+        const messages: BulkMessageItem[] = [];
+        for (const recipientChatId of bulkRecipientList) {
+          if (uploadedMediaObjs.length > 0) {
+            // First image has main text caption
+            messages.push({
+              chatId: recipientChatId,
+              type: 'image',
+              content: {
+                image: uploadedMediaObjs[0],
+                ...(content ? { caption: content } : {}),
+              },
+            });
+            // Additional images (photos 2 to 5)
+            for (let idx = 1; idx < uploadedMediaObjs.length; idx++) {
+              messages.push({
+                chatId: recipientChatId,
+                type: 'image',
+                content: {
+                  image: uploadedMediaObjs[idx],
+                },
+              });
+            }
+          } else {
+            messages.push({
               chatId: recipientChatId,
               type: 'text' as const,
               content: { text: content },
-            };
+            });
           }
-          return {
-            chatId: recipientChatId,
-            type: bulkMediaType,
-            content: {
-              [bulkMediaType]: finalMediaObj,
-              ...(content ? { caption: content } : {}),
-              ...(bulkMediaType === 'document' && content ? { filename: content } : {}),
-            },
-          };
-        });
+        }
 
         const bulkPayload: SendBulkPayload = {
           messages,
@@ -604,6 +688,7 @@ export function MessageTester() {
           await messageApi.createScheduledBroadcast(session, {
             scheduledTime,
             frequency: scheduledFrequency,
+            daysOfWeek: scheduledDaysOfWeek.length < 7 ? scheduledDaysOfWeek : undefined,
             payload: bulkPayload,
             name: `Envío Masivo (${scheduledTime})`,
             status: 'active',
@@ -886,7 +971,28 @@ export function MessageTester() {
 
           {messageType === 'text' && (
             <div className="form-group">
-              <label>{t('messageTester.messageContent')}</label>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                <label style={{ margin: 0 }}>{t('messageTester.messageContent')}</label>
+                <button
+                  type="button"
+                  onClick={() => setShowWaLinkModal(true)}
+                  style={{
+                    fontSize: '0.75rem',
+                    padding: '3px 8px',
+                    borderRadius: '6px',
+                    border: '1px solid #86efac',
+                    background: '#f0fdf4',
+                    color: '#166534',
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  <LinkIcon size={12} /> Link wa.me
+                </button>
+              </div>
               <textarea
                 value={content}
                 onChange={e => setContent(e.target.value)}
@@ -940,6 +1046,9 @@ export function MessageTester() {
 
                 <SavedGallerySection
                   savedImages={savedImages}
+                  selectedImages={selectedGalleryImages}
+                  onToggleSelectImage={handleToggleGalleryImage}
+                  onRemoveSelectedImage={handleRemoveSelectedGalleryImage}
                   onSelectImage={img => {
                     setMediaFile({ base64: img.base64, mimetype: img.mimetype, filename: img.filename });
                     setMediaUrl('');
@@ -986,10 +1095,30 @@ export function MessageTester() {
 
               {messageType !== 'audio' && messageType !== 'sticker' && (
                 <div className="form-group">
-                  <label>
-                    {messageType === 'document' ? t('messageTester.filename') : t('messageTester.caption')} (
-                    {t('common.optional')})
-                  </label>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <label style={{ margin: 0 }}>
+                      {messageType === 'document' ? t('messageTester.filename') : t('messageTester.caption')} ({t('common.optional')})
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setShowWaLinkModal(true)}
+                      style={{
+                        fontSize: '0.75rem',
+                        padding: '3px 8px',
+                        borderRadius: '6px',
+                        border: '1px solid #86efac',
+                        background: '#f0fdf4',
+                        color: '#166534',
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                      }}
+                    >
+                      <LinkIcon size={12} /> Link wa.me
+                    </button>
+                  </div>
                   <input
                     type="text"
                     value={content}
@@ -1558,7 +1687,28 @@ export function MessageTester() {
               </div>
               {bulkMediaType === 'text' && (
                 <div className="form-group">
-                  <label>{t('messageTester.messageContent')}</label>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <label style={{ margin: 0 }}>{t('messageTester.messageContent')}</label>
+                    <button
+                      type="button"
+                      onClick={() => setShowWaLinkModal(true)}
+                      style={{
+                        fontSize: '0.75rem',
+                        padding: '3px 8px',
+                        borderRadius: '6px',
+                        border: '1px solid #86efac',
+                        background: '#f0fdf4',
+                        color: '#166534',
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                      }}
+                    >
+                      <LinkIcon size={12} /> Link wa.me
+                    </button>
+                  </div>
                   <textarea
                     value={content}
                     onChange={e => setContent(e.target.value)}
@@ -1614,6 +1764,72 @@ export function MessageTester() {
                       />
                       <span className="hint">Escribe o selecciona la hora exacta del día en que quieres publicar.</span>
                     </div>
+
+                    {/* Selector de Días de la Semana */}
+                    <div className="form-group" style={{ background: 'var(--bg-primary, #ffffff)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color, #cbd5e1)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main, #334155)', display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }}>
+                          <Calendar size={14} color="#6366f1" /> Días de Ejecución:
+                        </label>
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                          <button
+                            type="button"
+                            onClick={() => setScheduledDaysOfWeek([0, 1, 2, 3, 4, 5, 6])}
+                            style={{ fontSize: '0.72rem', padding: '2px 6px', background: '#e0e7ff', color: '#4338ca', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}
+                          >
+                            Todos
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setScheduledDaysOfWeek([1, 2, 3, 4, 5])}
+                            style={{ fontSize: '0.72rem', padding: '2px 6px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}
+                          >
+                            Lun-Vie
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setScheduledDaysOfWeek([0, 6])}
+                            style={{ fontSize: '0.72rem', padding: '2px 6px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}
+                          >
+                            Finde
+                          </button>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: '6px', justifyContent: 'space-between' }}>
+                        {DAYS.map(d => {
+                          const active = scheduledDaysOfWeek.includes(d.id);
+                          return (
+                            <button
+                              key={d.id}
+                              type="button"
+                              onClick={() => {
+                                if (scheduledDaysOfWeek.includes(d.id)) {
+                                  if (scheduledDaysOfWeek.length === 1) return;
+                                  setScheduledDaysOfWeek(scheduledDaysOfWeek.filter(x => x !== d.id));
+                                } else {
+                                  setScheduledDaysOfWeek([...scheduledDaysOfWeek, d.id]);
+                                }
+                              }}
+                              style={{
+                                flex: 1,
+                                padding: '6px 0',
+                                border: active ? '1px solid #6366f1' : '1px solid #cbd5e1',
+                                background: active ? '#6366f1' : 'var(--bg-secondary, #f8fafc)',
+                                color: active ? '#ffffff' : '#475569',
+                                borderRadius: '6px',
+                                fontSize: '0.8rem',
+                                fontWeight: active ? 700 : 500,
+                                cursor: 'pointer',
+                                transition: 'all 0.15s ease',
+                              }}
+                            >
+                              {d.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
                     <div className="form-group">
                       <label>Frecuencia de Repetición</label>
                       <select
@@ -1852,9 +2068,18 @@ export function MessageTester() {
                         </div>
                       </td>
                       <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
-                        {item.frequency === 'twice_daily' && 'Cada 12 Horas'}
-                        {item.frequency === 'daily' && 'Todos los días'}
-                        {item.frequency === 'once' && 'Una sola vez'}
+                        <div>
+                          {item.frequency === 'twice_daily' && 'Cada 12 Horas'}
+                          {item.frequency === 'daily' && 'Todos los días'}
+                          {item.frequency === 'once' && 'Una sola vez'}
+                        </div>
+                        {Array.isArray(item.daysOfWeek) && item.daysOfWeek.length > 0 && item.daysOfWeek.length < 7 && (
+                          <div style={{ marginTop: '3px' }}>
+                            <span style={{ background: '#e0e7ff', color: '#4338ca', padding: '2px 6px', borderRadius: '8px', fontSize: '0.7rem', fontWeight: 600 }}>
+                              {item.daysOfWeek.map(d => DAYS.find(x => x.id === d)?.label).filter(Boolean).join(', ')}
+                            </span>
+                          </div>
+                        )}
                       </td>
                       <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', fontSize: '0.8rem', color: item.endDate ? '#0f172a' : '#64748b' }}>
                         {item.endDate ? `📅 Hasta: ${item.endDate}` : '♾️ Indefinido'}
@@ -2007,6 +2232,8 @@ export function MessageTester() {
         setEditSchedStatus={setEditSchedStatus}
         editSchedFrequency={editSchedFrequency}
         setEditSchedFrequency={setEditSchedFrequency}
+        editSchedDaysOfWeek={editSchedDaysOfWeek}
+        setEditSchedDaysOfWeek={setEditSchedDaysOfWeek}
         editSchedEndDate={editSchedEndDate}
         setEditSchedEndDate={setEditSchedEndDate}
         editSchedPostToStatus={editSchedPostToStatus}
@@ -2049,6 +2276,13 @@ export function MessageTester() {
         groups={groups}
         onRetryFailed={handleRetryFailedRecipients}
       />
+
+      <WaLinkModal
+        isOpen={showWaLinkModal}
+        onClose={() => setShowWaLinkModal(false)}
+        onInsert={handleInsertWaLink}
+      />
+
       {toast && (
         <div style={{
           position: 'fixed',

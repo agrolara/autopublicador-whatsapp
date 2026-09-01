@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, Check, Copy, FileText, Loader2, Plus, Search, Trash2, X, Image as ImageIcon, Video, Music, FileUp, Globe } from 'lucide-react';
+import { AlertTriangle, Check, Copy, FileText, Loader2, Plus, Search, Trash2, X, Image as ImageIcon, Video, Music, FileUp, Globe, Link as LinkIcon } from 'lucide-react';
 import { type MessageTemplate, type TemplatePayload } from '../services/api';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { useRole } from '../hooks/useRole';
@@ -13,6 +13,7 @@ import {
 } from '../hooks/queries';
 import { PageHeader } from '../components/PageHeader';
 import { Modal } from '../components/Modal';
+import { WaLinkModal } from '../components/message-tester/WaLinkModal';
 import { copyToClipboard } from '../utils/clipboard';
 import './Templates.css';
 
@@ -72,6 +73,7 @@ export function Templates() {
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [previewValues, setPreviewValues] = useState<Record<string, string>>({});
   const [searchTerm, setSearchTerm] = useState('');
+  const [showWaLink, setShowWaLink] = useState(false);
 
   const { data: templates = [], isLoading: loadingTemplates } = useTemplatesQuery(
     selectedSessionId || 'default',
@@ -484,7 +486,28 @@ export function Templates() {
                 </div>
 
                 <div className="form-group body-field">
-                  <label>{t('templates.body')}</label>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <label style={{ margin: 0 }}>{t('templates.body')}</label>
+                    <button
+                      type="button"
+                      onClick={() => setShowWaLink(true)}
+                      style={{
+                        fontSize: '0.75rem',
+                        padding: '3px 8px',
+                        borderRadius: '6px',
+                        border: '1px solid #86efac',
+                        background: '#f0fdf4',
+                        color: '#166534',
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                      }}
+                    >
+                      <LinkIcon size={12} /> Link wa.me
+                    </button>
+                  </div>
                   <textarea
                     value={form.body}
                     onChange={event => setForm({ ...form, body: event.target.value })}
@@ -576,6 +599,12 @@ export function Templates() {
           <p>{t('templates.deleteConfirm', { name: deleteTarget.name })}</p>
         </Modal>
       )}
+
+      <WaLinkModal
+        isOpen={showWaLink}
+        onClose={() => setShowWaLink(false)}
+        onInsert={url => setForm(f => ({ ...f, body: f.body ? `${f.body}\n\n${url}` : url }))}
+      />
     </div>
   );
 }

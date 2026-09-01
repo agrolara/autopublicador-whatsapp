@@ -31,6 +31,8 @@ export interface ScheduledBroadcast {
   scheduledTime: string; // e.g. "09:00", "21:00"
   frequency: 'once' | 'daily' | 'twice_daily'; // once, daily, twice_daily (every 12h)
   payload: SendBulkMessageDto;
+  daysOfWeek?: number[]; // [0,1,2,3,4,5,6] where 0=Sunday, 1=Monday... (empty/undefined = all days)
+  mediaUrls?: string[]; // Array of up to 5 image/media URLs for multi-media campaigns
   status?: 'active' | 'paused';
   startDate?: string;
   endDate?: string;
@@ -42,8 +44,9 @@ export interface ScheduledBroadcast {
   createdAt: string;
 }
 
-function getLocalChileTime(): { hour: number; minute: number; ymd: string; hhmm: string } {
+function getLocalChileTime(): { hour: number; minute: number; ymd: string; hhmm: string; dayOfWeek: number } {
   const tz = process.env.TIMEZONE || 'America/Santiago';
+  const now = new Date();
   const formatter = new Intl.DateTimeFormat('en-US', {
     timeZone: tz,
     year: 'numeric',
@@ -55,7 +58,7 @@ function getLocalChileTime(): { hour: number; minute: number; ymd: string; hhmm:
   });
 
   const p: Record<string, string> = {};
-  formatter.formatToParts(new Date()).forEach(x => {
+  formatter.formatToParts(now).forEach(x => {
     if (x.type !== 'literal') p[x.type] = x.value;
   });
 
@@ -64,7 +67,10 @@ function getLocalChileTime(): { hour: number; minute: number; ymd: string; hhmm:
   const ymd = `${p.year}-${p.month}-${p.day}`;
   const hhmm = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 
-  return { hour, minute, ymd, hhmm };
+  const chileLocaleStr = now.toLocaleString('en-US', { timeZone: tz });
+  const dayOfWeek = new Date(chileLocaleStr).getDay();
+
+  return { hour, minute, ymd, hhmm, dayOfWeek };
 }
 
 @Injectable()
@@ -265,6 +271,8 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
     frequency: 'once' | 'daily' | 'twice_daily';
     payload: SendBulkMessageDto;
     name?: string;
+    daysOfWeek?: number[];
+    mediaUrls?: string[];
     status?: 'active' | 'paused';
     startDate?: string;
     endDate?: string;
@@ -278,6 +286,8 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
       scheduledTime: dto.scheduledTime,
       frequency: dto.frequency,
       payload: normalizedPayload,
+      daysOfWeek: Array.isArray(dto.daysOfWeek) ? dto.daysOfWeek : undefined,
+      mediaUrls: Array.isArray(dto.mediaUrls) ? dto.mediaUrls : undefined,
       status: dto.status || 'active',
       startDate: dto.startDate || undefined,
       endDate: dto.endDate || undefined,
@@ -287,7 +297,7 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
 
     this.items.push(newBroadcast);
     this.saveToFile();
-    this.logger.log(`Created scheduled broadcast ${newBroadcast.id} at ${newBroadcast.scheduledTime} (${newBroadcast.frequency}) [Chile Time] (Status: ${newBroadcast.postToStatus ? 'Yes' : 'No'})`);
+    this.logger.log(`Created scheduled broadcast ${newBroadcast.id} at ${newBroadcast.scheduledTime} (${newBroadcast.frequency}) [Chile Time] (Status: ${newBroadcast.postToStatus ? 'Yes' : 'No'}, Days: ${newBroadcast.daysOfWeek ? newBroadcast.daysOfWeek.join(',') : 'All'})`);
     return newBroadcast;
   }
 
@@ -307,6 +317,8 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
     frequency?: 'once' | 'daily' | 'twice_daily';
     payload?: SendBulkMessageDto;
     name?: string;
+    daysOfWeek?: number[];
+    mediaUrls?: string[];
     status?: 'active' | 'paused';
     startDate?: string;
     endDate?: string;
@@ -317,6 +329,8 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
     if (dto.name !== undefined) item.name = dto.name;
     if (dto.scheduledTime !== undefined) item.scheduledTime = dto.scheduledTime;
     if (dto.frequency !== undefined) item.frequency = dto.frequency;
+    if (dto.daysOfWeek !== undefined) item.daysOfWeek = Array.isArray(dto.daysOfWeek) ? dto.daysOfWeek : undefined;
+    if (dto.mediaUrls !== undefined) item.mediaUrls = Array.isArray(dto.mediaUrls) ? dto.mediaUrls : undefined;
     if (dto.payload !== undefined) {
       item.payload = this.normalizePayloadMedia(sessionId, dto.payload);
     }
@@ -325,7 +339,7 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
     if (dto.endDate !== undefined) item.endDate = dto.endDate || undefined;
     if (dto.postToStatus !== undefined) item.postToStatus = dto.postToStatus;
     this.saveToFile();
-    this.logger.log(`Updated scheduled broadcast ${id} (${item.name}) - Status: ${item.status || 'active'} - PostToStatus: ${item.postToStatus ? 'Yes' : 'No'}`);
+    this.logger.log(`Updated scheduled broadcast ${id} (${item.name}) - Status: ${item.status || 'active'} - Days: ${item.daysOfWeek ? item.daysOfWeek.join(',') : 'All'} - PostToStatus: ${item.postToStatus ? 'Yes' : 'No'}`);
     return item;
   }
 
@@ -386,7 +400,7 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
   }
 
   private async processDueBroadcasts() {
-    const { hour: nowH, minute: nowM, ymd: todayYMD, hhmm: currentHHMM } = getLocalChileTime();
+    const { hour: nowH, minute: nowM, ymd: todayYMD, hhmm: currentHHMM, dayOfWeek: todayDayOfWeek } = getLocalChileTime();
 
     for (const item of [...this.items]) {
       // 1. Skip if paused
@@ -394,7 +408,12 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
         continue;
       }
 
-      // 2. Check date range (startDate / endDate)
+      // 2. Check days of week (if configured and non-empty)
+      if (Array.isArray(item.daysOfWeek) && item.daysOfWeek.length > 0 && !item.daysOfWeek.includes(todayDayOfWeek)) {
+        continue;
+      }
+
+      // 3. Check date range (startDate / endDate)
       if (item.startDate && todayYMD < item.startDate) {
         continue;
       }
