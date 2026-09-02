@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsNotEmpty, IsOptional, MaxLength } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, MaxLength, IsArray } from 'class-validator';
 
 const NAME_MAX_LENGTH = 100;
 const BODY_MAX_LENGTH = 4096;
@@ -66,6 +66,8 @@ export class CreateTemplateDto {
     type: [String],
   })
   @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
   mediaUrls?: string[];
 
   @ApiPropertyOptional({
@@ -115,6 +117,8 @@ export class UpdateTemplateDto {
 
   @ApiPropertyOptional({ description: 'Array of media URLs or data URIs (up to 5)', type: [String] })
   @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
   mediaUrls?: string[];
 
   @ApiPropertyOptional({ description: 'Optional filename for media' })
