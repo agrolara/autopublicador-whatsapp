@@ -150,6 +150,7 @@ export interface MessageTemplate {
   footer?: string | null;
   mediaType?: 'text' | 'image' | 'video' | 'audio' | 'document' | null;
   mediaUrl?: string | null;
+  mediaUrls?: string[] | null;
   mediaFileName?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -162,6 +163,7 @@ export interface TemplatePayload {
   footer?: string | null;
   mediaType?: 'text' | 'image' | 'video' | 'audio' | 'document' | null;
   mediaUrl?: string | null;
+  mediaUrls?: string[] | null;
   mediaFileName?: string | null;
 }
 

@@ -282,6 +282,77 @@ export function MessageTester() {
     localStorage.setItem('openwa_saved_images', JSON.stringify(updated));
   };
 
+  const applyLoadedTemplate = (tpl: MessageTemplate) => {
+    const fullText = [tpl.header, tpl.body, tpl.footer].filter(Boolean).join('\n\n');
+    setContent(fullText);
+
+    if (tpl.mediaType && tpl.mediaType !== 'text') {
+      if (messageType === 'bulk') {
+        setBulkMediaType(tpl.mediaType as any);
+      } else {
+        setMessageType(tpl.mediaType as any);
+      }
+
+      const urls = Array.isArray(tpl.mediaUrls) && tpl.mediaUrls.length > 0
+        ? tpl.mediaUrls
+        : (tpl.mediaUrl ? [tpl.mediaUrl] : []);
+
+      if (urls.length > 0) {
+        if (tpl.mediaType === 'image') {
+          const galleryItems: SavedGalleryImage[] = urls.map((url, idx) => {
+            const isBase64 = url.startsWith('data:');
+            const mime = isBase64 ? (url.match(/data:([^;]+);/)?.[1] || 'image/jpeg') : 'image/jpeg';
+            return {
+              id: `tpl-img-${tpl.id}-${idx}`,
+              name: `${tpl.name} #${idx + 1}`,
+              base64: url,
+              filename: tpl.mediaFileName || `imagen_${idx + 1}.jpg`,
+              mimetype: mime,
+            };
+          });
+          setSelectedGalleryImages(galleryItems);
+
+          if (urls[0].startsWith('data:')) {
+            setMediaFile({
+              base64: urls[0],
+              mimetype: galleryItems[0].mimetype,
+              filename: galleryItems[0].filename,
+            });
+            setMediaUrl('');
+          } else {
+            setMediaUrl(urls[0]);
+            setMediaFile(null);
+          }
+        } else {
+          setSelectedGalleryImages([]);
+          if (urls[0].startsWith('data:')) {
+            setMediaFile({
+              base64: urls[0],
+              mimetype: 'application/octet-stream',
+              filename: tpl.mediaFileName || 'archivo',
+            });
+            setMediaUrl('');
+          } else {
+            setMediaUrl(urls[0]);
+            setMediaFile(null);
+          }
+        }
+      }
+    } else {
+      if (messageType === 'bulk') {
+        setBulkMediaType('text');
+      } else {
+        setMessageType('text');
+      }
+      setSelectedGalleryImages([]);
+      clearMediaFile();
+      setMediaUrl('');
+    }
+
+    const photoMsg = tpl.mediaUrls && tpl.mediaUrls.length > 1 ? ` con ${tpl.mediaUrls.length} fotos` : '';
+    setToast({ type: 'success', message: `✨ Plantilla "${tpl.name}" cargada con éxito${photoMsg}.` });
+  };
+
   const openEditScheduleModal = (item: ScheduledBroadcastItem) => {
     setEditingScheduleId(item.id);
     setEditSchedName(item.name || `Envío Masivo (${item.scheduledTime})`);
@@ -925,24 +996,14 @@ export function MessageTester() {
               <select
                 onChange={e => {
                   const tpl = templates.find(t => t.id === e.target.value);
-                  if (tpl) {
-                    const fullText = [tpl.header, tpl.body, tpl.footer].filter(Boolean).join('\n\n');
-                    setContent(fullText);
-                    if (tpl.mediaType && tpl.mediaType !== 'text') {
-                      setMessageType(tpl.mediaType as any);
-                      if (tpl.mediaUrl) {
-                        setMediaUrl(tpl.mediaUrl);
-                      }
-                    } else {
-                      setMessageType('text');
-                    }
-                  }
+                  if (tpl) applyLoadedTemplate(tpl);
                 }}
+                defaultValue=""
               >
                 <option value="">-- Seleccionar una plantilla guardada --</option>
                 {templates.map(t => (
                   <option key={t.id} value={t.id}>
-                    {t.name}
+                    {t.name} {t.mediaType === 'image' ? (Array.isArray(t.mediaUrls) && t.mediaUrls.length > 1 ? `(${t.mediaUrls.length} fotos)` : '(1 foto)') : ''}
                   </option>
                 ))}
               </select>
@@ -1068,26 +1129,16 @@ export function MessageTester() {
                   <select
                     onChange={e => {
                       const found = templates.find(t => t.id === e.target.value);
-                      if (found) {
-                        const fullText = [found.header, found.body, found.footer].filter(Boolean).join('\n\n');
-                        setContent(fullText);
-                        if (found.mediaType && found.mediaType !== 'text') {
-                          setMessageType(found.mediaType as any);
-                          if (found.mediaUrl) {
-                            setMediaUrl(found.mediaUrl);
-                          }
-                        } else {
-                          setMessageType('text');
-                        }
-                        setToast({ type: 'success', message: `✨ Carga exitosa de plantilla: "${found.name}"` });
-                      }
+                      if (found) applyLoadedTemplate(found);
                     }}
                     style={{ width: '100%', padding: '6px 10px', fontSize: '0.85rem', borderRadius: '6px', border: '1px solid #86efac' }}
                     defaultValue=""
                   >
                     <option value="" disabled>-- Selecciona una plantilla guardada --</option>
                     {templates.map(t => (
-                      <option key={t.id} value={t.id}>{t.name}</option>
+                      <option key={t.id} value={t.id}>
+                        {t.name} {t.mediaType === 'image' ? (Array.isArray(t.mediaUrls) && t.mediaUrls.length > 1 ? `(${t.mediaUrls.length} fotos)` : '(1 foto)') : ''}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -1290,6 +1341,29 @@ export function MessageTester() {
 
           {messageType === 'bulk' && (
             <>
+              {templates.length > 0 && (
+                <div className="form-group" style={{ background: '#f0fdf4', padding: '10px 14px', borderRadius: '8px', border: '1px solid #bbf7d0', marginBottom: '14px' }}>
+                  <label style={{ fontSize: '0.84rem', fontWeight: 600, color: '#166534', margin: '0 0 6px 0', display: 'block' }}>
+                    📋 Cargar desde tus Plantillas Guardadas (Texto y Fotos):
+                  </label>
+                  <select
+                    onChange={e => {
+                      const found = templates.find(t => t.id === e.target.value);
+                      if (found) applyLoadedTemplate(found);
+                    }}
+                    style={{ width: '100%', padding: '7px 10px', fontSize: '0.85rem', borderRadius: '6px', border: '1px solid #86efac' }}
+                    defaultValue=""
+                  >
+                    <option value="" disabled>-- Selecciona una plantilla guardada --</option>
+                    {templates.map(t => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} {t.mediaType === 'image' ? (Array.isArray(t.mediaUrls) && t.mediaUrls.length > 1 ? `(${t.mediaUrls.length} fotos)` : '(1 foto)') : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div className="form-group">
                 <label>Tipo de contenido masivo</label>
                 <div className="toggle-group toggle-group-wrap">

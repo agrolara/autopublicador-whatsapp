@@ -62,6 +62,13 @@ export class CreateTemplateDto {
   mediaUrl?: string;
 
   @ApiPropertyOptional({
+    description: 'Array of media URLs or data URIs (up to 5)',
+    type: [String],
+  })
+  @IsOptional()
+  mediaUrls?: string[];
+
+  @ApiPropertyOptional({
     description: 'Optional filename for document/media attachments',
   })
   @IsOptional()
@@ -106,6 +113,10 @@ export class UpdateTemplateDto {
   @IsString()
   mediaUrl?: string;
 
+  @ApiPropertyOptional({ description: 'Array of media URLs or data URIs (up to 5)', type: [String] })
+  @IsOptional()
+  mediaUrls?: string[];
+
   @ApiPropertyOptional({ description: 'Optional filename for media' })
   @IsOptional()
   @IsString()
@@ -136,6 +147,9 @@ export class TemplateResponseDto {
 
   @ApiPropertyOptional({ type: String, nullable: true })
   mediaUrl?: string | null;
+
+  @ApiPropertyOptional({ type: [String], nullable: true })
+  mediaUrls?: string[] | null;
 
   @ApiPropertyOptional({ type: String, nullable: true })
   mediaFileName?: string | null;
