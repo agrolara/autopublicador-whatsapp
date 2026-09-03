@@ -48,6 +48,9 @@ export class AiAgentService implements OnModuleInit {
           maxTokens INT NOT NULL DEFAULT 400,
           humanTakeoverMinutes INT NOT NULL DEFAULT 30,
           debounceSeconds INT NOT NULL DEFAULT 3,
+          transcribeAudio BOOLEAN DEFAULT 0,
+          groqApiKey VARCHAR(255) NULL,
+          whisperModel VARCHAR(64) DEFAULT 'whisper-large-v3-turbo',
           createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
           updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
         )
@@ -55,6 +58,17 @@ export class AiAgentService implements OnModuleInit {
 
       await this.configRepository.query(`
         CREATE UNIQUE INDEX IF NOT EXISTS idx_session_ai_config_session ON session_ai_configs(sessionId)
+      `).catch(() => {});
+
+      // Add columns if table already existed without them
+      await this.configRepository.query(`
+        ALTER TABLE session_ai_configs ADD COLUMN transcribeAudio BOOLEAN DEFAULT 0
+      `).catch(() => {});
+      await this.configRepository.query(`
+        ALTER TABLE session_ai_configs ADD COLUMN groqApiKey VARCHAR(255) NULL
+      `).catch(() => {});
+      await this.configRepository.query(`
+        ALTER TABLE session_ai_configs ADD COLUMN whisperModel VARCHAR(64) DEFAULT 'whisper-large-v3-turbo'
       `).catch(() => {});
     } catch (err) {
       this.logger.warn('Failed to run session_ai_configs ensureTable migration', {
@@ -78,6 +92,9 @@ export class AiAgentService implements OnModuleInit {
         maxTokens: 400,
         humanTakeoverMinutes: 30,
         debounceSeconds: 3,
+        transcribeAudio: false,
+        groqApiKey: null,
+        whisperModel: 'whisper-large-v3-turbo',
       });
       try {
         config = await this.configRepository.save(config);
@@ -100,6 +117,9 @@ export class AiAgentService implements OnModuleInit {
     if (dto.maxTokens !== undefined) config.maxTokens = dto.maxTokens;
     if (dto.humanTakeoverMinutes !== undefined) config.humanTakeoverMinutes = dto.humanTakeoverMinutes;
     if (dto.debounceSeconds !== undefined) config.debounceSeconds = dto.debounceSeconds;
+    if (dto.transcribeAudio !== undefined) config.transcribeAudio = dto.transcribeAudio;
+    if (dto.groqApiKey !== undefined) config.groqApiKey = dto.groqApiKey.trim() || null;
+    if (dto.whisperModel !== undefined) config.whisperModel = dto.whisperModel.trim() || 'whisper-large-v3-turbo';
 
     return this.configRepository.save(config);
   }
@@ -112,7 +132,8 @@ export class AiAgentService implements OnModuleInit {
    * 4. NEVER for messages sent by ourselves (fromMe).
    * 5. Freshness gate: skips stale messages (> 180s old).
    * 6. Human takeover gate: silences AI if human replied recently.
-   * 7. Debounce gate: buffers rapid-fire customer messages.
+   * 7. Voice Notes STT: transcribes WhatsApp audio (.ogg) via Groq Whisper if enabled.
+   * 8. Debounce gate: buffers rapid-fire customer messages.
    */
   async handleInboundMessage(sessionId: string, message: Record<string, unknown>): Promise<void> {
     try {
@@ -137,14 +158,45 @@ export class AiAgentService implements OnModuleInit {
         return;
       }
 
-      const text = typeof message.body === 'string' ? message.body.trim() : '';
-      if (!text) return; // Only process messages with text content for now
-
       // Load session config
       const config = await this.configRepository.findOne({ where: { sessionId } });
       if (!config || !config.enabled || !config.apiKey || !config.systemPrompt) {
         return;
       }
+
+      let text = typeof message.body === 'string' ? message.body.trim() : '';
+
+      // Check for voice note / audio
+      const media = message.media as { data?: string; mimetype?: string } | undefined;
+      const isAudio =
+        message.type === 'ptt' ||
+        message.type === 'audio' ||
+        (media && typeof media.mimetype === 'string' && media.mimetype.startsWith('audio/'));
+
+      if (!text && isAudio) {
+        if (!config.transcribeAudio || !config.groqApiKey) {
+          this.logger.debug('Skipping audio: transcription disabled or no Groq key configured', { sessionId });
+          return;
+        }
+
+        const audioBase64 = media?.data;
+        if (!audioBase64) {
+          this.logger.warn('Audio message received but media data was not available', { sessionId, msgId: message.id });
+          return;
+        }
+
+        this.logger.log(`Transcribing audio message for session ${sessionId} with Groq Whisper...`);
+        const transcribed = await this.transcribeWithGroq(audioBase64, config.groqApiKey, config.whisperModel);
+        if (!transcribed) {
+          this.logger.warn('Groq Whisper returned empty transcription', { sessionId });
+          return;
+        }
+
+        this.logger.log(`Transcribed audio successfully: "${transcribed.slice(0, 60)}..."`);
+        text = `[Nota de voz transcripta]: "${transcribed}"`;
+      }
+
+      if (!text) return; // Only process messages with text content or successfully transcribed audio
 
       // Human takeover check: did the human operator reply in this chat recently?
       const humanMinutes = config.humanTakeoverMinutes ?? 30;
@@ -196,6 +248,54 @@ export class AiAgentService implements OnModuleInit {
         sessionId,
         error: err instanceof Error ? err.message : String(err),
       });
+    }
+  }
+
+  /**
+   * Transcribes WhatsApp audio (.ogg/opus) via Groq Whisper API in ~300ms.
+   */
+  async transcribeWithGroq(
+    audioBase64: string,
+    groqApiKey: string,
+    whisperModel?: string,
+  ): Promise<string> {
+    try {
+      const buffer = Buffer.from(audioBase64, 'base64');
+      const blob = new Blob([buffer], { type: 'audio/ogg' });
+      const formData = new FormData();
+      formData.append('file', blob, 'audio.ogg');
+      formData.append('model', whisperModel?.trim() || 'whisper-large-v3-turbo');
+      formData.append('language', 'es');
+      formData.append('response_format', 'json');
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+      try {
+        const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${groqApiKey.trim()}`,
+          },
+          body: formData,
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          const errText = await response.text().catch(() => '');
+          throw new Error(`Groq Whisper status ${response.status}: ${errText.slice(0, 200)}`);
+        }
+
+        const json = (await response.json()) as { text?: string };
+        return json.text?.trim() || '';
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    } catch (err) {
+      this.logger.error(
+        `Failed to transcribe audio with Groq Whisper: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return '';
     }
   }
 
@@ -305,7 +405,7 @@ export class AiAgentService implements OnModuleInit {
     let endpoint = 'https://openrouter.ai/api/v1/chat/completions';
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
+      Authorization: `Bearer ${apiKey}`,
     };
 
     if (provider === 'openrouter') {
@@ -348,7 +448,7 @@ export class AiAgentService implements OnModuleInit {
         throw new Error(`LLM provider returned status ${response.status}: ${errorText.slice(0, 300)}`);
       }
 
-      const json = await response.json() as any;
+      const json = (await response.json()) as any;
       const reply = json?.choices?.[0]?.message?.content;
       if (typeof reply !== 'string') {
         throw new Error('LLM provider response missing message content');

@@ -182,6 +182,9 @@ export interface SessionAiConfig {
   maxTokens: number;
   humanTakeoverMinutes: number;
   debounceSeconds: number;
+  transcribeAudio: boolean;
+  groqApiKey: string | null;
+  whisperModel: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -197,6 +200,9 @@ export interface UpdateAiConfigPayload {
   maxTokens?: number;
   humanTakeoverMinutes?: number;
   debounceSeconds?: number;
+  transcribeAudio?: boolean;
+  groqApiKey?: string;
+  whisperModel?: string;
 }
 
 export interface TestAiPromptPayload {

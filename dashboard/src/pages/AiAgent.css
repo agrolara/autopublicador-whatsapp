@@ -693,3 +693,52 @@
 .sim-tips li {
   margin-bottom: 0.25rem;
 }
+
+/* Audio Transcription with Groq Whisper */
+.audio-transcription-section {
+  border-left: 4px solid #8b5cf6;
+}
+
+.audio-transcription-description {
+  font-size: 0.84rem;
+  color: var(--text-muted, #64748b);
+  margin: 0.5rem 0 1rem 0;
+  line-height: 1.45;
+}
+
+.audio-cards-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+@media (max-width: 640px) {
+  .audio-cards-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.groq-link {
+  font-size: 0.76rem;
+  color: #3b82f6;
+  text-decoration: underline;
+  margin-left: auto;
+  font-weight: 500;
+}
+
+.groq-link:hover {
+  color: #2563eb;
+}
+
+.groq-free-tier-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #fdf4ff;
+  border: 1px solid #f0abfc;
+  color: #86198f;
+  padding: 0.6rem 0.85rem;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}

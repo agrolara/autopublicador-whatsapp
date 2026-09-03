@@ -16,6 +16,7 @@ import {
   HelpCircle,
   MessageSquare,
   Flame,
+  Mic,
 } from 'lucide-react';
 import { sessionApi, aiAgentApi } from '../services/api';
 import type {
@@ -116,6 +117,10 @@ export function AiAgent() {
   const [maxTokens, setMaxTokens] = useState<number>(400);
   const [humanTakeoverMinutes, setHumanTakeoverMinutes] = useState<number>(30);
   const [debounceSeconds, setDebounceSeconds] = useState<number>(3);
+  const [transcribeAudio, setTranscribeAudio] = useState<boolean>(false);
+  const [groqApiKey, setGroqApiKey] = useState<string>('');
+  const [showGroqApiKey, setShowGroqApiKey] = useState<boolean>(false);
+  const [whisperModel, setWhisperModel] = useState<string>('whisper-large-v3-turbo');
 
   // Test playground state
   const [testUserMessage, setTestUserMessage] = useState<string>('Hola, ¿qué servicios o productos tienen disponibles?');
@@ -164,6 +169,9 @@ export function AiAgent() {
         setMaxTokens(config.maxTokens ?? 400);
         setHumanTakeoverMinutes(config.humanTakeoverMinutes ?? 30);
         setDebounceSeconds(config.debounceSeconds ?? 3);
+        setTranscribeAudio(config.transcribeAudio ?? false);
+        setGroqApiKey(config.groqApiKey || '');
+        setWhisperModel(config.whisperModel || 'whisper-large-v3-turbo');
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Error al cargar configuración de IA');
       } finally {
@@ -202,6 +210,9 @@ export function AiAgent() {
         maxTokens,
         humanTakeoverMinutes,
         debounceSeconds,
+        transcribeAudio,
+        groqApiKey: groqApiKey.trim() || undefined,
+        whisperModel: whisperModel.trim(),
       };
 
       await aiAgentApi.updateConfig(selectedSessionId, payload);
@@ -555,6 +566,89 @@ export function AiAgent() {
                   Si el cliente envía varios mensajes seguidos, se agrupan en uno solo antes de llamar a la IA.
                 </span>
               </div>
+            </div>
+          </div>
+
+          {/* Voice Notes Audio Transcription (Groq Whisper) */}
+          <div className="config-section mt-4 audio-transcription-section">
+            <div className="section-title-between">
+              <label className="section-title">
+                <Mic size={18} />
+                Transcripción de Notas de Voz (Groq Whisper)
+              </label>
+              <div className="toggle-wrapper">
+                <span className={`toggle-label-text ${transcribeAudio ? 'active' : ''}`}>
+                  {transcribeAudio ? '🎙️ Transcripción Activada' : '⚪ Transcripción Apagada'}
+                </span>
+                <label className="switch">
+                  <input
+                    type="checkbox"
+                    checked={transcribeAudio}
+                    onChange={e => setTranscribeAudio(e.target.checked)}
+                  />
+                  <span className="slider round"></span>
+                </label>
+              </div>
+            </div>
+
+            <p className="audio-transcription-description">
+              Permite que la IA escuche las notas de voz de WhatsApp (.ogg / opus) de los clientes, las transcriba a texto en ~300 ms con <strong>Groq Whisper</strong> y responda automáticamente según tu negocio.
+            </p>
+
+            <div className="audio-cards-grid">
+              <div className="form-group mt-2">
+                <label className="input-label" style={{ display: 'flex', alignItems: 'center' }}>
+                  <Key size={16} />
+                  <span>Groq API Key:</span>
+                  <a
+                    href="https://console.groq.com/keys"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="groq-link"
+                  >
+                    Obtener clave gratis en Groq ↗
+                  </a>
+                </label>
+                <div className="input-with-action">
+                  <input
+                    type={showGroqApiKey ? 'text' : 'password'}
+                    className="text-input"
+                    placeholder="gsk_..."
+                    value={groqApiKey}
+                    onChange={e => setGroqApiKey(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="btn-icon"
+                    onClick={() => setShowGroqApiKey(!showGroqApiKey)}
+                    title={showGroqApiKey ? 'Ocultar clave' : 'Mostrar clave'}
+                  >
+                    {showGroqApiKey ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="form-group mt-2">
+                <label className="input-label">
+                  <Cpu size={16} />
+                  Modelo Whisper:
+                </label>
+                <select
+                  className="text-input"
+                  value={whisperModel}
+                  onChange={e => setWhisperModel(e.target.value)}
+                >
+                  <option value="whisper-large-v3-turbo">whisper-large-v3-turbo (~250 ms, Ultra rápido)</option>
+                  <option value="whisper-large-v3">whisper-large-v3 (~400 ms, Máxima precisión)</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="groq-free-tier-badge mt-3">
+              <Sparkles size={16} />
+              <span>
+                <strong>Capa Gratuita de Groq:</strong> Hasta <strong>2.000 notas de voz al día</strong> y 2 horas de audio por hora sin tarjeta de crédito.
+              </span>
             </div>
           </div>
 

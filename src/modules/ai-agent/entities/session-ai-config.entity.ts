@@ -41,6 +41,15 @@ export class SessionAiConfig {
   @Column({ type: 'int', default: 3 })
   debounceSeconds!: number;
 
+  @Column({ type: 'boolean', default: false })
+  transcribeAudio!: boolean;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  groqApiKey!: string | null;
+
+  @Column({ type: 'varchar', length: 64, default: 'whisper-large-v3-turbo' })
+  whisperModel!: string;
+
   @CreateDateColumn()
   createdAt!: Date;
 

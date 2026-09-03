@@ -62,6 +62,23 @@ export class UpdateAiConfigDto {
   @Min(1)
   @Max(30)
   debounceSeconds?: number;
+
+  @ApiPropertyOptional({ description: 'Enable voice notes transcription via Groq Whisper', default: false })
+  @IsOptional()
+  @IsBoolean()
+  transcribeAudio?: boolean;
+
+  @ApiPropertyOptional({ description: 'API Key for Groq Whisper' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  groqApiKey?: string;
+
+  @ApiPropertyOptional({ description: 'Groq Whisper model', default: 'whisper-large-v3-turbo' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  whisperModel?: string;
 }
 
 export class TestAiPromptDto {
