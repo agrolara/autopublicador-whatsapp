@@ -167,6 +167,54 @@ export interface TemplatePayload {
   mediaFileName?: string | null;
 }
 
+export type AiProvider = 'openrouter' | 'gemini' | 'openai' | 'custom';
+
+export interface SessionAiConfig {
+  id: string;
+  sessionId: string;
+  enabled: boolean;
+  provider: AiProvider;
+  apiKey: string | null;
+  model: string;
+  baseUrl: string | null;
+  systemPrompt: string | null;
+  temperature: number;
+  maxTokens: number;
+  humanTakeoverMinutes: number;
+  debounceSeconds: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpdateAiConfigPayload {
+  enabled?: boolean;
+  provider?: AiProvider;
+  apiKey?: string;
+  model?: string;
+  baseUrl?: string;
+  systemPrompt?: string;
+  temperature?: number;
+  maxTokens?: number;
+  humanTakeoverMinutes?: number;
+  debounceSeconds?: number;
+}
+
+export interface TestAiPromptPayload {
+  provider: AiProvider;
+  apiKey?: string;
+  model: string;
+  baseUrl?: string;
+  systemPrompt: string;
+  userMessage: string;
+  temperature?: number;
+  maxTokens?: number;
+}
+
+export interface TestAiPromptResponse {
+  reply: string;
+  durationMs: number;
+}
+
 export interface ApiKey {
   id: string;
   name: string;
@@ -892,6 +940,25 @@ export const templateApi = {
     }),
   delete: (sessionId: string, id: string) =>
     request<void>(`/sessions/${sessionId}/templates/${id}`, { method: 'DELETE' }),
+};
+
+// =============================================================================
+// AI Agent API
+// =============================================================================
+
+export const aiAgentApi = {
+  getConfig: (sessionId: string) =>
+    request<SessionAiConfig>(`/sessions/${sessionId}/ai-config`),
+  updateConfig: (sessionId: string, data: UpdateAiConfigPayload) =>
+    request<SessionAiConfig>(`/sessions/${sessionId}/ai-config`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  testPrompt: (sessionId: string, data: TestAiPromptPayload) =>
+    request<TestAiPromptResponse>(`/sessions/${sessionId}/ai-config/test`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 };
 
 // =============================================================================

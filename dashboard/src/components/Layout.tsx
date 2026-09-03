@@ -24,6 +24,7 @@ import {
   Calendar,
   Users,
   FolderGit2,
+  Bot,
 } from 'lucide-react';
 import { useTheme } from '../hooks/useTheme';
 import { type UserRole } from '../hooks/useRole';
@@ -45,6 +46,7 @@ const allNavItems = [
   { to: '/calendar', icon: Calendar, key: 'calendar' as const, adminOnly: false },
   { to: '/webhooks', icon: Webhook, key: 'webhooks' as const, adminOnly: false },
   { to: '/templates', icon: ClipboardList, key: 'templates' as const, adminOnly: false },
+  { to: '/ai-agent', icon: Bot, key: 'aiAgent' as const, adminOnly: false },
   { to: '/api-keys', icon: Key, key: 'apiKeys' as const, adminOnly: true },
   { to: '/message-tester', icon: Send, key: 'messageTester' as const, adminOnly: false },
   // Backend /infra/* is ADMIN-only; hide the nav item from non-admins (UX + defense-in-depth).
@@ -192,7 +194,7 @@ export function Layout({ onLogout, userRole }: LayoutProps) {
 
         <nav className="sidebar-nav">
           {navItems.map(({ to, icon: Icon, key }) => {
-            const label = t(`nav.${key}`);
+            const label = key === 'aiAgent' ? 'Asistente IA' : t(`nav.${key}`);
             return (
               <NavLink
                 key={to}

@@ -26,6 +26,7 @@ const CalendarPage = lazy(() => import('./pages/CalendarPage').then(m => ({ defa
 const GroupVault = lazy(() => import('./pages/GroupVault').then(m => ({ default: m.GroupVault })));
 const Infrastructure = lazy(() => import('./pages/Infrastructure').then(m => ({ default: m.Infrastructure })));
 const Plugins = lazy(() => import('./pages/Plugins'));
+const AiAgent = lazy(() => import('./pages/AiAgent').then(m => ({ default: m.AiAgent })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -127,6 +128,7 @@ function AppContent() {
               <Route path="calendar" element={<CalendarPage />} />
               <Route path="webhooks" element={<Webhooks />} />
               <Route path="templates" element={<Templates />} />
+              <Route path="ai-agent" element={<AiAgent />} />
               {role === 'admin' && <Route path="api-keys" element={<ApiKeys />} />}
               <Route path="logs" element={<Logs />} />
               <Route path="message-tester" element={<MessageTester />} />

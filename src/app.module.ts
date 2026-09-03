@@ -45,6 +45,7 @@ import { AgentToolsModule } from './core/agent-tools/agent-tools.module';
 import { IntegrationModule } from './modules/integration/integration.module';
 import { SearchModule } from './modules/search/search.module';
 import { GroupVaultModule } from './modules/group-vault/group-vault.module';
+import { AiAgentModule } from './modules/ai-agent/ai-agent.module';
 
 // Only import QueueModule if explicitly enabled to avoid Redis connection errors
 const queueModules: Array<Type | DynamicModule> = [];
@@ -308,6 +309,7 @@ if (dashboardServingEnabled && dashboardBuildPresent) {
     AgentToolsModule, // Agent-invocable tool registry (protocol-neutral)
     IntegrationModule, // Integration Fabric: @Public provider-webhook ingress + fast-ack pipeline
     GroupVaultModule, // Central group link vault and progressive auto-join
+    AiAgentModule, // Per-session AI Agent with strict private-only rules
     ...searchModules, // Global message search (opt-out via SEARCH_ENABLED=false; default ON)
     ...mcpModules, // MCP Streamable-HTTP server (opt-in via MCP_ENABLED=true)
     ...serveStaticModules, // Bundled dashboard SPA (production single-port setup)

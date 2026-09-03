@@ -18,9 +18,10 @@ import { WebhookModule } from '../webhook/webhook.module';
 import { StatusStoreModule } from '../status-store/status-store.module';
 import { ChatMediaModule } from '../chat-media/chat-media.module';
 import { AutomationModule } from '../automation/automation.module';
+import { AiAgentModule } from '../ai-agent/ai-agent.module';
 
 @Module({
-  // WebhookModule/StatusStoreModule/ChatMediaModule/AutomationModule do not import SessionModule
+  // WebhookModule/StatusStoreModule/ChatMediaModule/AutomationModule/AiAgentModule do not import SessionModule
   // back, so the dependency is one-directional — no forwardRef() needed.
   imports: [
     TypeOrmModule.forFeature([Session, Message], 'data'),
@@ -28,6 +29,7 @@ import { AutomationModule } from '../automation/automation.module';
     StatusStoreModule,
     ChatMediaModule,
     AutomationModule,
+    AiAgentModule,
   ],
   controllers: [SessionController],
   providers: [
