@@ -103,6 +103,7 @@ export function AiAgent() {
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
+  const [saveSuccessMessage, setSaveSuccessMessage] = useState<string>('Configuración de Inteligencia Artificial guardada correctamente.');
   const [error, setError] = useState<string | null>(null);
 
   // Form state
@@ -137,7 +138,9 @@ export function AiAgent() {
         const data = await sessionApi.list();
         setSessions(data);
         if (data.length > 0) {
-          setSelectedSessionId(data[0].id);
+          const savedSessionId = localStorage.getItem('openwa_ai_selected_session');
+          const sessionExists = savedSessionId && data.some(s => s.id === savedSessionId);
+          setSelectedSessionId(sessionExists ? savedSessionId! : data[0].id);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Error al cargar sesiones');
@@ -192,6 +195,65 @@ export function AiAgent() {
     }
   };
 
+  const handleToggleEnabled = async () => {
+    if (!selectedSessionId || saving) return;
+    const next = !enabled;
+    setEnabled(next);
+    try {
+      const payload: UpdateAiConfigPayload = {
+        enabled: next,
+        provider,
+        apiKey: apiKey.trim(),
+        model: model.trim(),
+        baseUrl: baseUrl.trim() || undefined,
+        systemPrompt: systemPrompt.trim(),
+        temperature,
+        maxTokens,
+        humanTakeoverMinutes,
+        debounceSeconds,
+        transcribeAudio,
+        groqApiKey: groqApiKey.trim() || undefined,
+        whisperModel: whisperModel.trim(),
+      };
+      await aiAgentApi.updateConfig(selectedSessionId, payload);
+      setSaveSuccessMessage(next ? '🟢 Asistente de IA ENCENDIDO y guardado para esta sesión.' : '⚪ Asistente de IA APAGADO y guardado para esta sesión.');
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3500);
+    } catch (err) {
+      setEnabled(!next);
+      setError(err instanceof Error ? err.message : 'Error al cambiar estado de la IA');
+    }
+  };
+
+  const handleToggleTranscribe = async (nextChecked: boolean) => {
+    if (!selectedSessionId || saving) return;
+    setTranscribeAudio(nextChecked);
+    try {
+      const payload: UpdateAiConfigPayload = {
+        enabled,
+        provider,
+        apiKey: apiKey.trim(),
+        model: model.trim(),
+        baseUrl: baseUrl.trim() || undefined,
+        systemPrompt: systemPrompt.trim(),
+        temperature,
+        maxTokens,
+        humanTakeoverMinutes,
+        debounceSeconds,
+        transcribeAudio: nextChecked,
+        groqApiKey: groqApiKey.trim() || undefined,
+        whisperModel: whisperModel.trim(),
+      };
+      await aiAgentApi.updateConfig(selectedSessionId, payload);
+      setSaveSuccessMessage(nextChecked ? '🎙️ Transcripción de audios ACTIVADA y guardada.' : '⚪ Transcripción de audios APAGADA y guardada.');
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3500);
+    } catch (err) {
+      setTranscribeAudio(!nextChecked);
+      setError(err instanceof Error ? err.message : 'Error al cambiar transcripción de audio');
+    }
+  };
+
   const handleSave = async () => {
     if (!selectedSessionId) return;
     try {
@@ -216,6 +278,7 @@ export function AiAgent() {
       };
 
       await aiAgentApi.updateConfig(selectedSessionId, payload);
+      setSaveSuccessMessage('Configuración de Inteligencia Artificial guardada correctamente.');
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 4000);
     } catch (err) {
@@ -287,7 +350,11 @@ export function AiAgent() {
           <label className="selector-label">Sesión de WhatsApp:</label>
           <select
             value={selectedSessionId}
-            onChange={e => setSelectedSessionId(e.target.value)}
+            onChange={e => {
+              const newId = e.target.value;
+              setSelectedSessionId(newId);
+              localStorage.setItem('openwa_ai_selected_session', newId);
+            }}
             className="session-select"
             disabled={loading || sessions.length === 0}
           >
@@ -310,7 +377,7 @@ export function AiAgent() {
       {saveSuccess && (
         <div className="ai-banner success">
           <CheckCircle2 size={20} />
-          <span>Configuración de Inteligencia Artificial guardada correctamente.</span>
+          <span>{saveSuccessMessage}</span>
         </div>
       )}
 
@@ -335,7 +402,7 @@ export function AiAgent() {
             <button
               type="button"
               className={`toggle-btn ${enabled ? 'on' : 'off'}`}
-              onClick={() => setEnabled(!enabled)}
+              onClick={handleToggleEnabled}
             >
               {enabled ? 'ENCENDIDO' : 'APAGADO'}
             </button>
@@ -584,7 +651,7 @@ export function AiAgent() {
                   <input
                     type="checkbox"
                     checked={transcribeAudio}
-                    onChange={e => setTranscribeAudio(e.target.checked)}
+                    onChange={e => handleToggleTranscribe(e.target.checked)}
                   />
                   <span className="slider round"></span>
                 </label>

@@ -103,40 +103,46 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
   private normalizePayloadMedia(sessionId: string, payload: SendBulkMessageDto): SendBulkMessageDto {
     if (!payload?.messages || payload.messages.length === 0) return payload;
 
-    const firstMsg = payload.messages[0] as any;
-    const msgType = firstMsg?.type || (firstMsg?.content?.image ? 'image' : firstMsg?.content?.video ? 'video' : 'text');
-    const mediaObj = firstMsg?.content?.[msgType];
-    const rawData = mediaObj?.url || mediaObj?.base64 || firstMsg?.mediaUrl;
+    const base64Cache = new Map<string, { url: string; mime: string }>();
+    const uploadsDir = path.join(process.cwd(), 'data', 'uploads');
 
-    if (typeof rawData === 'string' && rawData.startsWith('data:') && rawData.includes(';base64,')) {
-      try {
-        const comma = rawData.indexOf(',');
-        const header = rawData.substring(5, comma);
-        const mime = header.split(';')[0] || (msgType === 'video' ? 'video/mp4' : 'image/jpeg');
-        const ext = mime.split('/')[1]?.split('+')[0] || (msgType === 'video' ? 'mp4' : 'jpeg');
-        const cleanB64 = rawData.substring(comma + 1).replace(/\s/g, '');
-        const buffer = Buffer.from(cleanB64, 'base64');
+    for (const msg of payload.messages as any[]) {
+      const msgType = msg?.type || (msg?.content?.image ? 'image' : msg?.content?.video ? 'video' : 'text');
+      const mediaObj = msg?.content?.[msgType];
+      const rawData = mediaObj?.base64 || mediaObj?.url || msg?.mediaUrl;
 
-        const uploadsDir = path.join(process.cwd(), 'data', 'uploads');
-        if (!fs.existsSync(uploadsDir)) {
-          fs.mkdirSync(uploadsDir, { recursive: true });
-        }
-        const filename = `media_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
-        const filePath = path.join(uploadsDir, filename);
-        fs.writeFileSync(filePath, buffer);
+      if (typeof rawData === 'string' && rawData.startsWith('data:') && rawData.includes(';base64,')) {
+        try {
+          let cached = base64Cache.get(rawData);
+          if (!cached) {
+            const comma = rawData.indexOf(',');
+            const header = rawData.substring(5, comma);
+            const mime = header.split(';')[0] || (msgType === 'video' ? 'video/mp4' : 'image/jpeg');
+            const ext = mime.split('/')[1]?.split('+')[0] || (msgType === 'video' ? 'mp4' : 'jpeg');
+            const cleanB64 = rawData.substring(comma + 1).replace(/\s/g, '');
+            const buffer = Buffer.from(cleanB64, 'base64');
 
-        const mediaFileUrl = `/api/sessions/${sessionId}/messages/media-file/${filename}`;
+            if (!fs.existsSync(uploadsDir)) {
+              fs.mkdirSync(uploadsDir, { recursive: true });
+            }
+            const filename = `media_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+            const filePath = path.join(uploadsDir, filename);
+            fs.writeFileSync(filePath, buffer);
 
-        for (const msg of payload.messages as any[]) {
+            const mediaFileUrl = `/api/sessions/${sessionId}/messages/media-file/${filename}`;
+            cached = { url: mediaFileUrl, mime };
+            base64Cache.set(rawData, cached);
+          }
+
           if (msg.content?.[msgType]) {
-            msg.content[msgType] = { url: mediaFileUrl, mimetype: mime };
+            msg.content[msgType] = { url: cached.url, mimetype: cached.mime };
           }
           if (msg.mediaUrl) {
-            msg.mediaUrl = mediaFileUrl;
+            msg.mediaUrl = cached.url;
           }
+        } catch (err: any) {
+          this.logger.warn(`Could not persist inline media to disk: ${err?.message}`);
         }
-      } catch (err: any) {
-        this.logger.warn(`Could not persist inline media to disk: ${err?.message}`);
       }
     }
     return payload;

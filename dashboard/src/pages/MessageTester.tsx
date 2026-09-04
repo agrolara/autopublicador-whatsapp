@@ -386,32 +386,52 @@ export function MessageTester() {
     }
 
     const orig = scheduledList.find(s => s.id === editingScheduleId);
-    const origFirst = orig?.payload?.messages?.[0] || {};
-    const mType = origFirst?.type || (origFirst?.content?.image ? 'image' : origFirst?.content?.video ? 'video' : 'text');
-    const mUrl = origFirst?.content?.[mType]?.url || origFirst?.mediaUrl || '';
+    let campaignMediaUrls: string[] = Array.isArray(orig?.mediaUrls) && orig.mediaUrls.length > 0 ? orig.mediaUrls : [];
+    if (campaignMediaUrls.length === 0 && orig?.payload?.messages) {
+      const firstChatId = orig.payload.messages[0]?.chatId;
+      const firstChatMsgs = orig.payload.messages.filter(m => m.chatId === firstChatId);
+      campaignMediaUrls = firstChatMsgs
+        .map(m => m.content?.image?.url || (m as any).mediaUrl)
+        .filter(Boolean);
+    }
 
-    const messages = recipList.map(target => {
-      if (mType && mType !== 'text' && mUrl) {
-        return {
+    const messages: any[] = [];
+    for (const target of recipList) {
+      if (campaignMediaUrls.length > 0) {
+        // First image with caption
+        messages.push({
           chatId: target,
           to: target,
-          type: mType,
+          type: 'image',
           content: {
-            [mType]: { url: mUrl },
-            caption: editSchedContent.trim(),
+            image: { url: campaignMediaUrls[0] },
+            ...(editSchedContent.trim() ? { caption: editSchedContent.trim() } : {}),
           },
-          mediaUrl: mUrl,
+          mediaUrl: campaignMediaUrls[0],
           caption: editSchedContent.trim(),
-        };
+        });
+        // Additional images (photos 2 to 5)
+        for (let i = 1; i < campaignMediaUrls.length; i++) {
+          messages.push({
+            chatId: target,
+            to: target,
+            type: 'image',
+            content: {
+              image: { url: campaignMediaUrls[i] },
+            },
+            mediaUrl: campaignMediaUrls[i],
+          });
+        }
+      } else {
+        messages.push({
+          chatId: target,
+          to: target,
+          type: 'text' as const,
+          content: { text: editSchedContent.trim() },
+          message: { text: editSchedContent.trim() },
+        });
       }
-      return {
-        chatId: target,
-        to: target,
-        type: 'text' as const,
-        content: { text: editSchedContent.trim() },
-        message: { text: editSchedContent.trim() },
-      };
-    });
+    }
 
     try {
       await messageApi.updateScheduledBroadcast(session, editingScheduleId, {
@@ -698,12 +718,16 @@ export function MessageTester() {
         if (selectedGalleryImages.length > 0) {
           setToast({ type: 'info', message: `Subiendo ${selectedGalleryImages.length} imágenes al servidor...` });
           for (const img of selectedGalleryImages) {
-            const uploaded = await messageApi.uploadMedia(session, {
-              base64: img.base64,
-              mimetype: img.mimetype,
-              filename: img.filename,
-            });
-            uploadedMediaObjs.push({ url: uploaded.url });
+            if (img.base64 && (img.base64.startsWith('http://') || img.base64.startsWith('https://') || img.base64.startsWith('/'))) {
+              uploadedMediaObjs.push({ url: img.base64 });
+            } else {
+              const uploaded = await messageApi.uploadMedia(session, {
+                base64: img.base64,
+                mimetype: img.mimetype,
+                filename: img.filename,
+              });
+              uploadedMediaObjs.push({ url: uploaded.url });
+            }
           }
         } else if (bulkMediaType !== 'text') {
           if (mediaFile) {
@@ -792,16 +816,42 @@ export function MessageTester() {
         case 'text':
           result = await messageApi.sendText(session, chatId, content);
           break;
-        case 'image':
+        case 'image': {
+          if (selectedGalleryImages.length > 1) {
+            setToast({ type: 'info', message: `Enviando ${selectedGalleryImages.length} fotos a ${chatId}...` });
+            const firstImg = selectedGalleryImages[0];
+            const isFirstHttp = firstImg.base64 && (firstImg.base64.startsWith('http://') || firstImg.base64.startsWith('https://') || firstImg.base64.startsWith('/'));
+            const firstPayload: SendMediaPayload = isFirstHttp
+              ? { url: firstImg.base64 }
+              : { base64: firstImg.base64, mimetype: firstImg.mimetype };
+            if (content) firstPayload.caption = content;
+            result = await messageApi.sendMedia(session, chatId, 'image', firstPayload);
+
+            for (let idx = 1; idx < selectedGalleryImages.length; idx++) {
+              await new Promise(r => setTimeout(r, 1200));
+              const nextImg = selectedGalleryImages[idx];
+              const isNextHttp = nextImg.base64 && (nextImg.base64.startsWith('http://') || nextImg.base64.startsWith('https://') || nextImg.base64.startsWith('/'));
+              const nextPayload: SendMediaPayload = isNextHttp
+                ? { url: nextImg.base64 }
+                : { base64: nextImg.base64, mimetype: nextImg.mimetype };
+              await messageApi.sendMedia(session, chatId, 'image', nextPayload);
+            }
+          } else {
+            const payload: SendMediaPayload = mediaFile
+              ? { base64: mediaFile.base64, mimetype: mediaFile.mimetype }
+              : { url: mediaUrl };
+            if (content) payload.caption = content;
+            result = await messageApi.sendMedia(session, chatId, 'image', payload);
+          }
+          break;
+        }
         case 'video':
         case 'audio':
         case 'document': {
-          // sendMedia unifies URL and base64 (local file) sends; base64 wins when a file is picked. The
-          // backend accepts url XOR base64 and requires a mimetype for base64 (always provided here).
           const payload: SendMediaPayload = mediaFile
             ? { base64: mediaFile.base64, mimetype: mediaFile.mimetype }
             : { url: mediaUrl };
-          if ((messageType === 'image' || messageType === 'video') && content) payload.caption = content;
+          if (messageType === 'video' && content) payload.caption = content;
           if (messageType === 'document' && content) payload.filename = content;
           result = await messageApi.sendMedia(session, chatId, messageType, payload);
           break;
