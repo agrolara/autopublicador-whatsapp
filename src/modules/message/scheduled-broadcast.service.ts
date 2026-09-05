@@ -160,6 +160,13 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
             item.payload = this.normalizePayloadMedia(item.sessionId, item.payload);
             if (JSON.stringify(item.payload).length !== before) changed = true;
           }
+          if (!item.mediaUrls || item.mediaUrls.length === 0) {
+            const extracted = this.extractMediaUrls(item);
+            if (extracted.length > 0) {
+              item.mediaUrls = extracted;
+              changed = true;
+            }
+          }
         }
         if (changed) {
           this.saveToFile();
@@ -192,25 +199,53 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
     return String(err);
   }
 
+  private extractMediaUrls(item: ScheduledBroadcast): string[] {
+    if (Array.isArray(item.mediaUrls) && item.mediaUrls.length > 0) {
+      return item.mediaUrls;
+    }
+    if (item.payload?.messages?.length > 0) {
+      const firstChatId = item.payload.messages[0]?.chatId;
+      const chatMsgs = item.payload.messages.filter((m: any) => m.chatId === firstChatId);
+      const urls = chatMsgs.map((m: any) => {
+        const msgType = m?.type || (m?.content?.image ? 'image' : m?.content?.video ? 'video' : 'text');
+        return m?.content?.[msgType]?.url || m?.mediaUrl;
+      }).filter(Boolean);
+      if (urls.length > 0) return urls;
+    }
+    return [];
+  }
+
   getBroadcasts(sessionId: string): ScheduledBroadcast[] {
     return this.items
       .filter(item => item.sessionId === sessionId)
       .sort((a, b) => (a.scheduledTime || '').localeCompare(b.scheduledTime || ''))
       .map(item => {
+        const mediaUrls = this.extractMediaUrls(item);
         if (!item.payload?.messages || item.payload.messages.length <= 1) {
-          return item;
+          return {
+            ...item,
+            mediaUrls: mediaUrls.length > 0 ? mediaUrls : item.mediaUrls,
+          };
         }
         const lightweightMessages = item.payload.messages.map((m: any, idx: number) => {
           if (idx === 0) return m;
+          const msgType = m?.type || (m?.content?.image ? 'image' : m?.content?.video ? 'video' : 'text');
+          const mediaObj = m?.content?.[msgType];
+          const hasUrl = mediaObj?.url || m?.mediaUrl;
           return {
             chatId: m.chatId,
             type: m.type,
-            content: { text: m.content?.text || m.content?.caption || '' },
+            content: {
+              ...(hasUrl && msgType !== 'text' ? { [msgType]: { url: hasUrl } } : {}),
+              text: m.content?.text || m.content?.caption || '',
+            },
+            ...(hasUrl ? { mediaUrl: hasUrl } : {}),
           };
         });
 
         return {
           ...item,
+          mediaUrls: mediaUrls.length > 0 ? mediaUrls : item.mediaUrls,
           payload: {
             ...item.payload,
             messages: lightweightMessages as any,
@@ -285,6 +320,17 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
     postToStatus?: boolean;
   }): ScheduledBroadcast {
     const normalizedPayload = this.normalizePayloadMedia(sessionId, dto.payload);
+    let mediaUrls = Array.isArray(dto.mediaUrls) && dto.mediaUrls.length > 0 ? dto.mediaUrls : undefined;
+    if (!mediaUrls && normalizedPayload?.messages?.length > 0) {
+      const firstChatId = normalizedPayload.messages[0]?.chatId;
+      const chatMsgs = normalizedPayload.messages.filter((m: any) => m.chatId === firstChatId);
+      const urls = chatMsgs.map((m: any) => {
+        const msgType = m?.type || (m?.content?.image ? 'image' : m?.content?.video ? 'video' : 'text');
+        return m?.content?.[msgType]?.url || m?.mediaUrl;
+      }).filter(Boolean);
+      if (urls.length > 0) mediaUrls = urls;
+    }
+
     const newBroadcast: ScheduledBroadcast = {
       id: `sched_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       sessionId,
@@ -293,7 +339,7 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
       frequency: dto.frequency,
       payload: normalizedPayload,
       daysOfWeek: Array.isArray(dto.daysOfWeek) ? dto.daysOfWeek : undefined,
-      mediaUrls: Array.isArray(dto.mediaUrls) ? dto.mediaUrls : undefined,
+      mediaUrls,
       status: dto.status || 'active',
       startDate: dto.startDate || undefined,
       endDate: dto.endDate || undefined,
@@ -336,9 +382,15 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
     if (dto.scheduledTime !== undefined) item.scheduledTime = dto.scheduledTime;
     if (dto.frequency !== undefined) item.frequency = dto.frequency;
     if (dto.daysOfWeek !== undefined) item.daysOfWeek = Array.isArray(dto.daysOfWeek) ? dto.daysOfWeek : undefined;
-    if (dto.mediaUrls !== undefined) item.mediaUrls = Array.isArray(dto.mediaUrls) ? dto.mediaUrls : undefined;
+    if (dto.mediaUrls !== undefined) {
+      item.mediaUrls = Array.isArray(dto.mediaUrls) && dto.mediaUrls.length > 0 ? dto.mediaUrls : undefined;
+    }
     if (dto.payload !== undefined) {
       item.payload = this.normalizePayloadMedia(sessionId, dto.payload);
+      if (!item.mediaUrls || item.mediaUrls.length === 0) {
+        const extracted = this.extractMediaUrls(item);
+        if (extracted.length > 0) item.mediaUrls = extracted;
+      }
     }
     if (dto.status !== undefined) item.status = dto.status;
     if (dto.startDate !== undefined) item.startDate = dto.startDate || undefined;

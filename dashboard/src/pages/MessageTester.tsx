@@ -247,6 +247,7 @@ export function MessageTester() {
   const [editSchedPostToStatus, setEditSchedPostToStatus] = useState(false);
   const [editSchedContent, setEditSchedContent] = useState('');
   const [editSchedRecipients, setEditSchedRecipients] = useState('');
+  const [editSchedMediaUrls, setEditSchedMediaUrls] = useState<string[]>([]);
 
   const [savedImages, setSavedImages] = useState<SavedImageItem[]>(() => {
     try {
@@ -367,8 +368,19 @@ export function MessageTester() {
     const msgText = firstMsg?.content?.caption || firstMsg?.content?.text || firstMsg?.text || (typeof firstMsg?.message === 'string' ? firstMsg.message : '') || '';
     setEditSchedContent(msgText);
 
-    const recips = (item.payload?.messages || []).map(m => m.chatId || (m as any).to).filter(Boolean).join('\n');
+    // Deduplicate recipients (in multi-photo campaigns, there are multiple messages per recipient)
+    const recips = Array.from(new Set((item.payload?.messages || []).map(m => m.chatId || (m as any).to).filter(Boolean))).join('\n');
     setEditSchedRecipients(recips);
+
+    let initialMediaUrls: string[] = Array.isArray(item.mediaUrls) && item.mediaUrls.length > 0 ? item.mediaUrls : [];
+    if (initialMediaUrls.length === 0 && item.payload?.messages) {
+      const firstChatId = item.payload.messages[0]?.chatId;
+      const firstChatMsgs = item.payload.messages.filter((m: any) => m.chatId === firstChatId);
+      initialMediaUrls = firstChatMsgs
+        .map((m: any) => m.content?.image?.url || (m as any).mediaUrl)
+        .filter(Boolean);
+    }
+    setEditSchedMediaUrls(initialMediaUrls);
 
     setShowEditScheduleModal(true);
   };
@@ -386,7 +398,9 @@ export function MessageTester() {
     }
 
     const orig = scheduledList.find(s => s.id === editingScheduleId);
-    let campaignMediaUrls: string[] = Array.isArray(orig?.mediaUrls) && orig.mediaUrls.length > 0 ? orig.mediaUrls : [];
+    let campaignMediaUrls: string[] = editSchedMediaUrls.length > 0
+      ? editSchedMediaUrls
+      : (Array.isArray(orig?.mediaUrls) && orig.mediaUrls.length > 0 ? orig.mediaUrls : []);
     if (campaignMediaUrls.length === 0 && orig?.payload?.messages) {
       const firstChatId = orig.payload.messages[0]?.chatId;
       const firstChatMsgs = orig.payload.messages.filter(m => m.chatId === firstChatId);
@@ -442,6 +456,7 @@ export function MessageTester() {
         status: editSchedStatus,
         endDate: editSchedEndDate || '',
         postToStatus: editSchedPostToStatus,
+        mediaUrls: campaignMediaUrls.length > 0 ? campaignMediaUrls : undefined,
         payload: {
           messages,
           options: orig?.payload?.options || { delayBetweenMessages: 8000 },
@@ -780,6 +795,7 @@ export function MessageTester() {
         };
 
         if (sendMode === 'scheduled') {
+          const campaignMediaUrls = uploadedMediaObjs.map(u => u.url).filter(Boolean);
           await messageApi.createScheduledBroadcast(session, {
             scheduledTime,
             frequency: scheduledFrequency,
@@ -789,6 +805,7 @@ export function MessageTester() {
             status: 'active',
             endDate: scheduledEndDate || undefined,
             postToStatus: scheduledPostToStatus,
+            mediaUrls: campaignMediaUrls.length > 0 ? campaignMediaUrls : undefined,
           });
           setToast({
             type: 'success',
@@ -2366,6 +2383,8 @@ export function MessageTester() {
         setEditSchedContent={setEditSchedContent}
         editSchedRecipients={editSchedRecipients}
         setEditSchedRecipients={setEditSchedRecipients}
+        editSchedMediaUrls={editSchedMediaUrls}
+        setEditSchedMediaUrls={setEditSchedMediaUrls}
         templates={templates}
         onSave={handleSaveEditedSchedule}
       />

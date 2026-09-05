@@ -23,7 +23,18 @@ export interface EditScheduleModalProps {
   setEditSchedContent: (v: string) => void;
   editSchedRecipients: string;
   setEditSchedRecipients: (v: string) => void;
-  templates: Array<{ id: string; name: string; header?: string; body?: string; footer?: string }>;
+  editSchedMediaUrls?: string[];
+  setEditSchedMediaUrls?: (v: string[]) => void;
+  templates: Array<{
+    id: string;
+    name: string;
+    header?: string | null;
+    body?: string;
+    footer?: string | null;
+    mediaType?: string;
+    mediaUrl?: string | null;
+    mediaUrls?: string[] | null;
+  }>;
   onSave: () => void;
 }
 
@@ -58,6 +69,8 @@ export const EditScheduleModal: React.FC<EditScheduleModalProps> = ({
   setEditSchedContent,
   editSchedRecipients,
   setEditSchedRecipients,
+  editSchedMediaUrls = [],
+  setEditSchedMediaUrls,
   templates,
   onSave,
 }) => {
@@ -272,13 +285,21 @@ export const EditScheduleModal: React.FC<EditScheduleModalProps> = ({
                       if (found) {
                         const fullText = [found.header, found.body, found.footer].filter(Boolean).join('\n\n');
                         setEditSchedContent(fullText);
+                        if (setEditSchedMediaUrls) {
+                          const urls = Array.isArray(found.mediaUrls) && found.mediaUrls.length > 0
+                            ? found.mediaUrls
+                            : (found.mediaUrl ? [found.mediaUrl] : []);
+                          setEditSchedMediaUrls(urls);
+                        }
                       }
                     }}
                     defaultValue=""
                   >
                     <option value="" disabled>-- Plantillas --</option>
                     {templates.map(t => (
-                      <option key={t.id} value={t.id}>{t.name}</option>
+                      <option key={t.id} value={t.id}>
+                        {t.name} {t.mediaType === 'image' ? (Array.isArray(t.mediaUrls) && t.mediaUrls.length > 1 ? `(${t.mediaUrls.length} fotos)` : '(1 foto)') : ''}
+                      </option>
                     ))}
                   </select>
                 )}
@@ -292,6 +313,42 @@ export const EditScheduleModal: React.FC<EditScheduleModalProps> = ({
               placeholder="Escribe el mensaje de la campaña..."
             />
           </div>
+
+          {/* Attached Media Preview */}
+          {editSchedMediaUrls && editSchedMediaUrls.length > 0 && (
+            <div style={{
+              background: '#f0fdf4',
+              border: '1px solid #86efac',
+              borderRadius: '8px',
+              padding: '10px 14px',
+              marginBottom: '12px',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#166534', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  📸 {editSchedMediaUrls.length} {editSchedMediaUrls.length === 1 ? 'foto adjunta' : 'fotos adjuntas (se enviarán todas a cada grupo)'}
+                </span>
+                {setEditSchedMediaUrls && (
+                  <button
+                    type="button"
+                    onClick={() => setEditSchedMediaUrls([])}
+                    style={{ fontSize: '0.72rem', color: '#b91c1c', background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+                  >
+                    Quitar fotos
+                  </button>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {editSchedMediaUrls.map((url, i) => (
+                  <div key={i} style={{ position: 'relative', width: '60px', height: '60px', borderRadius: '6px', overflow: 'hidden', border: '1px solid #86efac' }}>
+                    <img src={url} alt={`Preview ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    <span style={{ position: 'absolute', bottom: 2, right: 2, background: 'rgba(0,0,0,0.65)', color: '#fff', fontSize: '0.65rem', padding: '1px 4px', borderRadius: '3px', fontWeight: 600 }}>
+                      #{i + 1}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="form-group" style={{ marginBottom: '16px' }}>
             <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>

@@ -1206,7 +1206,9 @@ export const messageApi = {
       scheduledTime: string;
       frequency: 'once' | 'daily' | 'twice_daily';
       payload: SendBulkPayload;
+      mediaUrls?: string[];
       name?: string;
+      daysOfWeek?: number[];
       status?: 'active' | 'paused';
       startDate?: string;
       endDate?: string;
@@ -1224,7 +1226,9 @@ export const messageApi = {
       scheduledTime: string;
       frequency: 'once' | 'daily' | 'twice_daily';
       payload: SendBulkPayload;
+      mediaUrls: string[];
       name: string;
+      daysOfWeek: number[];
       status: 'active' | 'paused';
       startDate: string;
       endDate: string;

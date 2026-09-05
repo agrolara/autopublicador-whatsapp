@@ -48,6 +48,7 @@ export function CalendarPage() {
   const [formText, setFormText] = useState('');
   const [formMessageType, setFormMessageType] = useState<'text' | 'image' | 'video' | 'audio' | 'document'>('text');
   const [formMediaUrl, setFormMediaUrl] = useState('');
+  const [formMediaUrls, setFormMediaUrls] = useState<string[]>([]);
   const [formStatus, setFormStatus] = useState<'active' | 'paused'>('active');
   const [formEndDate, setFormEndDate] = useState('');
   const [formPostToStatus, setFormPostToStatus] = useState(false);
@@ -130,7 +131,7 @@ export function CalendarPage() {
     });
   };
 
-  // Helper to extract text and recipients from payload
+  // Helper to extract text, media and recipients from payload
   const getItemDetails = (item: ScheduledBroadcastItem) => {
     const timeOnly = (item.scheduledTime || '').includes('T')
       ? item.scheduledTime.split('T')[1]?.substring(0, 5)
@@ -150,18 +151,31 @@ export function CalendarPage() {
       || '';
 
     const mediaType = (firstMsg as any)?.type || (firstMsg?.content?.image ? 'image' : firstMsg?.content?.video ? 'video' : 'text');
-    const mediaUrl = (firstMsg as any)?.content?.[mediaType]?.url || (firstMsg as any)?.mediaUrl || '';
 
+    // Extract all media URLs (for multi-photo campaigns)
+    let mediaUrls: string[] = Array.isArray(item.mediaUrls) && item.mediaUrls.length > 0 ? item.mediaUrls : [];
+    if (mediaUrls.length === 0 && Array.isArray(item.payload?.messages)) {
+      const firstChatId = (item.payload.messages[0] as any)?.chatId || (item.payload.messages[0] as any)?.to;
+      const firstChatMsgs = item.payload.messages.filter((m: any) => ((m as any).chatId || (m as any).to) === firstChatId);
+      mediaUrls = firstChatMsgs
+        .map((m: any) => m.content?.image?.url || m.content?.video?.url || (m as any).mediaUrl)
+        .filter(Boolean);
+    }
+    const mediaUrl = mediaUrls[0] || (firstMsg as any)?.content?.[mediaType]?.url || (firstMsg as any)?.mediaUrl || '';
+
+    // Deduplicate recipients (in multi-photo campaigns there are multiple messages per recipient)
     let recipients: string[] = [];
     if (Array.isArray(item.payload?.messages)) {
-      recipients = item.payload.messages
-        .map(m => (m as any).chatId || (m as any).to)
-        .filter(Boolean);
+      recipients = Array.from(new Set(
+        item.payload.messages
+          .map(m => (m as any).chatId || (m as any).to)
+          .filter(Boolean)
+      ));
     } else if (Array.isArray((item.payload as any)?.recipients)) {
-      recipients = (item.payload as any).recipients;
+      recipients = Array.from(new Set((item.payload as any).recipients));
     }
 
-    return { timeOnly, dateOnly, text, recipients, mediaType, mediaUrl };
+    return { timeOnly, dateOnly, text, recipients, mediaType, mediaUrl, mediaUrls };
   };
 
   // Open Create Modal for specific date
@@ -179,6 +193,7 @@ export function CalendarPage() {
     setFormText('');
     setFormMessageType('text');
     setFormMediaUrl('');
+    setFormMediaUrls([]);
     setFormRecipients([]);
     setManualRecipientsInput('');
     setSelectedTagId('');
@@ -189,7 +204,7 @@ export function CalendarPage() {
   const handleOpenItemModal = (item: ScheduledBroadcastItem, e: React.MouseEvent) => {
     e.stopPropagation();
     setActiveItem(item);
-    const { timeOnly, dateOnly, text, recipients, mediaType, mediaUrl } = getItemDetails(item);
+    const { timeOnly, dateOnly, text, recipients, mediaType, mediaUrl, mediaUrls } = getItemDetails(item);
     setFormName(item.name || `Publicación (${timeOnly})`);
     setFormDate(dateOnly);
     setFormTime(timeOnly);
@@ -200,6 +215,7 @@ export function CalendarPage() {
     setFormText(text);
     setFormMessageType(mediaType as any || 'text');
     setFormMediaUrl(mediaUrl || '');
+    setFormMediaUrls(mediaUrls || []);
     setFormRecipients(recipients);
     setManualRecipientsInput(recipients.join('\n'));
     setModalMode('view');
@@ -275,28 +291,57 @@ export function CalendarPage() {
       ? `${formDate}T${formTime}:00`
       : formTime;
 
-    const messages = recipientList.map(target => {
-      if (formMessageType && formMessageType !== 'text' && formMediaUrl) {
-        return {
+    const messages: any[] = [];
+    const campaignMediaUrls = formMediaUrls.length > 0 ? formMediaUrls : (formMediaUrl ? [formMediaUrl] : []);
+
+    for (const target of recipientList) {
+      if (formMessageType === 'image' && campaignMediaUrls.length > 0) {
+        // First image with text caption
+        messages.push({
+          chatId: target,
+          to: target,
+          type: 'image',
+          content: {
+            image: { url: campaignMediaUrls[0] },
+            ...(formText.trim() ? { caption: formText.trim() } : {}),
+          },
+          mediaUrl: campaignMediaUrls[0],
+          caption: formText.trim(),
+        });
+        // Additional images (photos 2 to N)
+        for (let i = 1; i < campaignMediaUrls.length; i++) {
+          messages.push({
+            chatId: target,
+            to: target,
+            type: 'image',
+            content: {
+              image: { url: campaignMediaUrls[i] },
+            },
+            mediaUrl: campaignMediaUrls[i],
+          });
+        }
+      } else if (formMessageType && formMessageType !== 'text' && campaignMediaUrls.length > 0) {
+        messages.push({
           chatId: target,
           to: target,
           type: formMessageType,
           content: {
-            [formMessageType]: { url: formMediaUrl },
+            [formMessageType]: { url: campaignMediaUrls[0] },
             caption: formText.trim(),
           },
-          mediaUrl: formMediaUrl,
+          mediaUrl: campaignMediaUrls[0],
           caption: formText.trim(),
-        };
+        });
+      } else {
+        messages.push({
+          chatId: target,
+          to: target,
+          type: 'text' as const,
+          content: { text: formText.trim() },
+          message: { text: formText.trim() },
+        });
       }
-      return {
-        chatId: target,
-        to: target,
-        type: 'text' as const,
-        content: { text: formText.trim() },
-        message: { text: formText.trim() },
-      };
-    });
+    }
 
     const payload = {
       messages,
@@ -312,6 +357,7 @@ export function CalendarPage() {
           status: formStatus,
           endDate: formEndDate || '',
           postToStatus: formPostToStatus,
+          mediaUrls: campaignMediaUrls.length > 0 ? campaignMediaUrls : undefined,
           payload,
         });
         showNotification('success', '✨ Publicación programada actualizada correctamente.');
@@ -323,6 +369,7 @@ export function CalendarPage() {
           status: formStatus,
           endDate: formEndDate || undefined,
           postToStatus: formPostToStatus,
+          mediaUrls: campaignMediaUrls.length > 0 ? campaignMediaUrls : undefined,
           payload,
         });
         showNotification('success', modalMode === 'duplicate'
@@ -346,13 +393,16 @@ export function CalendarPage() {
       setFormText(fullText);
       if (!formName) setFormName(tpl.name);
       if (tpl.mediaType && tpl.mediaType !== 'text') {
-        setFormMessageType(tpl.mediaType);
-        if (tpl.mediaUrl) {
-          setFormMediaUrl(tpl.mediaUrl);
-        }
+        setFormMessageType(tpl.mediaType as any);
+        const urls = Array.isArray((tpl as any).mediaUrls) && (tpl as any).mediaUrls.length > 0
+          ? (tpl as any).mediaUrls
+          : (tpl.mediaUrl ? [tpl.mediaUrl] : []);
+        setFormMediaUrls(urls);
+        setFormMediaUrl(urls[0] || tpl.mediaUrl || '');
       } else {
         setFormMessageType('text');
         setFormMediaUrl('');
+        setFormMediaUrls([]);
       }
     }
   };
@@ -771,6 +821,25 @@ export function CalendarPage() {
                   </div>
                 </div>
 
+                {/* Attached Images in View Mode */}
+                {(formMediaUrls.length > 0 || formMediaUrl) && (
+                  <div>
+                    <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-color, #334155)' }}>
+                      🖼️ Imágenes Adjuntas ({(formMediaUrls.length > 0 ? formMediaUrls : [formMediaUrl]).length}):
+                    </span>
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '6px', flexWrap: 'wrap' }}>
+                      {(formMediaUrls.length > 0 ? formMediaUrls : [formMediaUrl]).map((url, idx) => (
+                        <div key={idx} style={{ position: 'relative', width: '64px', height: '64px', borderRadius: '6px', overflow: 'hidden', border: '1px solid #cbd5e1' }}>
+                          <img src={url} alt={`Adjunto ${idx + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          <span style={{ position: 'absolute', bottom: 2, right: 2, background: 'rgba(0,0,0,0.6)', color: 'white', fontSize: '10px', padding: '1px 4px', borderRadius: '4px' }}>
+                            #{idx + 1}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Actions Toolbar in View Mode */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px', paddingTop: '14px', borderTop: '1px solid var(--border-color, #e2e8f0)' }}>
                   <button
@@ -1082,6 +1151,25 @@ export function CalendarPage() {
                     }}
                   />
                 </div>
+
+                {/* Attached Images Preview in Form Mode */}
+                {formMessageType === 'image' && (formMediaUrls.length > 0 || formMediaUrl) && (
+                  <div style={{ padding: '10px 12px', background: 'var(--bg-secondary, #f8fafc)', borderRadius: '8px', border: '1px solid var(--border-color, #e2e8f0)' }}>
+                    <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-color, #475569)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      🖼️ Imágenes que se enviarán ({(formMediaUrls.length > 0 ? formMediaUrls : [formMediaUrl]).length} foto{(formMediaUrls.length > 0 ? formMediaUrls : [formMediaUrl]).length > 1 ? 's' : ''}):
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      {(formMediaUrls.length > 0 ? formMediaUrls : [formMediaUrl]).map((url, idx) => (
+                        <div key={idx} style={{ position: 'relative', width: '64px', height: '64px', borderRadius: '6px', overflow: 'hidden', border: '1px solid #cbd5e1' }}>
+                          <img src={url} alt={`Preview ${idx + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          <span style={{ position: 'absolute', bottom: 2, right: 2, background: 'rgba(0,0,0,0.6)', color: 'white', fontSize: '10px', padding: '1px 4px', borderRadius: '4px' }}>
+                            #{idx + 1}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Category / Groups Quick Selector */}
                 <div>
