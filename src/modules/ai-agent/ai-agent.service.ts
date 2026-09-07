@@ -720,14 +720,21 @@ export class AiAgentService implements OnModuleInit {
 
     const messagesForLlm = [
       { role: 'system' as const, content: fullSystemPrompt },
-      { role: 'user' as const, content: 'Hola, ¿qué servicios o productos ofrecen y cuáles son sus precios?' },
+      { role: 'user' as const, content: dto.userMessage?.trim() || 'Hola, ¿qué servicios o productos ofrecen y cuáles son sus precios?' },
     ];
 
-    const reply = await this.callLlm(config as SessionAiConfig, messagesForLlm);
-    return {
-      reply,
-      durationMs: Date.now() - start,
-    };
+    try {
+      const reply = await this.callLlm(config as SessionAiConfig, messagesForLlm);
+      return {
+        reply,
+        durationMs: Date.now() - start,
+      };
+    } catch (err) {
+      return {
+        reply: `⚠️ Error de conexión con el proveedor (${dto.provider}): ${err instanceof Error ? err.message : String(err)}`,
+        durationMs: Date.now() - start,
+      };
+    }
   }
 
   private async callLlm(
