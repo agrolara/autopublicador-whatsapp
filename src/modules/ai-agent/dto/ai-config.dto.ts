@@ -42,7 +42,7 @@ export class UpdateAiConfigDto {
   @Max(1)
   temperature?: number;
 
-  @ApiPropertyOptional({ description: 'Maximum tokens to generate', default: 400 })
+  @ApiPropertyOptional({ description: 'Maximum tokens to generate', default: 1200 })
   @IsOptional()
   @IsInt()
   @Min(50)

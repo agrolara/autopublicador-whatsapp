@@ -21,7 +21,7 @@ interface DebounceEntry {
  * Splits a long text cleanly into WhatsApp-friendly chunks of <= maxChunkSize chars.
  * Prefers splitting on double newlines, single newlines, sentence endings, or spaces.
  */
-export function chunkMessage(text: string, maxChunkSize = 1400): string[] {
+export function chunkMessage(text: string, maxChunkSize = 650): string[] {
   if (!text || text.length <= maxChunkSize) {
     return text && text.trim() ? [text.trim()] : [];
   }
@@ -38,12 +38,12 @@ export function chunkMessage(text: string, maxChunkSize = 1400): string[] {
     let cutIndex = -1;
     // 1. Try splitting by paragraph (\n\n)
     const doubleNewlineIndex = remaining.lastIndexOf('\n\n', maxChunkSize);
-    if (doubleNewlineIndex > 200) {
+    if (doubleNewlineIndex > 100) {
       cutIndex = doubleNewlineIndex;
     } else {
       // 2. Try splitting by single newline (\n)
       const newlineIndex = remaining.lastIndexOf('\n', maxChunkSize);
-      if (newlineIndex > 200) {
+      if (newlineIndex > 100) {
         cutIndex = newlineIndex;
       } else {
         // 3. Try splitting by sentence (. , ! , ? )
@@ -54,7 +54,7 @@ export function chunkMessage(text: string, maxChunkSize = 1400): string[] {
         } else {
           // 4. Try splitting by whitespace
           const spaceIndex = remaining.lastIndexOf(' ', maxChunkSize);
-          if (spaceIndex > 200) {
+          if (spaceIndex > 60) {
             cutIndex = spaceIndex;
           } else {
             // 5. Hard cut fallback
@@ -574,8 +574,8 @@ export class AiAgentService implements OnModuleInit {
         return;
       }
 
-      // Send the reply with smart message chunking (<= 1400 chars per message)
-      const chunks = chunkMessage(replyText, 1400);
+      // Send the reply with smart message chunking (<= 650 chars per message)
+      const chunks = chunkMessage(replyText, 650);
 
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
@@ -715,7 +715,7 @@ export class AiAgentService implements OnModuleInit {
       baseUrl: dto.baseUrl,
       systemPrompt: fullSystemPrompt,
       temperature: dto.temperature ?? 0.7,
-      maxTokens: dto.maxTokens ?? 400,
+      maxTokens: dto.maxTokens ?? 1200,
     };
 
     const messagesForLlm = [
@@ -785,7 +785,7 @@ export class AiAgentService implements OnModuleInit {
         model: config.model || 'deepseek/deepseek-chat',
         messages,
         temperature: config.temperature ?? 0.7,
-        max_tokens: config.maxTokens ?? 400,
+        max_tokens: config.maxTokens ?? 1200,
       }),
     });
 
@@ -820,7 +820,7 @@ export class AiAgentService implements OnModuleInit {
         model,
         messages,
         temperature: config.temperature ?? 0.7,
-        max_tokens: config.maxTokens ?? 400,
+        max_tokens: config.maxTokens ?? 1200,
       }),
     });
 
@@ -859,7 +859,7 @@ export class AiAgentService implements OnModuleInit {
       contents,
       generationConfig: {
         temperature: config.temperature ?? 0.7,
-        maxOutputTokens: config.maxTokens ?? 400,
+        maxOutputTokens: config.maxTokens ?? 1200,
       },
     };
 

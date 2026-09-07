@@ -32,7 +32,7 @@ export class SessionAiConfig {
   @Column({ type: 'float', default: 0.7 })
   temperature!: number;
 
-  @Column({ type: 'int', default: 400 })
+  @Column({ type: 'int', default: 1200 })
   maxTokens!: number;
 
   @Column({ type: 'int', default: 30 })

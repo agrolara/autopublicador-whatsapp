@@ -80,26 +80,53 @@ REGLAS DE ATENCIÓN:
 3. Informa al cliente que su requerimiento está siendo registrado para seguimiento.`,
 };
 
-const SUGGESTED_MODELS: Record<AiProvider, string[]> = {
+interface SuggestedModelItem {
+  id: string;
+  badge: string;
+  isFree: boolean;
+}
+
+const SUGGESTED_MODELS: Record<AiProvider, SuggestedModelItem[]> = {
   openrouter: [
-    'deepseek/deepseek-chat',
-    'anthropic/claude-3.5-sonnet',
-    'meta-llama/llama-3.3-70b-instruct',
-    'openai/gpt-4o-mini',
+    {
+      id: 'meta-llama/llama-3.3-70b-instruct',
+      badge: '$0.10 - $0.32 / 1M tok',
+      isFree: false,
+    },
+    {
+      id: 'nvidia/nemotron-3.5-lightning:free',
+      badge: 'Gratis',
+      isFree: true,
+    },
+    {
+      id: 'nvidia/nemotron-3-ultra-550b-a55b:free',
+      badge: 'Gratis',
+      isFree: true,
+    },
+    {
+      id: 'google/gemma-4-31b-it:free',
+      badge: 'Gratis',
+      isFree: true,
+    },
+    {
+      id: 'google/gemma-4-26b-a4b-it:free',
+      badge: 'Gratis',
+      isFree: true,
+    },
   ],
   gemini: [
-    'gemini-2.0-flash',
-    'gemini-1.5-flash',
-    'gemini-1.5-pro',
+    { id: 'gemini-2.0-flash', badge: 'Ultra Rápido', isFree: true },
+    { id: 'gemini-1.5-flash', badge: 'Económico', isFree: true },
+    { id: 'gemini-1.5-pro', badge: 'Alta Capacidad', isFree: false },
   ],
   openai: [
-    'gpt-4o-mini',
-    'gpt-4o',
+    { id: 'gpt-4o-mini', badge: 'Económico', isFree: false },
+    { id: 'gpt-4o', badge: 'Avanzado', isFree: false },
   ],
   custom: [
-    'llama-3.3-70b-versatile',
-    'deepseek-chat',
-    'mistral-large-latest',
+    { id: 'llama-3.3-70b-versatile', badge: 'Ultra Rápido', isFree: true },
+    { id: 'deepseek-chat', badge: 'Compatible', isFree: true },
+    { id: 'mistral-large-latest', badge: 'Compatible', isFree: false },
   ],
 };
 
@@ -118,11 +145,11 @@ export function AiAgent() {
   const [provider, setProvider] = useState<AiProvider>('openrouter');
   const [apiKey, setApiKey] = useState<string>('');
   const [showApiKey, setShowApiKey] = useState<boolean>(false);
-  const [model, setModel] = useState<string>('deepseek/deepseek-chat');
+  const [model, setModel] = useState<string>('meta-llama/llama-3.3-70b-instruct');
   const [baseUrl, setBaseUrl] = useState<string>('');
   const [systemPrompt, setSystemPrompt] = useState<string>('');
   const [temperature, setTemperature] = useState<number>(0.7);
-  const [maxTokens, setMaxTokens] = useState<number>(400);
+  const [maxTokens, setMaxTokens] = useState<number>(1200);
   const [humanTakeoverMinutes, setHumanTakeoverMinutes] = useState<number>(30);
   const [debounceSeconds, setDebounceSeconds] = useState<number>(3);
   const [transcribeAudio, setTranscribeAudio] = useState<boolean>(false);
@@ -178,11 +205,11 @@ export function AiAgent() {
         setEnabled(config.enabled ?? false);
         setProvider(config.provider || 'openrouter');
         setApiKey(config.apiKey || '');
-        setModel(config.model || 'deepseek/deepseek-chat');
+        setModel(config.model || 'meta-llama/llama-3.3-70b-instruct');
         setBaseUrl(config.baseUrl || '');
         setSystemPrompt(config.systemPrompt || '');
         setTemperature(config.temperature ?? 0.7);
-        setMaxTokens(config.maxTokens ?? 400);
+        setMaxTokens(config.maxTokens && config.maxTokens >= 600 ? config.maxTokens : 1200);
         setHumanTakeoverMinutes(config.humanTakeoverMinutes ?? 30);
         setDebounceSeconds(config.debounceSeconds ?? 3);
         setTranscribeAudio(config.transcribeAudio ?? false);
@@ -250,7 +277,7 @@ export function AiAgent() {
     setProvider(newProvider);
     const defaults = SUGGESTED_MODELS[newProvider];
     if (defaults && defaults.length > 0) {
-      setModel(defaults[0]);
+      setModel(defaults[0].id);
     }
     if (newProvider === 'gemini' && !baseUrl) {
       setBaseUrl('');
@@ -547,20 +574,26 @@ export function AiAgent() {
                 className="text-input"
                 value={model}
                 onChange={e => setModel(e.target.value)}
-                placeholder="Identificador del modelo (ej. deepseek/deepseek-chat)"
+                placeholder="Identificador del modelo (ej. meta-llama/llama-3.3-70b-instruct)"
               />
               <div className="model-suggestions">
-                <span className="sugg-label">Sugeridos:</span>
-                {SUGGESTED_MODELS[provider]?.map(m => (
-                  <button
-                    key={m}
-                    type="button"
-                    className={`model-tag ${model === m ? 'active' : ''}`}
-                    onClick={() => setModel(m)}
-                  >
-                    {m}
-                  </button>
-                ))}
+                <span className="sugg-label">Accesos rápidos sugeridos:</span>
+                <div className="model-chips-container">
+                  {SUGGESTED_MODELS[provider]?.map(m => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      className={`model-tag-chip ${model === m.id ? 'active' : ''}`}
+                      onClick={() => setModel(m.id)}
+                      title={m.id}
+                    >
+                      <span className="chip-model-name">{m.id}</span>
+                      <span className={`chip-badge ${m.isFree ? 'free' : 'paid'}`}>
+                        {m.badge}
+                      </span>
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -665,6 +698,24 @@ export function AiAgent() {
                 </select>
                 <span className="setting-hint">
                   Si el cliente envía varios mensajes seguidos, se agrupan en uno solo antes de llamar a la IA.
+                </span>
+              </div>
+
+              <div className="setting-box">
+                <label className="input-label">Límite máximo de respuesta (Tokens):</label>
+                <select
+                  className="text-input"
+                  value={maxTokens}
+                  onChange={e => setMaxTokens(Number(e.target.value))}
+                >
+                  <option value={800}>800 tokens (~2.500 caracteres)</option>
+                  <option value={1200}>1.200 tokens (~4.000 caracteres) (Recomendado)</option>
+                  <option value={1600}>1.600 tokens (~5.500 caracteres)</option>
+                  <option value={2000}>2.000 tokens (~7.000 caracteres)</option>
+                  <option value={400}>400 tokens (Corto)</option>
+                </select>
+                <span className="setting-hint">
+                  Permite respuestas completas sin cortes en listados amplios o menús extensos.
                 </span>
               </div>
             </div>
