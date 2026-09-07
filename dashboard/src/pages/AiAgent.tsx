@@ -17,6 +17,11 @@ import {
   MessageSquare,
   Flame,
   Mic,
+  BookOpen,
+  Layers,
+  UploadCloud,
+  Trash2,
+  FileText,
 } from 'lucide-react';
 import { sessionApi, aiAgentApi } from '../services/api';
 import type {
@@ -24,6 +29,7 @@ import type {
   SessionAiConfig,
   AiProvider,
   UpdateAiConfigPayload,
+  KnowledgeDocument,
 } from '../services/api';
 import './AiAgent.css';
 
@@ -131,6 +137,12 @@ export function AiAgent() {
   const [testDuration, setTestDuration] = useState<number | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
 
+  // Knowledge Base state
+  const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
+  const [loadingDocuments, setLoadingDocuments] = useState<boolean>(false);
+  const [uploadingDocument, setUploadingDocument] = useState<boolean>(false);
+  const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
+
   // Load active sessions
   useEffect(() => {
     async function loadSessions() {
@@ -176,6 +188,7 @@ export function AiAgent() {
         setTranscribeAudio(config.transcribeAudio ?? false);
         setGroqApiKey(config.groqApiKey || '');
         setWhisperModel(config.whisperModel || 'whisper-large-v3-turbo');
+        await loadDocuments(selectedSessionId);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Error al cargar configuración de IA');
       } finally {
@@ -184,6 +197,54 @@ export function AiAgent() {
     }
     loadConfig();
   }, [selectedSessionId]);
+
+  const loadDocuments = async (sessionId: string) => {
+    try {
+      setLoadingDocuments(true);
+      const docs = await aiAgentApi.getDocuments(sessionId);
+      setDocuments(docs || []);
+    } catch (err) {
+      console.error('Error al cargar documentos de base de conocimiento:', err);
+    } finally {
+      setLoadingDocuments(false);
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedSessionId) return;
+    try {
+      setUploadingDocument(true);
+      setError(null);
+      await aiAgentApi.uploadDocument(selectedSessionId, file);
+      await loadDocuments(selectedSessionId);
+      setSaveSuccessMessage(`📄 Documento "${file.name}" cargado con éxito a la Base de Conocimiento.`);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 4000);
+    } catch (err: any) {
+      setError(err.message || 'Error al cargar documento');
+    } finally {
+      setUploadingDocument(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const handleDeleteDocument = async (docId: string, docName: string) => {
+    if (!selectedSessionId) return;
+    if (!window.confirm(`¿Deseas eliminar "${docName}" de la base de conocimiento?`)) return;
+    try {
+      setDeletingDocId(docId);
+      await aiAgentApi.deleteDocument(selectedSessionId, docId);
+      await loadDocuments(selectedSessionId);
+      setSaveSuccessMessage(`🗑️ Documento "${docName}" eliminado.`);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (err: any) {
+      setError(err.message || 'Error al eliminar documento');
+    } finally {
+      setDeletingDocId(null);
+    }
+  };
 
   const handleProviderChange = (newProvider: AiProvider) => {
     setProvider(newProvider);
@@ -691,6 +752,98 @@ export function AiAgent() {
                 <strong>Capa Gratuita de Groq:</strong> Hasta <strong>2.000 notas de voz al día</strong> y 2 horas de audio por hora sin tarjeta de crédito.
               </span>
             </div>
+          </div>
+
+          {/* Knowledge Base Documents Section */}
+          <div className="config-section mt-4 knowledge-base-section">
+            <div className="section-title-between">
+              <label className="section-title">
+                <BookOpen size={18} />
+                Base de Conocimiento y Documentos (PDF, DOCX, TXT, CSV)
+              </label>
+              <div className="kb-badge">
+                <Layers size={14} />
+                <span>{documents.length} {documents.length === 1 ? 'documento activo' : 'documentos activos'}</span>
+              </div>
+            </div>
+
+            <p className="kb-description">
+              Carga catálogos, listas de precios, políticas o menús. La IA extraerá el texto automáticamente y lo usará como fuente de verdad para responder a los clientes sin saturar el prompt manual.
+            </p>
+
+            <div className="kb-upload-zone">
+              <label className={`kb-file-dropzone ${uploadingDocument ? 'uploading' : ''}`}>
+                <input
+                  type="file"
+                  accept=".pdf,.docx,.txt,.csv"
+                  onChange={handleFileUpload}
+                  disabled={uploadingDocument || !selectedSessionId}
+                  style={{ display: 'none' }}
+                />
+                <UploadCloud size={28} className="kb-upload-icon" />
+                <span className="kb-upload-text">
+                  {uploadingDocument ? 'Subiendo y extrayendo texto del documento...' : 'Haz clic aquí para seleccionar o arrastra un archivo (.pdf, .docx, .txt, .csv)'}
+                </span>
+                <span className="kb-upload-subtext">Máximo 10 MB por archivo. Almacenamiento persistente en volumen Docker.</span>
+              </label>
+            </div>
+
+            {loadingDocuments ? (
+              <div className="kb-loading">Cargando documentos de la base de conocimiento...</div>
+            ) : documents.length > 0 ? (
+              <div className="kb-table-wrapper mt-3">
+                <table className="kb-table">
+                  <thead>
+                    <tr>
+                      <th>Nombre del Archivo</th>
+                      <th>Formato</th>
+                      <th>Tamaño</th>
+                      <th>Caracteres</th>
+                      <th>Fecha de Carga</th>
+                      <th style={{ textAlign: 'right' }}>Acción</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {documents.map(doc => {
+                      const ext = doc.originalName.split('.').pop()?.toLowerCase() || 'txt';
+                      return (
+                        <tr key={doc.id}>
+                          <td className="kb-doc-name">
+                            <FileText size={16} />
+                            <span title={doc.originalName}>{doc.originalName}</span>
+                          </td>
+                          <td>
+                            <span className={`kb-type-badge type-${ext}`}>
+                              {ext.toUpperCase()}
+                            </span>
+                          </td>
+                          <td>{(doc.size / 1024).toFixed(1)} KB</td>
+                          <td>{doc.charCount.toLocaleString()} caracteres</td>
+                          <td>{new Date(doc.uploadedAt).toLocaleDateString('es-CL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
+                          <td style={{ textAlign: 'right' }}>
+                            <button
+                              type="button"
+                              className="kb-delete-btn"
+                              title="Eliminar de la base de conocimiento"
+                              onClick={() => handleDeleteDocument(doc.id, doc.originalName)}
+                              disabled={deletingDocId === doc.id}
+                            >
+                              <Trash2 size={16} />
+                              {deletingDocId === doc.id ? 'Eliminando...' : 'Eliminar'}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="kb-empty-box mt-3">
+                <FileText size={22} />
+                <span>No hay documentos cargados para esta sesión. Sube archivos para enriquecer las respuestas de la IA.</span>
+              </div>
+            )}
           </div>
 
           {/* Action Bar */}

@@ -9,17 +9,81 @@ import { UpdateAiConfigDto, TestAiPromptDto } from './dto/ai-config.dto';
 import { Message, MessageDirection } from '../message/entities/message.entity';
 import { createLogger } from '../../common/services/logger.service';
 import type { MessageService } from '../message/message.service';
+import { KnowledgeBaseService } from './knowledge-base.service';
+import { EngineRegistry } from '../../engine/engine-registry.service';
 
 interface DebounceEntry {
   timer: NodeJS.Timeout;
   messages: string[];
 }
 
+/**
+ * Splits a long text cleanly into WhatsApp-friendly chunks of <= maxChunkSize chars.
+ * Prefers splitting on double newlines, single newlines, sentence endings, or spaces.
+ */
+export function chunkMessage(text: string, maxChunkSize = 1400): string[] {
+  if (!text || text.length <= maxChunkSize) {
+    return text && text.trim() ? [text.trim()] : [];
+  }
+
+  const chunks: string[] = [];
+  let remaining = text.trim();
+
+  while (remaining.length > 0) {
+    if (remaining.length <= maxChunkSize) {
+      chunks.push(remaining);
+      break;
+    }
+
+    let cutIndex = -1;
+    // 1. Try splitting by paragraph (\n\n)
+    const doubleNewlineIndex = remaining.lastIndexOf('\n\n', maxChunkSize);
+    if (doubleNewlineIndex > 200) {
+      cutIndex = doubleNewlineIndex;
+    } else {
+      // 2. Try splitting by single newline (\n)
+      const newlineIndex = remaining.lastIndexOf('\n', maxChunkSize);
+      if (newlineIndex > 200) {
+        cutIndex = newlineIndex;
+      } else {
+        // 3. Try splitting by sentence (. , ! , ? )
+        const sentenceMatches = [...remaining.slice(0, maxChunkSize).matchAll(/([.!?])\s+/g)];
+        if (sentenceMatches.length > 0) {
+          const lastMatch = sentenceMatches[sentenceMatches.length - 1];
+          cutIndex = (lastMatch.index ?? 0) + lastMatch[1].length;
+        } else {
+          // 4. Try splitting by whitespace
+          const spaceIndex = remaining.lastIndexOf(' ', maxChunkSize);
+          if (spaceIndex > 200) {
+            cutIndex = spaceIndex;
+          } else {
+            // 5. Hard cut fallback
+            cutIndex = maxChunkSize;
+          }
+        }
+      }
+    }
+
+    const chunk = remaining.slice(0, cutIndex).trim();
+    if (chunk) {
+      chunks.push(chunk);
+    }
+    remaining = remaining.slice(cutIndex).trim();
+  }
+
+  return chunks;
+}
+
+const HANDOVER_KEYWORD_REGEX =
+  /\b(hablar con un humano|hablar con una persona|operador|asesor|persona real|humano|reclamo|supervisor|due[ñn]o|comunicar con un agente|quiero hablar con alguien)\b/i;
+
 @Injectable()
 export class AiAgentService implements OnModuleInit {
   private readonly logger = createLogger('AiAgentService');
   private messageService?: MessageService;
   private readonly debounceMap = new Map<string, DebounceEntry>();
+  // In-memory handover silence map: `${sessionId}:${chatId}` -> expiry epoch ms (default 60 min)
+  private readonly handoverMap = new Map<string, number>();
 
   constructor(
     @InjectRepository(SessionAiConfig, 'data')
@@ -28,6 +92,10 @@ export class AiAgentService implements OnModuleInit {
     private readonly messageRepository: Repository<Message>,
     @Optional()
     private readonly moduleRef?: ModuleRef,
+    @Optional()
+    private readonly knowledgeBaseService?: KnowledgeBaseService,
+    @Optional()
+    private readonly engineRegistry?: EngineRegistry,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -48,25 +116,25 @@ export class AiAgentService implements OnModuleInit {
   private loadAllFromBackup(): Record<string, Partial<SessionAiConfig>> {
     try {
       const filePath = this.getBackupFilePath();
-      if (fs.existsSync(filePath)) {
-        const raw = fs.readFileSync(filePath, 'utf8');
-        return JSON.parse(raw);
+      if (!fs.existsSync(filePath)) {
+        return {};
       }
+      const raw = fs.readFileSync(filePath, 'utf-8');
+      return JSON.parse(raw) as Record<string, Partial<SessionAiConfig>>;
     } catch (err) {
       this.logger.warn('Failed to read ai_configs.json backup', {
         error: err instanceof Error ? err.message : String(err),
       });
+      return {};
     }
-    return {};
   }
 
-  private saveToBackup(sessionId: string, config: SessionAiConfig): void {
+  private saveToBackup(sessionId: string, config: Partial<SessionAiConfig>): void {
     try {
       const filePath = this.getBackupFilePath();
-      const all = this.loadAllFromBackup();
-      all[sessionId] = {
-        id: config.id,
-        sessionId: config.sessionId,
+      const current = this.loadAllFromBackup();
+      current[sessionId] = {
+        sessionId,
         enabled: config.enabled,
         provider: config.provider,
         apiKey: config.apiKey,
@@ -80,11 +148,8 @@ export class AiAgentService implements OnModuleInit {
         transcribeAudio: config.transcribeAudio,
         groqApiKey: config.groqApiKey,
         whisperModel: config.whisperModel,
-        updatedAt: config.updatedAt || new Date(),
       };
-      const tmpPath = `${filePath}.tmp`;
-      fs.writeFileSync(tmpPath, JSON.stringify(all, null, 2), 'utf8');
-      fs.renameSync(tmpPath, filePath);
+      fs.writeFileSync(filePath, JSON.stringify(current, null, 2), 'utf-8');
     } catch (err) {
       this.logger.warn('Failed to save ai_configs.json backup', {
         error: err instanceof Error ? err.message : String(err),
@@ -96,17 +161,29 @@ export class AiAgentService implements OnModuleInit {
     try {
       const backupMap = this.loadAllFromBackup();
       for (const [sessionId, bkp] of Object.entries(backupMap)) {
-        if (!bkp || !sessionId) continue;
-        const existing = await this.configRepository.findOne({ where: { sessionId } });
-        if (!existing || (!existing.apiKey && bkp.apiKey)) {
+        let existing = await this.configRepository.findOne({ where: { sessionId } });
+        if (!existing) {
           this.logger.log(`Restoring AI config for session ${sessionId} from ai_configs.json backup`);
-          const toSave = existing || this.configRepository.create({ sessionId });
-          if (bkp.enabled !== undefined) toSave.enabled = bkp.enabled;
-          if (bkp.provider !== undefined) toSave.provider = bkp.provider as any;
-          if (bkp.apiKey !== undefined) toSave.apiKey = bkp.apiKey;
-          if (bkp.model !== undefined) toSave.model = bkp.model;
+          existing = this.configRepository.create({ sessionId });
+        }
+        let needsSave = false;
+        const toSave = existing;
+        if (bkp.enabled !== undefined && !toSave.enabled && bkp.enabled) {
+          toSave.enabled = bkp.enabled;
+          needsSave = true;
+        }
+        if (bkp.apiKey && !toSave.apiKey) {
+          toSave.apiKey = bkp.apiKey;
+          needsSave = true;
+        }
+        if (bkp.systemPrompt && (!toSave.systemPrompt || toSave.systemPrompt.length < 50)) {
+          toSave.systemPrompt = bkp.systemPrompt;
+          needsSave = true;
+        }
+        if (needsSave) {
+          if (bkp.provider) toSave.provider = bkp.provider as AiProvider;
+          if (bkp.model) toSave.model = bkp.model;
           if (bkp.baseUrl !== undefined) toSave.baseUrl = bkp.baseUrl;
-          if (bkp.systemPrompt !== undefined) toSave.systemPrompt = bkp.systemPrompt;
           if (bkp.temperature !== undefined) toSave.temperature = bkp.temperature;
           if (bkp.maxTokens !== undefined) toSave.maxTokens = bkp.maxTokens;
           if (bkp.humanTakeoverMinutes !== undefined) toSave.humanTakeoverMinutes = bkp.humanTakeoverMinutes;
@@ -163,7 +240,7 @@ export class AiAgentService implements OnModuleInit {
         ALTER TABLE session_ai_configs ADD COLUMN whisperModel VARCHAR(64) DEFAULT 'whisper-large-v3-turbo'
       `).catch(() => {});
     } catch (err) {
-      this.logger.warn('Failed to run session_ai_configs ensureTable migration', {
+      this.logger.warn('Error verifying session_ai_configs schema', {
         error: err instanceof Error ? err.message : String(err),
       });
     }
@@ -228,9 +305,10 @@ export class AiAgentService implements OnModuleInit {
    * 3. NEVER for status broadcasts or newsletters.
    * 4. NEVER for messages sent by ourselves (fromMe).
    * 5. Freshness gate: skips stale messages (> 180s old).
-   * 6. Human takeover gate: silences AI if human replied recently.
+   * 6. Human takeover gate: silences AI if human replied recently or if handed over.
    * 7. Voice Notes STT: transcribes WhatsApp audio (.ogg) via Groq Whisper if enabled.
    * 8. Debounce gate: buffers rapid-fire customer messages.
+   * 9. Handover keyword trigger: alerts personal number and silences AI.
    */
   async handleInboundMessage(sessionId: string, message: Record<string, unknown>): Promise<void> {
     try {
@@ -246,6 +324,18 @@ export class AiAgentService implements OnModuleInit {
         rawChatId.includes('status@broadcast') ||
         rawChatId.includes('@newsletter')
       ) {
+        return;
+      }
+
+      // Check handover silence window
+      const handoverKey = `${sessionId}:${rawChatId}`;
+      const handoverExpiry = this.handoverMap.get(handoverKey);
+      if (handoverExpiry && Date.now() < handoverExpiry) {
+        this.logger.debug('AI reply skipped: chat is currently handed over to human operator', {
+          sessionId,
+          chatId: rawChatId,
+          remainingMinutes: Math.round((handoverExpiry - Date.now()) / 60000),
+        });
         return;
       }
 
@@ -295,6 +385,13 @@ export class AiAgentService implements OnModuleInit {
 
       if (!text) return; // Only process messages with text content or successfully transcribed audio
 
+      // Keyword trigger for immediate human handover
+      if (HANDOVER_KEYWORD_REGEX.test(text)) {
+        this.logger.log(`Human handover keyword detected in message from ${rawChatId}`);
+        await this.triggerHumanHandover(sessionId, rawChatId, text, message);
+        return;
+      }
+
       // Human takeover check: did the human operator reply in this chat recently?
       const humanMinutes = config.humanTakeoverMinutes ?? 30;
       if (humanMinutes > 0) {
@@ -328,14 +425,14 @@ export class AiAgentService implements OnModuleInit {
         existing.messages.push(text);
         existing.timer = setTimeout(() => {
           this.debounceMap.delete(bufferKey);
-          void this.executeAiReply(sessionId, rawChatId, config, existing.messages);
+          void this.executeAiReply(sessionId, rawChatId, config, existing.messages, message);
         }, debounceDelay);
       } else {
         const entry: DebounceEntry = {
           messages: [text],
           timer: setTimeout(() => {
             this.debounceMap.delete(bufferKey);
-            void this.executeAiReply(sessionId, rawChatId, config, entry.messages);
+            void this.executeAiReply(sessionId, rawChatId, config, entry.messages, message);
           }, debounceDelay),
         };
         this.debounceMap.set(bufferKey, entry);
@@ -401,9 +498,17 @@ export class AiAgentService implements OnModuleInit {
     chatId: string,
     config: SessionAiConfig,
     userMessages: string[],
+    rawMessage?: Record<string, unknown>,
   ): Promise<void> {
     try {
       const combinedUserMessage = userMessages.join('\n');
+
+      // Check keyword trigger one more time on combined messages
+      if (HANDOVER_KEYWORD_REGEX.test(combinedUserMessage)) {
+        this.logger.log(`Handover keyword in combined burst for chat ${chatId}`);
+        await this.triggerHumanHandover(sessionId, chatId, combinedUserMessage, rawMessage);
+        return;
+      }
 
       // Fetch recent message history (last 8 messages) for conversational memory
       const historyRows = await this.messageRepository.find({
@@ -413,8 +518,24 @@ export class AiAgentService implements OnModuleInit {
       });
       historyRows.reverse();
 
+      // Inject Knowledge Base context if available
+      let knowledgeContext = '';
+      if (this.knowledgeBaseService) {
+        try {
+          knowledgeContext = await this.knowledgeBaseService.getContextText(sessionId);
+        } catch (err) {
+          this.logger.warn('Failed to load knowledge base context', { error: String(err) });
+        }
+      }
+
+      const handoverInstruction =
+        `\n\n[INSTRUCCIÓN OBLIGATORIA DE DERIVACIÓN A ASESOR HUMANO]:\n` +
+        `Si el cliente solicita explícitamente comunicarse con una persona humana, asesor, operador, supervisor, realizar un reclamo formal o si su solicitud requiere una gestión manual o personalizada que no puedes resolver, debes responder amablemente confirmando que lo estás comunicando con un asesor humano de nuestro equipo e incluir obligatoriamente al final de tu respuesta la etiqueta especial: [DERIVAR_HUMANO].`;
+
+      const finalSystemPrompt = `${config.systemPrompt || 'Eres un asistente útil.'}${knowledgeContext}${handoverInstruction}`;
+
       const messagesForLlm: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
-        { role: 'system', content: config.systemPrompt || 'Eres un asistente útil.' },
+        { role: 'system', content: finalSystemPrompt },
       ];
 
       // Append past turns (excluding the current ones)
@@ -436,8 +557,16 @@ export class AiAgentService implements OnModuleInit {
 
       this.logger.log(`Invoking AI agent for chat ${chatId} (${config.provider}/${config.model})`);
 
-      const replyText = await this.callLlm(config, messagesForLlm);
+      let replyText = await this.callLlm(config, messagesForLlm);
       if (!replyText || !replyText.trim()) return;
+
+      // Check if LLM emitted the handover tag
+      if (replyText.includes('[DERIVAR_HUMANO]')) {
+        const cleanedReply = replyText.replace(/\[DERIVAR_HUMANO\]/g, '').trim();
+        this.logger.log(`LLM requested human handover for chat ${chatId}`);
+        await this.triggerHumanHandover(sessionId, chatId, combinedUserMessage, rawMessage, cleanedReply);
+        return;
+      }
 
       const messageService = this.resolveMessageService();
       if (!messageService) {
@@ -445,16 +574,37 @@ export class AiAgentService implements OnModuleInit {
         return;
       }
 
-      // Send the reply
-      await messageService.sendText(sessionId, {
-        chatId,
-        text: replyText.trim(),
-      });
+      // Send the reply with smart message chunking (<= 1400 chars per message)
+      const chunks = chunkMessage(replyText, 1400);
+
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+
+        if (i > 0) {
+          // Emit typing presence for subsequent chunks
+          try {
+            const engine = this.engineRegistry?.get(sessionId);
+            if (engine) {
+              await engine.sendChatState(chatId, 'typing').catch(() => {});
+            }
+          } catch {}
+
+          // Natural delay between chunks: 1.5s - 2.5s
+          const delayMs = 1500 + Math.floor(Math.random() * 1000);
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+
+        await messageService.sendText(sessionId, {
+          chatId,
+          text: chunk,
+        });
+      }
 
       this.logger.log(`AI Agent replied successfully to ${chatId}`, {
         sessionId,
         model: config.model,
         chars: replyText.length,
+        chunks: chunks.length,
       });
     } catch (err) {
       this.logger.error(
@@ -464,108 +614,281 @@ export class AiAgentService implements OnModuleInit {
   }
 
   /**
-   * Test prompt simulator endpoint: allows testing provider, model and prompt
+   * Silences the AI for this chat (60 min), sends confirmation to client,
+   * and sends an urgent notification alert to WhatsApp personal number +56993005959.
+   */
+  async triggerHumanHandover(
+    sessionId: string,
+    chatId: string,
+    lastUserMessage: string,
+    rawMessage?: Record<string, unknown>,
+    customReply?: string,
+  ): Promise<void> {
+    try {
+      // 1. Mark chat as silenced for 60 minutes
+      const handoverKey = `${sessionId}:${chatId}`;
+      this.handoverMap.set(handoverKey, Date.now() + 60 * 60 * 1000);
+
+      const messageService = this.resolveMessageService();
+      if (!messageService) {
+        this.logger.warn('MessageService not available for handover trigger', { sessionId });
+        return;
+      }
+
+      // 2. Send friendly confirmation to client
+      const clientReply =
+        customReply && customReply.trim().length > 0
+          ? customReply.trim()
+          : 'Te estoy transfiriendo con un asesor humano de nuestro equipo. En breve te responderemos directamente por este chat. ¡Muchas gracias por tu paciencia!';
+
+      await messageService.sendText(sessionId, {
+        chatId,
+        text: clientReply,
+      });
+
+      // 3. Send WhatsApp alert to personal number +56993005959
+      const clientPhone = chatId.replace(/[^0-9]/g, '');
+      const pushName =
+        (rawMessage?.pushName as string) ||
+        (rawMessage?.notifyName as string) ||
+        (rawMessage?.senderName as string) ||
+        'Cliente WhatsApp';
+
+      const chileTime = new Intl.DateTimeFormat('es-CL', {
+        timeZone: 'America/Santiago',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      }).format(new Date());
+
+      const alertMessage =
+        `🚨 *ALERTA: DERIVACIÓN A HUMANO - OPENWA* 🚨\n\n` +
+        `👤 *Cliente:* ${pushName}\n` +
+        `📱 *Número:* +${clientPhone}\n` +
+        `🕒 *Hora:* ${chileTime}\n` +
+        `💬 *Última consulta:* "${lastUserMessage.slice(0, 300)}"\n` +
+        `⚠️ *Acción:* La IA se ha silenciado para este chat por 60 minutos. Por favor responde directamente.`;
+
+      await messageService
+        .sendText(sessionId, {
+          chatId: '56993005959@s.whatsapp.net',
+          text: alertMessage,
+        })
+        .catch((err) => {
+          this.logger.warn('Failed to send handover alert to personal WhatsApp (+56993005959)', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+
+      this.logger.log(`Handover alert dispatched to +56993005959 for chat ${chatId}`);
+    } catch (err) {
+      this.logger.error(
+        `Error executing human handover for ${sessionId}/${chatId}: ${err instanceof Error ? err.message : String(err)}`,
+        err instanceof Error ? err.stack : undefined,
+      );
+    }
+  }
+
+  /**
+   * Test prompt simulator endpoint: allows testing provider, model, prompt and knowledge base
    * without sending any message to WhatsApp.
    */
-  async testPrompt(dto: TestAiPromptDto): Promise<{ reply: string; durationMs: number }> {
+  async testPrompt(dto: TestAiPromptDto, sessionId?: string): Promise<{ reply: string; durationMs: number }> {
     const start = Date.now();
+
+    let knowledgeContext = '';
+    if (sessionId && this.knowledgeBaseService) {
+      try {
+        knowledgeContext = await this.knowledgeBaseService.getContextText(sessionId);
+      } catch {}
+    }
+
+    const fullSystemPrompt = `${dto.systemPrompt || 'Eres un asistente útil.'}${knowledgeContext}`;
+
     const config: Partial<SessionAiConfig> = {
       provider: dto.provider,
       apiKey: dto.apiKey,
       model: dto.model,
       baseUrl: dto.baseUrl,
-      systemPrompt: dto.systemPrompt,
+      systemPrompt: fullSystemPrompt,
       temperature: dto.temperature ?? 0.7,
       maxTokens: dto.maxTokens ?? 400,
     };
 
-    const messages = [
-      { role: 'system' as const, content: dto.systemPrompt },
-      { role: 'user' as const, content: dto.userMessage },
+    const messagesForLlm = [
+      { role: 'system' as const, content: fullSystemPrompt },
+      { role: 'user' as const, content: 'Hola, ¿qué servicios o productos ofrecen y cuáles son sus precios?' },
     ];
 
-    const reply = await this.callLlm(config as SessionAiConfig, messages);
-    const durationMs = Date.now() - start;
-    return { reply, durationMs };
+    const reply = await this.callLlm(config as SessionAiConfig, messagesForLlm);
+    return {
+      reply,
+      durationMs: Date.now() - start,
+    };
   }
 
   private async callLlm(
     config: SessionAiConfig,
-    messages: Array<{ role: string; content: string }>,
+    messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
   ): Promise<string> {
     const provider = config.provider || 'openrouter';
-    const apiKey = config.apiKey?.trim();
-    if (!apiKey) {
-      throw new Error(`API key is required for provider ${provider}`);
-    }
 
-    let endpoint = 'https://openrouter.ai/api/v1/chat/completions';
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    };
-
-    if (provider === 'openrouter') {
-      endpoint = 'https://openrouter.ai/api/v1/chat/completions';
-      headers['HTTP-Referer'] = 'https://github.com/agrolara/autopublicador-whatsapp';
-      headers['X-Title'] = 'OpenWA AI Agent';
-    } else if (provider === 'openai') {
-      endpoint = 'https://api.openai.com/v1/chat/completions';
-    } else if (provider === 'gemini') {
-      // Google Gemini supports OpenAI-compatible chat completions endpoint
-      endpoint = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
-    } else if (provider === 'custom') {
-      if (!config.baseUrl) {
-        throw new Error('Base URL is required for custom AI provider');
-      }
-      const base = config.baseUrl.replace(/\/+$/, '');
-      endpoint = base.endsWith('/chat/completions') ? base : `${base}/chat/completions`;
-    }
-
-    const payload = {
-      model: config.model || 'deepseek/deepseek-chat',
-      messages,
-      temperature: config.temperature ?? 0.7,
-      max_tokens: config.maxTokens ?? 400,
-    };
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 35000);
-
-    try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => '');
-        throw new Error(`LLM provider returned status ${response.status}: ${errorText.slice(0, 300)}`);
-      }
-
-      const json = (await response.json()) as any;
-      const reply = json?.choices?.[0]?.message?.content;
-      if (typeof reply !== 'string') {
-        throw new Error('LLM provider response missing message content');
-      }
-      return reply;
-    } finally {
-      clearTimeout(timeoutId);
+    switch (provider) {
+      case 'openrouter':
+        return this.callOpenRouter(config, messages);
+      case 'openai':
+        return this.callOpenAiCompatible(
+          config.baseUrl || 'https://api.openai.com/v1',
+          config.apiKey || '',
+          config.model || 'gpt-4o-mini',
+          config,
+          messages,
+        );
+      case 'gemini':
+        return this.callGemini(config, messages);
+      case 'custom':
+        return this.callOpenAiCompatible(
+          config.baseUrl || 'https://api.openai.com/v1',
+          config.apiKey || '',
+          config.model,
+          config,
+          messages,
+        );
+      default:
+        throw new Error(`Unsupported AI provider: ${provider}`);
     }
   }
 
-  private resolveMessageService(): MessageService | undefined {
-    if (!this.messageService && this.moduleRef) {
-      try {
-        const { MessageService: Svc } = require('../message/message.service');
-        this.messageService = this.moduleRef.get(Svc, { strict: false });
-      } catch (err) {
-        this.logger.warn('Could not resolve MessageService via ModuleRef', {
-          error: err instanceof Error ? err.message : String(err),
+  private async callOpenRouter(
+    config: SessionAiConfig,
+    messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  ): Promise<string> {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.apiKey?.trim()}`,
+        'HTTP-Referer': 'https://openwa.dev',
+        'X-Title': 'OpenWA AI Agent',
+      },
+      body: JSON.stringify({
+        model: config.model || 'deepseek/deepseek-chat',
+        messages,
+        temperature: config.temperature ?? 0.7,
+        max_tokens: config.maxTokens ?? 400,
+      }),
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(`OpenRouter error (${response.status}): ${err}`);
+    }
+
+    const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    return data.choices?.[0]?.message?.content || '';
+  }
+
+  private async callOpenAiCompatible(
+    baseUrl: string,
+    apiKey: string,
+    model: string,
+    config: SessionAiConfig,
+    messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  ): Promise<string> {
+    const cleanBaseUrl = baseUrl.replace(/\/+$/, '');
+    const url = cleanBaseUrl.endsWith('/chat/completions')
+      ? cleanBaseUrl
+      : `${cleanBaseUrl}/chat/completions`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey.trim()}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: config.temperature ?? 0.7,
+        max_tokens: config.maxTokens ?? 400,
+      }),
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(`API error (${response.status}): ${err}`);
+    }
+
+    const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    return data.choices?.[0]?.message?.content || '';
+  }
+
+  private async callGemini(
+    config: SessionAiConfig,
+    messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  ): Promise<string> {
+    const model = config.model || 'gemini-1.5-flash';
+    const apiKey = config.apiKey?.trim();
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+    const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+    let systemInstruction: string | undefined;
+
+    for (const msg of messages) {
+      if (msg.role === 'system') {
+        systemInstruction = msg.content;
+      } else {
+        contents.push({
+          role: msg.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: msg.content }],
         });
       }
+    }
+
+    const body: Record<string, unknown> = {
+      contents,
+      generationConfig: {
+        temperature: config.temperature ?? 0.7,
+        maxOutputTokens: config.maxTokens ?? 400,
+      },
+    };
+
+    if (systemInstruction) {
+      body.systemInstruction = {
+        parts: [{ text: systemInstruction }],
+      };
+    }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(`Gemini error (${response.status}): ${err}`);
+    }
+
+    const data = (await response.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+    return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  }
+
+  private resolveMessageService(): MessageService | undefined {
+    if (this.messageService) return this.messageService;
+    try {
+      if (this.moduleRef) {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { MessageService } = require('../message/message.service');
+        this.messageService = this.moduleRef.get(MessageService, { strict: false });
+      }
+    } catch {
+      // MessageService not yet resolved
     }
     return this.messageService;
   }

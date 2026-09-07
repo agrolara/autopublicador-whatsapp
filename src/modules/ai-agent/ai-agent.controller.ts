@@ -1,6 +1,19 @@
-import { Controller, Get, Put, Post, Param, Body } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
+import {
+  Controller,
+  Get,
+  Put,
+  Post,
+  Delete,
+  Param,
+  Body,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
+} from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiConsumes, ApiBody } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { AiAgentService } from './ai-agent.service';
+import { KnowledgeBaseService, KnowledgeDocumentDto } from './knowledge-base.service';
 import { UpdateAiConfigDto, TestAiPromptDto } from './dto/ai-config.dto';
 import { SessionAiConfig } from './entities/session-ai-config.entity';
 import { RequireRole } from '../auth/decorators/auth.decorators';
@@ -9,7 +22,10 @@ import { ApiKeyRole } from '../auth/entities/api-key.entity';
 @ApiTags('ai-agent')
 @Controller('sessions/:sessionId/ai-config')
 export class AiAgentController {
-  constructor(private readonly aiAgentService: AiAgentService) {}
+  constructor(
+    private readonly aiAgentService: AiAgentService,
+    private readonly knowledgeBaseService: KnowledgeBaseService,
+  ) {}
 
   @Get()
   @RequireRole(ApiKeyRole.OPERATOR)
@@ -38,9 +54,58 @@ export class AiAgentController {
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiResponse({ status: 200, description: 'Simulated LLM response' })
   async testPrompt(
-    @Param('sessionId') _sessionId: string,
+    @Param('sessionId') sessionId: string,
     @Body() dto: TestAiPromptDto,
   ): Promise<{ reply: string; durationMs: number }> {
-    return this.aiAgentService.testPrompt(dto);
+    return this.aiAgentService.testPrompt(dto, sessionId);
+  }
+
+  @Get('documents')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'List knowledge base documents for a session' })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiResponse({ status: 200, description: 'List of knowledge base documents' })
+  async listDocuments(@Param('sessionId') sessionId: string): Promise<KnowledgeDocumentDto[]> {
+    return this.knowledgeBaseService.listDocuments(sessionId);
+  }
+
+  @Post('documents')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Upload a document to the knowledge base (.pdf, .docx, .txt, .csv)' })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    required: true,
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: {
+        file: { type: 'string', format: 'binary', description: 'Document file' },
+      },
+    },
+  })
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
+  async uploadDocument(
+    @Param('sessionId') sessionId: string,
+    @UploadedFile() file?: { originalname: string; buffer: Buffer; mimetype?: string; size: number },
+  ): Promise<KnowledgeDocumentDto> {
+    if (!file || !file.buffer) {
+      throw new BadRequestException('Archivo no subido o inválido.');
+    }
+    return this.knowledgeBaseService.addDocument(sessionId, file);
+  }
+
+  @Delete('documents/:documentId')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Delete a document from the knowledge base' })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiParam({ name: 'documentId', description: 'Document ID' })
+  @ApiResponse({ status: 200, description: 'Document deleted' })
+  async deleteDocument(
+    @Param('sessionId') sessionId: string,
+    @Param('documentId') documentId: string,
+  ): Promise<{ success: boolean }> {
+    const success = await this.knowledgeBaseService.deleteDocument(sessionId, documentId);
+    return { success };
   }
 }

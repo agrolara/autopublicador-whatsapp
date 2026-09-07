@@ -221,6 +221,16 @@ export interface TestAiPromptResponse {
   durationMs: number;
 }
 
+export interface KnowledgeDocument {
+  id: string;
+  originalName: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  uploadedAt: string;
+  charCount: number;
+}
+
 export interface ApiKey {
   id: string;
   name: string;
@@ -964,6 +974,20 @@ export const aiAgentApi = {
     request<TestAiPromptResponse>(`/sessions/${sessionId}/ai-config/test`, {
       method: 'POST',
       body: JSON.stringify(data),
+    }),
+  getDocuments: (sessionId: string) =>
+    request<KnowledgeDocument[]>(`/sessions/${sessionId}/ai-config/documents`),
+  uploadDocument: (sessionId: string, file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return request<KnowledgeDocument>(`/sessions/${sessionId}/ai-config/documents`, {
+      method: 'POST',
+      body: formData,
+    });
+  },
+  deleteDocument: (sessionId: string, documentId: string) =>
+    request<{ success: boolean }>(`/sessions/${sessionId}/ai-config/documents/${documentId}`, {
+      method: 'DELETE',
     }),
 };
 
