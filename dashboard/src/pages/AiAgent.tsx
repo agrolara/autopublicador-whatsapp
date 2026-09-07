@@ -101,6 +101,7 @@ export function AiAgent() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(true);
+  const [loadingConfig, setLoadingConfig] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
   const [saveSuccessMessage, setSaveSuccessMessage] = useState<string>('Configuración de Inteligencia Artificial guardada correctamente.');
@@ -157,7 +158,7 @@ export function AiAgent() {
 
     async function loadConfig() {
       try {
-        setLoading(true);
+        setLoadingConfig(true);
         setError(null);
         setTestReply(null);
         setTestError(null);
@@ -178,7 +179,7 @@ export function AiAgent() {
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Error al cargar configuración de IA');
       } finally {
-        setLoading(false);
+        setLoadingConfig(false);
       }
     }
     loadConfig();
@@ -196,26 +197,11 @@ export function AiAgent() {
   };
 
   const handleToggleEnabled = async () => {
-    if (!selectedSessionId || saving) return;
+    if (!selectedSessionId || saving || loadingConfig) return;
     const next = !enabled;
     setEnabled(next);
     try {
-      const payload: UpdateAiConfigPayload = {
-        enabled: next,
-        provider,
-        apiKey: apiKey.trim(),
-        model: model.trim(),
-        baseUrl: baseUrl.trim() || undefined,
-        systemPrompt: systemPrompt.trim(),
-        temperature,
-        maxTokens,
-        humanTakeoverMinutes,
-        debounceSeconds,
-        transcribeAudio,
-        groqApiKey: groqApiKey.trim() || undefined,
-        whisperModel: whisperModel.trim(),
-      };
-      await aiAgentApi.updateConfig(selectedSessionId, payload);
+      await aiAgentApi.updateConfig(selectedSessionId, { enabled: next });
       setSaveSuccessMessage(next ? '🟢 Asistente de IA ENCENDIDO y guardado para esta sesión.' : '⚪ Asistente de IA APAGADO y guardado para esta sesión.');
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3500);
@@ -226,25 +212,10 @@ export function AiAgent() {
   };
 
   const handleToggleTranscribe = async (nextChecked: boolean) => {
-    if (!selectedSessionId || saving) return;
+    if (!selectedSessionId || saving || loadingConfig) return;
     setTranscribeAudio(nextChecked);
     try {
-      const payload: UpdateAiConfigPayload = {
-        enabled,
-        provider,
-        apiKey: apiKey.trim(),
-        model: model.trim(),
-        baseUrl: baseUrl.trim() || undefined,
-        systemPrompt: systemPrompt.trim(),
-        temperature,
-        maxTokens,
-        humanTakeoverMinutes,
-        debounceSeconds,
-        transcribeAudio: nextChecked,
-        groqApiKey: groqApiKey.trim() || undefined,
-        whisperModel: whisperModel.trim(),
-      };
-      await aiAgentApi.updateConfig(selectedSessionId, payload);
+      await aiAgentApi.updateConfig(selectedSessionId, { transcribeAudio: nextChecked });
       setSaveSuccessMessage(nextChecked ? '🎙️ Transcripción de audios ACTIVADA y guardada.' : '⚪ Transcripción de audios APAGADA y guardada.');
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3500);
@@ -352,11 +323,12 @@ export function AiAgent() {
             value={selectedSessionId}
             onChange={e => {
               const newId = e.target.value;
+              setLoadingConfig(true);
               setSelectedSessionId(newId);
               localStorage.setItem('openwa_ai_selected_session', newId);
             }}
             className="session-select"
-            disabled={loading || sessions.length === 0}
+            disabled={loading || loadingConfig || sessions.length === 0}
           >
             {sessions.map(s => (
               <option key={s.id} value={s.id}>
@@ -403,8 +375,9 @@ export function AiAgent() {
               type="button"
               className={`toggle-btn ${enabled ? 'on' : 'off'}`}
               onClick={handleToggleEnabled}
+              disabled={loadingConfig || saving}
             >
-              {enabled ? 'ENCENDIDO' : 'APAGADO'}
+              {loadingConfig ? 'CARGANDO...' : (enabled ? 'ENCENDIDO' : 'APAGADO')}
             </button>
           </div>
 
@@ -651,6 +624,7 @@ export function AiAgent() {
                   <input
                     type="checkbox"
                     checked={transcribeAudio}
+                    disabled={loadingConfig || saving}
                     onChange={e => handleToggleTranscribe(e.target.checked)}
                   />
                   <span className="slider round"></span>
@@ -725,7 +699,7 @@ export function AiAgent() {
               type="button"
               className="save-btn"
               onClick={handleSave}
-              disabled={saving || !selectedSessionId}
+              disabled={saving || loadingConfig || !selectedSessionId}
             >
               <Save size={20} />
               {saving ? 'Guardando configuración...' : 'Guardar Configuración de IA'}

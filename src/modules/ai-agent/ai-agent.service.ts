@@ -2,6 +2,8 @@ import { Injectable, OnModuleInit, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ModuleRef } from '@nestjs/core';
+import * as fs from 'fs';
+import * as path from 'path';
 import { SessionAiConfig, AiProvider } from './entities/session-ai-config.entity';
 import { UpdateAiConfigDto, TestAiPromptDto } from './dto/ai-config.dto';
 import { Message, MessageDirection } from '../message/entities/message.entity';
@@ -30,6 +32,96 @@ export class AiAgentService implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     await this.ensureTable();
+    await this.syncFromBackup();
+  }
+
+  private getBackupFilePath(): string {
+    const dataDir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dataDir)) {
+      try {
+        fs.mkdirSync(dataDir, { recursive: true });
+      } catch {}
+    }
+    return path.join(dataDir, 'ai_configs.json');
+  }
+
+  private loadAllFromBackup(): Record<string, Partial<SessionAiConfig>> {
+    try {
+      const filePath = this.getBackupFilePath();
+      if (fs.existsSync(filePath)) {
+        const raw = fs.readFileSync(filePath, 'utf8');
+        return JSON.parse(raw);
+      }
+    } catch (err) {
+      this.logger.warn('Failed to read ai_configs.json backup', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return {};
+  }
+
+  private saveToBackup(sessionId: string, config: SessionAiConfig): void {
+    try {
+      const filePath = this.getBackupFilePath();
+      const all = this.loadAllFromBackup();
+      all[sessionId] = {
+        id: config.id,
+        sessionId: config.sessionId,
+        enabled: config.enabled,
+        provider: config.provider,
+        apiKey: config.apiKey,
+        model: config.model,
+        baseUrl: config.baseUrl,
+        systemPrompt: config.systemPrompt,
+        temperature: config.temperature,
+        maxTokens: config.maxTokens,
+        humanTakeoverMinutes: config.humanTakeoverMinutes,
+        debounceSeconds: config.debounceSeconds,
+        transcribeAudio: config.transcribeAudio,
+        groqApiKey: config.groqApiKey,
+        whisperModel: config.whisperModel,
+        updatedAt: config.updatedAt || new Date(),
+      };
+      const tmpPath = `${filePath}.tmp`;
+      fs.writeFileSync(tmpPath, JSON.stringify(all, null, 2), 'utf8');
+      fs.renameSync(tmpPath, filePath);
+    } catch (err) {
+      this.logger.warn('Failed to save ai_configs.json backup', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  private async syncFromBackup(): Promise<void> {
+    try {
+      const backupMap = this.loadAllFromBackup();
+      for (const [sessionId, bkp] of Object.entries(backupMap)) {
+        if (!bkp || !sessionId) continue;
+        const existing = await this.configRepository.findOne({ where: { sessionId } });
+        if (!existing || (!existing.apiKey && bkp.apiKey)) {
+          this.logger.log(`Restoring AI config for session ${sessionId} from ai_configs.json backup`);
+          const toSave = existing || this.configRepository.create({ sessionId });
+          if (bkp.enabled !== undefined) toSave.enabled = bkp.enabled;
+          if (bkp.provider !== undefined) toSave.provider = bkp.provider as any;
+          if (bkp.apiKey !== undefined) toSave.apiKey = bkp.apiKey;
+          if (bkp.model !== undefined) toSave.model = bkp.model;
+          if (bkp.baseUrl !== undefined) toSave.baseUrl = bkp.baseUrl;
+          if (bkp.systemPrompt !== undefined) toSave.systemPrompt = bkp.systemPrompt;
+          if (bkp.temperature !== undefined) toSave.temperature = bkp.temperature;
+          if (bkp.maxTokens !== undefined) toSave.maxTokens = bkp.maxTokens;
+          if (bkp.humanTakeoverMinutes !== undefined) toSave.humanTakeoverMinutes = bkp.humanTakeoverMinutes;
+          if (bkp.debounceSeconds !== undefined) toSave.debounceSeconds = bkp.debounceSeconds;
+          if (bkp.transcribeAudio !== undefined) toSave.transcribeAudio = bkp.transcribeAudio;
+          if (bkp.groqApiKey !== undefined) toSave.groqApiKey = bkp.groqApiKey;
+          if (bkp.whisperModel !== undefined) toSave.whisperModel = bkp.whisperModel;
+          await this.configRepository.save(toSave);
+        }
+      }
+    } catch (err) {
+      this.logger.warn('Failed to sync AI configs from backup on init', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   private async ensureTable(): Promise<void> {
@@ -80,24 +172,27 @@ export class AiAgentService implements OnModuleInit {
   async getConfig(sessionId: string): Promise<SessionAiConfig> {
     let config = await this.configRepository.findOne({ where: { sessionId } });
     if (!config) {
+      const backupMap = this.loadAllFromBackup();
+      const bkp = backupMap[sessionId];
       config = this.configRepository.create({
         sessionId,
-        enabled: false,
-        provider: 'openrouter',
-        apiKey: null,
-        model: 'deepseek/deepseek-chat',
-        baseUrl: null,
-        systemPrompt: 'Eres un asistente virtual amable y profesional. Responde de forma concisa y útil a los clientes.',
-        temperature: 0.7,
-        maxTokens: 400,
-        humanTakeoverMinutes: 30,
-        debounceSeconds: 3,
-        transcribeAudio: false,
-        groqApiKey: null,
-        whisperModel: 'whisper-large-v3-turbo',
+        enabled: bkp?.enabled ?? false,
+        provider: (bkp?.provider as any) || 'openrouter',
+        apiKey: bkp?.apiKey || null,
+        model: bkp?.model || 'deepseek/deepseek-chat',
+        baseUrl: bkp?.baseUrl || null,
+        systemPrompt: bkp?.systemPrompt || 'Eres un asistente virtual amable y profesional. Responde de forma concisa y útil a los clientes.',
+        temperature: bkp?.temperature ?? 0.7,
+        maxTokens: bkp?.maxTokens ?? 400,
+        humanTakeoverMinutes: bkp?.humanTakeoverMinutes ?? 30,
+        debounceSeconds: bkp?.debounceSeconds ?? 3,
+        transcribeAudio: bkp?.transcribeAudio ?? false,
+        groqApiKey: bkp?.groqApiKey || null,
+        whisperModel: bkp?.whisperModel || 'whisper-large-v3-turbo',
       });
       try {
         config = await this.configRepository.save(config);
+        this.saveToBackup(sessionId, config);
       } catch {
         config = (await this.configRepository.findOne({ where: { sessionId } })) || config;
       }
@@ -121,7 +216,9 @@ export class AiAgentService implements OnModuleInit {
     if (dto.groqApiKey !== undefined) config.groqApiKey = dto.groqApiKey.trim() || null;
     if (dto.whisperModel !== undefined) config.whisperModel = dto.whisperModel.trim() || 'whisper-large-v3-turbo';
 
-    return this.configRepository.save(config);
+    const saved = await this.configRepository.save(config);
+    this.saveToBackup(sessionId, saved);
+    return saved;
   }
 
   /**
