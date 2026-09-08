@@ -107,6 +107,11 @@ export function stripThinkingProcess(text: string): string {
   return cleaned || text;
 }
 
+export function normalizeChatId(id: string): string {
+  if (!id) return '';
+  return id.replace('@s.whatsapp.net', '@c.us').trim();
+}
+
 const HANDOVER_KEYWORD_REGEX =
   /\b(hablar con un humano|hablar con una persona|operador|asesor|persona real|humano|reclamo|supervisor|due[ñn]o|comunicar con un agente|quiero hablar con alguien)\b/i;
 
@@ -115,8 +120,10 @@ export class AiAgentService implements OnModuleInit {
   private readonly logger = createLogger('AiAgentService');
   private messageService?: MessageService;
   private readonly debounceMap = new Map<string, DebounceEntry>();
-  // In-memory handover silence map: `${sessionId}:${chatId}` -> expiry epoch ms (default 60 min)
+  // In-memory handover silence map: `${sessionId}:${normalizedChatId}` -> expiry epoch ms (default 60 min)
   private readonly handoverMap = new Map<string, number>();
+  // Tracks message IDs emitted by the AI Agent to never confuse them with a human operator
+  private readonly aiSentMessageIds = new Set<string>();
 
   constructor(
     @InjectRepository(SessionAiConfig, 'data')
@@ -360,28 +367,33 @@ export class AiAgentService implements OnModuleInit {
         return;
       }
 
+      const normalizedChatId = normalizeChatId(rawChatId);
+      const handoverKey = `${sessionId}:${normalizedChatId}`;
+
+      // Check for manual reactivation command first (operates anytime)
+      const rawBody = typeof message.body === 'string' ? message.body.trim() : '';
+      if (/^#(?:bot|ia|reactivar|activar)\b/i.test(rawBody)) {
+        this.handoverMap.delete(handoverKey);
+        this.logger.log(`Handover silence manually cleared via command for ${rawChatId}`);
+        const messageService = this.resolveMessageService();
+        if (messageService) {
+          const sent = await messageService.sendText(sessionId, {
+            chatId: rawChatId,
+            text: '🤖 *Asistente de IA activo y operativo para este chat.* ¿En qué te puedo ayudar?',
+          });
+          if (sent?.messageId) this.aiSentMessageIds.add(sent.messageId);
+        }
+        return;
+      }
+
       // Check handover silence window
-      const handoverKey = `${sessionId}:${rawChatId}`;
       const handoverExpiry = this.handoverMap.get(handoverKey);
       if (handoverExpiry && Date.now() < handoverExpiry) {
-        const rawBody = typeof message.body === 'string' ? message.body.trim() : '';
-        if (/^#(?:bot|ia|reactivar|activar)\b/i.test(rawBody)) {
-          this.handoverMap.delete(handoverKey);
-          this.logger.log(`Handover silence manually cleared via command for ${rawChatId}`);
-          const messageService = this.resolveMessageService();
-          if (messageService) {
-            await messageService.sendText(sessionId, {
-              chatId: rawChatId,
-              text: '🤖 *Asistente de IA reactivado para este chat.* ¿En qué te puedo ayudar?',
-            });
-          }
-        } else {
-          this.logger.debug('AI reply skipped: chat is currently handed over to human operator', {
-            sessionId,
-            chatId: rawChatId,
-            remainingMinutes: Math.round((handoverExpiry - Date.now()) / 60000),
-          });
-        }
+        this.logger.debug('AI reply skipped: chat is currently handed over to human operator', {
+          sessionId,
+          chatId: rawChatId,
+          remainingMinutes: Math.round((handoverExpiry - Date.now()) / 60000),
+        });
         return;
       }
 
@@ -439,17 +451,26 @@ export class AiAgentService implements OnModuleInit {
       }
 
       // Human takeover check: did the human operator reply in this chat recently?
+      // CRITICAL: We exclude messages sent by the AI itself so the bot never silences itself!
       const humanMinutes = config.humanTakeoverMinutes ?? 30;
       if (humanMinutes > 0) {
         const cutoff = new Date(Date.now() - humanMinutes * 60 * 1000);
-        const recentHumanMsg = await this.messageRepository.findOne({
-          where: {
-            sessionId,
-            chatId: rawChatId,
-            direction: MessageDirection.OUTGOING,
-          },
+        const recentOutgoing = await this.messageRepository.find({
+          where: [
+            { sessionId, chatId: rawChatId, direction: MessageDirection.OUTGOING },
+            { sessionId, chatId: normalizedChatId, direction: MessageDirection.OUTGOING },
+          ],
           order: { createdAt: 'DESC' },
+          take: 10,
         });
+
+        const recentHumanMsg = recentOutgoing.find(
+          (m) =>
+            !this.aiSentMessageIds.has(m.id) &&
+            (!m.waMessageId || !this.aiSentMessageIds.has(m.waMessageId)) &&
+            !m.body?.startsWith('🤖 *Asistente') &&
+            !m.body?.startsWith('Te estoy transfiriendo'),
+        );
 
         if (recentHumanMsg && recentHumanMsg.createdAt > cutoff) {
           this.logger.debug('AI reply skipped: human operator active in chat', {
@@ -462,7 +483,7 @@ export class AiAgentService implements OnModuleInit {
       }
 
       // Debounce customer message bursts (e.g. 3 messages sent within 3 seconds)
-      const bufferKey = `${sessionId}:${rawChatId}`;
+      const bufferKey = `${sessionId}:${normalizedChatId}`;
       const debounceDelay = (config.debounceSeconds || 3) * 1000;
 
       const existing = this.debounceMap.get(bufferKey);
@@ -624,8 +645,8 @@ export class AiAgentService implements OnModuleInit {
         return;
       }
 
-      // Send the reply with smart message chunking (<= 650 chars per message)
-      const chunks = chunkMessage(replyText, 650);
+      // Send the reply with smart message chunking (<= 750 chars per message)
+      const chunks = chunkMessage(replyText, 750);
 
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
@@ -639,15 +660,16 @@ export class AiAgentService implements OnModuleInit {
             }
           } catch {}
 
-          // Natural delay between chunks: 1.5s - 2.5s
-          const delayMs = 1500 + Math.floor(Math.random() * 1000);
+          // Natural delay between chunks: 1.2s - 2.0s
+          const delayMs = 1200 + Math.floor(Math.random() * 800);
           await new Promise((resolve) => setTimeout(resolve, delayMs));
         }
 
-        await messageService.sendText(sessionId, {
+        const sent = await messageService.sendText(sessionId, {
           chatId,
           text: chunk,
         });
+        if (sent?.messageId) this.aiSentMessageIds.add(sent.messageId);
       }
 
       this.logger.log(`AI Agent replied successfully to ${chatId}`, {
@@ -676,7 +698,8 @@ export class AiAgentService implements OnModuleInit {
   ): Promise<void> {
     try {
       // 1. Mark chat as silenced for 60 minutes
-      const handoverKey = `${sessionId}:${chatId}`;
+      const normalizedChatId = normalizeChatId(chatId);
+      const handoverKey = `${sessionId}:${normalizedChatId}`;
       this.handoverMap.set(handoverKey, Date.now() + 60 * 60 * 1000);
 
       const messageService = this.resolveMessageService();
@@ -691,10 +714,11 @@ export class AiAgentService implements OnModuleInit {
           ? customReply.trim()
           : 'Te estoy transfiriendo con un asesor humano de nuestro equipo. En breve te responderemos directamente por este chat. ¡Muchas gracias por tu paciencia!';
 
-      await messageService.sendText(sessionId, {
+      const sent = await messageService.sendText(sessionId, {
         chatId,
         text: clientReply,
       });
+      if (sent?.messageId) this.aiSentMessageIds.add(sent.messageId);
 
       // 3. Send WhatsApp alert to personal number +56993005959
       const clientPhone = chatId.replace(/[^0-9]/g, '');
@@ -836,7 +860,7 @@ export class AiAgentService implements OnModuleInit {
         model: config.model || 'deepseek/deepseek-chat',
         messages,
         temperature: config.temperature ?? 0.7,
-        max_tokens: config.maxTokens ?? 1200,
+        max_tokens: Math.max(config.maxTokens ?? 1200, 2500),
       }),
     });
 
@@ -871,7 +895,7 @@ export class AiAgentService implements OnModuleInit {
         model,
         messages,
         temperature: config.temperature ?? 0.7,
-        max_tokens: config.maxTokens ?? 1200,
+        max_tokens: Math.max(config.maxTokens ?? 1200, 2500),
       }),
     });
 
@@ -910,7 +934,7 @@ export class AiAgentService implements OnModuleInit {
       contents,
       generationConfig: {
         temperature: config.temperature ?? 0.7,
-        maxOutputTokens: config.maxTokens ?? 1200,
+        maxOutputTokens: Math.max(config.maxTokens ?? 1200, 2500),
       },
     };
 
@@ -957,8 +981,11 @@ export class AiAgentService implements OnModuleInit {
   resetHandoverSilence(sessionId: string, chatId?: string): { success: boolean; clearedCount: number } {
     let clearedCount = 0;
     if (chatId) {
-      const key = `${sessionId}:${chatId}`;
-      if (this.handoverMap.delete(key)) clearedCount++;
+      const norm = normalizeChatId(chatId);
+      const key1 = `${sessionId}:${chatId}`;
+      const key2 = `${sessionId}:${norm}`;
+      if (this.handoverMap.delete(key1)) clearedCount++;
+      if (this.handoverMap.delete(key2)) clearedCount++;
     } else {
       for (const [k] of this.handoverMap.entries()) {
         if (k.startsWith(`${sessionId}:`)) {
