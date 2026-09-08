@@ -1,10 +1,10 @@
-import { Injectable, OnModuleInit, Optional } from '@nestjs/common';
+import { Injectable, OnModuleInit, Optional, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ModuleRef } from '@nestjs/core';
 import * as fs from 'fs';
 import * as path from 'path';
-import { SessionAiConfig, AiProvider } from './entities/session-ai-config.entity';
+import { SessionAiConfig, AiProvider, BlacklistEntry } from './entities/session-ai-config.entity';
 import { UpdateAiConfigDto, TestAiPromptDto } from './dto/ai-config.dto';
 import { Message, MessageDirection } from '../message/entities/message.entity';
 import { createLogger } from '../../common/services/logger.service';
@@ -112,6 +112,78 @@ export function normalizeChatId(id: string): string {
   return id.replace('@s.whatsapp.net', '@c.us').trim();
 }
 
+/**
+ * Strips formatting, spaces, and WhatsApp domains to obtain plain phone digits.
+ */
+export function normalizePhoneDigits(phone: string): string {
+  if (!phone) return '';
+  return phone
+    .replace(/@s\.whatsapp\.net/gi, '')
+    .replace(/@c\.us/gi, '')
+    .replace(/\D/g, '');
+}
+
+/**
+ * Safely parses raw stored blacklist into strongly-typed BlacklistEntry array.
+ */
+export function parseBlacklist(raw: string | null | undefined): BlacklistEntry[] {
+  if (!raw) return [];
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((item: any) => {
+          if (typeof item === 'string') {
+            const clean = normalizePhoneDigits(item);
+            return {
+              phone: item.trim(),
+              cleanPhone: clean,
+              addedAt: new Date().toISOString(),
+            };
+          }
+          const rawPhone = String(item.phone || item.cleanPhone || '');
+          const clean = item.cleanPhone || normalizePhoneDigits(rawPhone);
+          return {
+            phone: rawPhone.trim(),
+            cleanPhone: clean,
+            addedAt: item.addedAt || new Date().toISOString(),
+            reason: item.reason ? String(item.reason).trim() : undefined,
+          };
+        })
+        .filter((e) => e.cleanPhone.length > 0);
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Checks if an incoming WhatsApp chat ID matches any blacklisted phone number.
+ * Supports exact digits matching and suffix matching (for country code variations).
+ */
+export function isPhoneBlacklisted(rawChatId: string, blacklist: BlacklistEntry[]): boolean {
+  if (!rawChatId || !blacklist || blacklist.length === 0) return false;
+  const incomingDigits = normalizePhoneDigits(rawChatId);
+  if (!incomingDigits) return false;
+
+  for (const entry of blacklist) {
+    const entryDigits = entry.cleanPhone || normalizePhoneDigits(entry.phone);
+    if (!entryDigits) continue;
+
+    // Exact match
+    if (incomingDigits === entryDigits) return true;
+
+    // Suffix match (e.g. 56993005959 vs 993005959, or national format variations)
+    if (incomingDigits.length >= 8 && entryDigits.length >= 8) {
+      if (incomingDigits.endsWith(entryDigits) || entryDigits.endsWith(incomingDigits)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 const HANDOVER_KEYWORD_REGEX =
   /\b(hablar con un humano|hablar con una persona|operador|asesor|persona real|humano|reclamo|supervisor|due[ñn]o|comunicar con un agente|quiero hablar con alguien)\b/i;
 
@@ -188,6 +260,7 @@ export class AiAgentService implements OnModuleInit {
         transcribeAudio: config.transcribeAudio,
         groqApiKey: config.groqApiKey,
         whisperModel: config.whisperModel,
+        blacklist: config.blacklist,
       };
       fs.writeFileSync(filePath, JSON.stringify(current, null, 2), 'utf-8');
     } catch (err) {
@@ -220,6 +293,10 @@ export class AiAgentService implements OnModuleInit {
           toSave.systemPrompt = bkp.systemPrompt;
           needsSave = true;
         }
+        if (bkp.blacklist && !toSave.blacklist) {
+          toSave.blacklist = typeof bkp.blacklist === 'string' ? bkp.blacklist : JSON.stringify(bkp.blacklist);
+          needsSave = true;
+        }
         if (needsSave) {
           if (bkp.provider) toSave.provider = bkp.provider as AiProvider;
           if (bkp.model) toSave.model = bkp.model;
@@ -231,6 +308,9 @@ export class AiAgentService implements OnModuleInit {
           if (bkp.transcribeAudio !== undefined) toSave.transcribeAudio = bkp.transcribeAudio;
           if (bkp.groqApiKey !== undefined) toSave.groqApiKey = bkp.groqApiKey;
           if (bkp.whisperModel !== undefined) toSave.whisperModel = bkp.whisperModel;
+          if (bkp.blacklist !== undefined) {
+            toSave.blacklist = typeof bkp.blacklist === 'string' ? bkp.blacklist : JSON.stringify(bkp.blacklist);
+          }
           await this.configRepository.save(toSave);
         }
       }
@@ -260,6 +340,7 @@ export class AiAgentService implements OnModuleInit {
           transcribeAudio BOOLEAN DEFAULT 0,
           groqApiKey VARCHAR(255) NULL,
           whisperModel VARCHAR(64) DEFAULT 'whisper-large-v3-turbo',
+          blacklist TEXT NULL,
           createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
           updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
         )
@@ -278,6 +359,9 @@ export class AiAgentService implements OnModuleInit {
       `).catch(() => {});
       await this.configRepository.query(`
         ALTER TABLE session_ai_configs ADD COLUMN whisperModel VARCHAR(64) DEFAULT 'whisper-large-v3-turbo'
+      `).catch(() => {});
+      await this.configRepository.query(`
+        ALTER TABLE session_ai_configs ADD COLUMN blacklist TEXT NULL
       `).catch(() => {});
     } catch (err) {
       this.logger.warn('Error verifying session_ai_configs schema', {
@@ -306,6 +390,7 @@ export class AiAgentService implements OnModuleInit {
         transcribeAudio: bkp?.transcribeAudio ?? false,
         groqApiKey: bkp?.groqApiKey || null,
         whisperModel: bkp?.whisperModel || 'whisper-large-v3-turbo',
+        blacklist: bkp?.blacklist ? (typeof bkp.blacklist === 'string' ? bkp.blacklist : JSON.stringify(bkp.blacklist)) : null,
       });
       try {
         config = await this.configRepository.save(config);
@@ -332,10 +417,63 @@ export class AiAgentService implements OnModuleInit {
     if (dto.transcribeAudio !== undefined) config.transcribeAudio = dto.transcribeAudio;
     if (dto.groqApiKey !== undefined) config.groqApiKey = dto.groqApiKey.trim() || null;
     if (dto.whisperModel !== undefined) config.whisperModel = dto.whisperModel.trim() || 'whisper-large-v3-turbo';
+    if (dto.blacklist !== undefined) {
+      config.blacklist = typeof dto.blacklist === 'string' ? dto.blacklist : JSON.stringify(dto.blacklist);
+    }
 
     const saved = await this.configRepository.save(config);
     this.saveToBackup(sessionId, saved);
     return saved;
+  }
+
+  async getBlacklist(sessionId: string): Promise<BlacklistEntry[]> {
+    const config = await this.getConfig(sessionId);
+    return parseBlacklist(config.blacklist);
+  }
+
+  async addBlacklistNumber(sessionId: string, phone: string, reason?: string): Promise<BlacklistEntry[]> {
+    const config = await this.getConfig(sessionId);
+    const list = parseBlacklist(config.blacklist);
+    const cleanPhone = normalizePhoneDigits(phone);
+    if (!cleanPhone) {
+      throw new BadRequestException('Número telefónico inválido.');
+    }
+
+    const existingIndex = list.findIndex(
+      (e) => e.cleanPhone === cleanPhone || (e.cleanPhone.length >= 8 && cleanPhone.endsWith(e.cleanPhone)),
+    );
+    if (existingIndex >= 0) {
+      list[existingIndex].phone = phone.trim();
+      if (reason !== undefined) list[existingIndex].reason = reason.trim() || undefined;
+      list[existingIndex].addedAt = new Date().toISOString();
+    } else {
+      list.unshift({
+        phone: phone.trim(),
+        cleanPhone,
+        addedAt: new Date().toISOString(),
+        reason: reason?.trim() || undefined,
+      });
+    }
+
+    config.blacklist = JSON.stringify(list);
+    await this.configRepository.save(config);
+    this.saveToBackup(sessionId, config);
+    this.logger.log(`Added number ${phone} (${cleanPhone}) to blacklist for session ${sessionId}`);
+    return list;
+  }
+
+  async removeBlacklistNumber(sessionId: string, phone: string): Promise<BlacklistEntry[]> {
+    const config = await this.getConfig(sessionId);
+    const list = parseBlacklist(config.blacklist);
+    const cleanPhone = normalizePhoneDigits(phone);
+    const filtered = list.filter(
+      (e) => e.cleanPhone !== cleanPhone && !cleanPhone.endsWith(e.cleanPhone) && !e.cleanPhone.endsWith(cleanPhone),
+    );
+    config.blacklist = JSON.stringify(filtered);
+    await this.configRepository.save(config);
+    this.saveToBackup(sessionId, config);
+    this.logger.log(`Removed number ${phone} from blacklist for session ${sessionId}`);
+    return filtered;
   }
 
   /**
@@ -407,6 +545,18 @@ export class AiAgentService implements OnModuleInit {
       const config = await this.configRepository.findOne({ where: { sessionId } });
       if (!config || !config.enabled || !config.apiKey || !config.systemPrompt) {
         return;
+      }
+
+      // Blacklist gate: immediately ignore if sender is in AI blacklist
+      if (config.blacklist) {
+        const blacklist = parseBlacklist(config.blacklist);
+        if (isPhoneBlacklisted(rawChatId, blacklist)) {
+          this.logger.debug('AI reply skipped: sender is in AI blacklist', {
+            sessionId,
+            chatId: rawChatId,
+          });
+          return;
+        }
       }
 
       let text = typeof message.body === 'string' ? message.body.trim() : '';

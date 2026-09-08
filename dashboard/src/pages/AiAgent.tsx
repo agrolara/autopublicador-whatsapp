@@ -23,6 +23,8 @@ import {
   Trash2,
   FileText,
   RotateCcw,
+  UserX,
+  Plus,
 } from 'lucide-react';
 import { sessionApi, aiAgentApi } from '../services/api';
 import type {
@@ -31,6 +33,7 @@ import type {
   AiProvider,
   UpdateAiConfigPayload,
   KnowledgeDocument,
+  BlacklistEntry,
 } from '../services/api';
 import './AiAgent.css';
 
@@ -175,6 +178,15 @@ export function AiAgent() {
   const [resettingSilence, setResettingSilence] = useState<boolean>(false);
   const [resetSilenceMsg, setResetSilenceMsg] = useState<string | null>(null);
 
+  // Blacklist state
+  const [blacklist, setBlacklist] = useState<BlacklistEntry[]>([]);
+  const [loadingBlacklist, setLoadingBlacklist] = useState<boolean>(false);
+  const [newBlacklistPhone, setNewBlacklistPhone] = useState<string>('');
+  const [newBlacklistReason, setNewBlacklistReason] = useState<string>('');
+  const [addingBlacklist, setAddingBlacklist] = useState<boolean>(false);
+  const [deletingBlacklistPhone, setDeletingBlacklistPhone] = useState<string | null>(null);
+  const [blacklistError, setBlacklistError] = useState<string | null>(null);
+
   // Load active sessions
   useEffect(() => {
     async function loadSessions() {
@@ -221,6 +233,7 @@ export function AiAgent() {
         setGroqApiKey(config.groqApiKey || '');
         setWhisperModel(config.whisperModel || 'whisper-large-v3-turbo');
         await loadDocuments(selectedSessionId);
+        await loadBlacklist(selectedSessionId);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Error al cargar configuración de IA');
       } finally {
@@ -239,6 +252,59 @@ export function AiAgent() {
       console.error('Error al cargar documentos de base de conocimiento:', err);
     } finally {
       setLoadingDocuments(false);
+    }
+  };
+
+  const loadBlacklist = async (sessionId: string) => {
+    try {
+      setLoadingBlacklist(true);
+      const list = await aiAgentApi.getBlacklist(sessionId);
+      setBlacklist(list || []);
+    } catch (err) {
+      console.error('Error al cargar lista negra:', err);
+    } finally {
+      setLoadingBlacklist(false);
+    }
+  };
+
+  const handleAddBlacklist = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newBlacklistPhone.trim() || !selectedSessionId) return;
+    try {
+      setAddingBlacklist(true);
+      setBlacklistError(null);
+      const updated = await aiAgentApi.addBlacklist(
+        selectedSessionId,
+        newBlacklistPhone.trim(),
+        newBlacklistReason.trim() || undefined,
+      );
+      setBlacklist(updated || []);
+      setNewBlacklistPhone('');
+      setNewBlacklistReason('');
+      setSaveSuccessMessage(`🚫 Número ${newBlacklistPhone.trim()} añadido a la Lista Negra.`);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 4000);
+    } catch (err: any) {
+      setBlacklistError(err.message || 'Error al agregar a la lista negra');
+    } finally {
+      setAddingBlacklist(false);
+    }
+  };
+
+  const handleRemoveBlacklist = async (phone: string) => {
+    if (!selectedSessionId) return;
+    try {
+      setDeletingBlacklistPhone(phone);
+      setBlacklistError(null);
+      const updated = await aiAgentApi.removeBlacklist(selectedSessionId, phone);
+      setBlacklist(updated || []);
+      setSaveSuccessMessage(`✅ Número removido de la Lista Negra.`);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 4000);
+    } catch (err: any) {
+      setBlacklistError(err.message || 'Error al remover de la lista negra');
+    } finally {
+      setDeletingBlacklistPhone(null);
     }
   };
 
@@ -939,6 +1005,124 @@ export function AiAgent() {
               <div className="kb-empty-box mt-3">
                 <FileText size={22} />
                 <span>No hay documentos cargados para esta sesión. Sube archivos para enriquecer las respuestas de la IA.</span>
+              </div>
+            )}
+          </div>
+
+          {/* Blacklist / Lista Negra Section */}
+          <div className="config-section mt-4 blacklist-section">
+            <div className="section-title-between">
+              <label className="section-title">
+                <UserX size={18} />
+                Lista Negra de Números (Blacklist)
+              </label>
+              <div className="blacklist-badge">
+                <UserX size={14} />
+                <span>{blacklist.length} {blacklist.length === 1 ? 'número bloqueado' : 'números bloqueados'}</span>
+              </div>
+            </div>
+
+            <p className="blacklist-description">
+              Agrega números de teléfono a los que la Inteligencia Artificial <strong>NUNCA</strong> debe responder (ej. números personales, supervisores o clientes que requieren atención manual exclusiva). Los mensajes se guardan en tu chat normalmente, pero la IA guardará absoluto silencio.
+            </p>
+
+            <form className="blacklist-add-form mt-3" onSubmit={handleAddBlacklist}>
+              <div className="blacklist-input-group">
+                <input
+                  type="text"
+                  className="text-input blacklist-phone-input"
+                  placeholder="Número (ej. +56 9 1234 5678 o 56912345678)..."
+                  value={newBlacklistPhone}
+                  onChange={e => setNewBlacklistPhone(e.target.value)}
+                  disabled={addingBlacklist || !selectedSessionId}
+                />
+                <input
+                  type="text"
+                  className="text-input blacklist-reason-input"
+                  placeholder="Motivo / Etiqueta opcional (ej. Proveedor, Atención manual)..."
+                  value={newBlacklistReason}
+                  onChange={e => setNewBlacklistReason(e.target.value)}
+                  disabled={addingBlacklist || !selectedSessionId}
+                />
+                <button
+                  type="submit"
+                  className="btn-add-blacklist"
+                  disabled={addingBlacklist || !newBlacklistPhone.trim() || !selectedSessionId}
+                >
+                  <Plus size={16} />
+                  <span>{addingBlacklist ? 'Agregando...' : 'Agregar'}</span>
+                </button>
+              </div>
+            </form>
+
+            {blacklistError && (
+              <div className="blacklist-error-alert mt-2">
+                <AlertCircle size={16} />
+                <span>{blacklistError}</span>
+              </div>
+            )}
+
+            {loadingBlacklist ? (
+              <div className="blacklist-loading mt-3">Cargando lista negra...</div>
+            ) : blacklist.length > 0 ? (
+              <div className="blacklist-table-wrapper mt-3">
+                <table className="blacklist-table">
+                  <thead>
+                    <tr>
+                      <th>Teléfono / WhatsApp</th>
+                      <th>Dígitos Normalizados</th>
+                      <th>Motivo / Etiqueta</th>
+                      <th>Fecha de Bloqueo</th>
+                      <th style={{ textAlign: 'right' }}>Acción</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {blacklist.map(entry => (
+                      <tr key={entry.cleanPhone}>
+                        <td className="blacklist-phone-cell">
+                          <UserX size={15} />
+                          <span className="blacklist-phone-text">{entry.phone}</span>
+                        </td>
+                        <td>
+                          <code className="blacklist-clean-code">{entry.cleanPhone}</code>
+                        </td>
+                        <td>
+                          {entry.reason ? (
+                            <span className="blacklist-reason-badge">{entry.reason}</span>
+                          ) : (
+                            <span className="blacklist-reason-empty">Sin motivo</span>
+                          )}
+                        </td>
+                        <td>
+                          {new Date(entry.addedAt).toLocaleDateString('es-CL', {
+                            day: '2-digit',
+                            month: '2-digit',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          <button
+                            type="button"
+                            className="blacklist-delete-btn"
+                            title="Quitar de la lista negra"
+                            onClick={() => handleRemoveBlacklist(entry.cleanPhone)}
+                            disabled={deletingBlacklistPhone === entry.cleanPhone}
+                          >
+                            <Trash2 size={15} />
+                            {deletingBlacklistPhone === entry.cleanPhone ? 'Quitando...' : 'Quitar'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="blacklist-empty-box mt-3">
+                <UserX size={22} />
+                <span>No hay números en la lista negra. La IA responderá normalmente a todos los clientes que escriban.</span>
               </div>
             )}
           </div>

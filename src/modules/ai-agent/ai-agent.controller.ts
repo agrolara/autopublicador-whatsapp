@@ -15,8 +15,8 @@ import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery, ApiConsumes, Ap
 import { FileInterceptor } from '@nestjs/platform-express';
 import { AiAgentService } from './ai-agent.service';
 import { KnowledgeBaseService, KnowledgeDocumentDto } from './knowledge-base.service';
-import { UpdateAiConfigDto, TestAiPromptDto } from './dto/ai-config.dto';
-import { SessionAiConfig } from './entities/session-ai-config.entity';
+import { UpdateAiConfigDto, TestAiPromptDto, AddBlacklistEntryDto } from './dto/ai-config.dto';
+import { SessionAiConfig, BlacklistEntry } from './entities/session-ai-config.entity';
 import { RequireRole } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
 
@@ -72,6 +72,40 @@ export class AiAgentController {
     @Query('chatId') chatId?: string,
   ): Promise<{ success: boolean; clearedCount: number }> {
     return this.aiAgentService.resetHandoverSilence(sessionId, chatId);
+  }
+
+  @Get('blacklist')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Get blacklisted phone numbers for AI agent' })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiResponse({ status: 200, description: 'List of blacklisted numbers' })
+  async getBlacklist(@Param('sessionId') sessionId: string): Promise<BlacklistEntry[]> {
+    return this.aiAgentService.getBlacklist(sessionId);
+  }
+
+  @Post('blacklist')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Add a phone number to the AI blacklist' })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiResponse({ status: 200, description: 'Updated blacklist' })
+  async addBlacklist(
+    @Param('sessionId') sessionId: string,
+    @Body() dto: AddBlacklistEntryDto,
+  ): Promise<BlacklistEntry[]> {
+    return this.aiAgentService.addBlacklistNumber(sessionId, dto.phone, dto.reason);
+  }
+
+  @Delete('blacklist/:phone')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Remove a phone number from the AI blacklist' })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiParam({ name: 'phone', description: 'Phone number to remove' })
+  @ApiResponse({ status: 200, description: 'Updated blacklist' })
+  async removeBlacklist(
+    @Param('sessionId') sessionId: string,
+    @Param('phone') phone: string,
+  ): Promise<BlacklistEntry[]> {
+    return this.aiAgentService.removeBlacklistNumber(sessionId, phone);
   }
 
   @Get('documents')

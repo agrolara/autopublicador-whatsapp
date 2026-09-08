@@ -79,6 +79,23 @@ export class UpdateAiConfigDto {
   @IsString()
   @MaxLength(64)
   whisperModel?: string;
+
+  @ApiPropertyOptional({ description: 'Blacklisted numbers/entries for AI agent' })
+  @IsOptional()
+  blacklist?: unknown;
+}
+
+export class AddBlacklistEntryDto {
+  @ApiProperty({ description: 'Phone number to blacklist (e.g. +56912345678 or 56912345678)' })
+  @IsString()
+  @MaxLength(64)
+  phone!: string;
+
+  @ApiPropertyOptional({ description: 'Optional reason or note for blacklisting' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  reason?: string;
 }
 
 export class TestAiPromptDto {

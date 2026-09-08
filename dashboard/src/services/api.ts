@@ -169,6 +169,13 @@ export interface TemplatePayload {
 
 export type AiProvider = 'openrouter' | 'gemini' | 'openai' | 'custom';
 
+export interface BlacklistEntry {
+  phone: string;
+  cleanPhone: string;
+  addedAt: string;
+  reason?: string;
+}
+
 export interface SessionAiConfig {
   id: string;
   sessionId: string;
@@ -185,6 +192,7 @@ export interface SessionAiConfig {
   transcribeAudio: boolean;
   groqApiKey: string | null;
   whisperModel: string;
+  blacklist?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -203,6 +211,7 @@ export interface UpdateAiConfigPayload {
   transcribeAudio?: boolean;
   groqApiKey?: string;
   whisperModel?: string;
+  blacklist?: unknown;
 }
 
 export interface TestAiPromptPayload {
@@ -994,6 +1003,17 @@ export const aiAgentApi = {
       `/sessions/${sessionId}/ai-config/reset-silence${chatId ? `?chatId=${encodeURIComponent(chatId)}` : ''}`,
       { method: 'POST' },
     ),
+  getBlacklist: (sessionId: string) =>
+    request<BlacklistEntry[]>(`/sessions/${sessionId}/ai-config/blacklist`),
+  addBlacklist: (sessionId: string, phone: string, reason?: string) =>
+    request<BlacklistEntry[]>(`/sessions/${sessionId}/ai-config/blacklist`, {
+      method: 'POST',
+      body: JSON.stringify({ phone, reason }),
+    }),
+  removeBlacklist: (sessionId: string, phone: string) =>
+    request<BlacklistEntry[]>(`/sessions/${sessionId}/ai-config/blacklist/${encodeURIComponent(phone)}`, {
+      method: 'DELETE',
+    }),
 };
 
 // =============================================================================

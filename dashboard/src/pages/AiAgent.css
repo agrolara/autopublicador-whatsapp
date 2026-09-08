@@ -1072,4 +1072,217 @@
   animation: spin 1s linear infinite;
 }
 
+/* ==========================================================================
+   AI Blacklist / Lista Negra Section
+   ========================================================================== */
+.blacklist-section {
+  border-left: 4px solid #ef4444 !important;
+}
+
+.blacklist-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: #fee2e2;
+  color: #991b1b;
+  padding: 0.25rem 0.65rem;
+  border-radius: 20px;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.blacklist-description {
+  font-size: 0.84rem;
+  color: var(--text-muted, #64748b);
+  line-height: 1.45;
+  margin-top: 0.4rem;
+}
+
+.blacklist-add-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.blacklist-input-group {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.blacklist-phone-input {
+  flex: 1 1 200px;
+  min-width: 170px;
+}
+
+.blacklist-reason-input {
+  flex: 2 1 240px;
+  min-width: 200px;
+}
+
+.btn-add-blacklist {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 1.1rem;
+  background: #ef4444;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  white-space: nowrap;
+}
+
+.btn-add-blacklist:hover:not(:disabled) {
+  background: #dc2626;
+}
+
+.btn-add-blacklist:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.blacklist-error-alert {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.8rem;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.blacklist-loading {
+  font-size: 0.82rem;
+  color: var(--text-muted, #64748b);
+  padding: 1rem 0;
+  text-align: center;
+}
+
+.blacklist-table-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 8px;
+  background: var(--card-bg, #ffffff);
+}
+
+.blacklist-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  text-align: left;
+}
+
+.blacklist-table th {
+  background: var(--table-header-bg, #f8fafc);
+  color: var(--text-muted, #64748b);
+  font-weight: 600;
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
+}
+
+.blacklist-table td {
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid var(--border-color, #f1f5f9);
+  vertical-align: middle;
+}
+
+.blacklist-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.blacklist-table tbody tr:hover {
+  background: var(--row-hover, #f8fafc);
+}
+
+.blacklist-phone-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  color: var(--text-color, #0f172a);
+}
+
+.blacklist-phone-cell svg {
+  color: #ef4444;
+  flex-shrink: 0;
+}
+
+.blacklist-clean-code {
+  background: #f1f5f9;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 0.78rem;
+  color: #475569;
+}
+
+.blacklist-reason-badge {
+  display: inline-block;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  color: #374151;
+  font-weight: 500;
+}
+
+.blacklist-reason-empty {
+  color: #94a3b8;
+  font-style: italic;
+  font-size: 0.75rem;
+}
+
+.blacklist-delete-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.65rem;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #dc2626;
+  border-radius: 6px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.blacklist-delete-btn:hover:not(:disabled) {
+  background: #fee2e2;
+  border-color: #fca5a5;
+  color: #b91c1c;
+}
+
+.blacklist-delete-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.blacklist-empty-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 1.5rem 1rem;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  color: #64748b;
+  font-size: 0.82rem;
+  text-align: center;
+}
+
+.blacklist-empty-box svg {
+  color: #94a3b8;
+}
+
+
 

@@ -2,6 +2,13 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateCol
 
 export type AiProvider = 'openrouter' | 'gemini' | 'openai' | 'custom';
 
+export interface BlacklistEntry {
+  phone: string;
+  cleanPhone: string;
+  addedAt: string;
+  reason?: string;
+}
+
 @Entity('session_ai_configs')
 export class SessionAiConfig {
   @PrimaryGeneratedColumn('uuid')
@@ -49,6 +56,9 @@ export class SessionAiConfig {
 
   @Column({ type: 'varchar', length: 64, default: 'whisper-large-v3-turbo' })
   whisperModel!: string;
+
+  @Column({ type: 'text', nullable: true })
+  blacklist!: string | null;
 
   @CreateDateColumn()
   createdAt!: Date;
