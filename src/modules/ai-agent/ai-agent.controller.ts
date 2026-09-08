@@ -6,11 +6,12 @@ import {
   Delete,
   Param,
   Body,
+  Query,
   UseInterceptors,
   UploadedFile,
   BadRequestException,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiConsumes, ApiBody } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { AiAgentService } from './ai-agent.service';
 import { KnowledgeBaseService, KnowledgeDocumentDto } from './knowledge-base.service';
@@ -58,6 +59,19 @@ export class AiAgentController {
     @Body() dto: TestAiPromptDto,
   ): Promise<{ reply: string; durationMs: number }> {
     return this.aiAgentService.testPrompt(dto, sessionId);
+  }
+
+  @Post('reset-silence')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Reset human handover silence for a session or specific chat' })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiQuery({ name: 'chatId', required: false, description: 'Optional chat ID to reset' })
+  @ApiResponse({ status: 200, description: 'Reset result' })
+  async resetSilence(
+    @Param('sessionId') sessionId: string,
+    @Query('chatId') chatId?: string,
+  ): Promise<{ success: boolean; clearedCount: number }> {
+    return this.aiAgentService.resetHandoverSilence(sessionId, chatId);
   }
 
   @Get('documents')

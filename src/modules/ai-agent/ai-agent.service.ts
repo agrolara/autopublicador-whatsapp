@@ -74,6 +74,39 @@ export function chunkMessage(text: string, maxChunkSize = 650): string[] {
   return chunks;
 }
 
+/**
+ * Strips internal thinking/reasoning blocks (e.g. from Nemotron, DeepSeek R1, Qwen)
+ * so that only the final client-facing reply is sent to WhatsApp.
+ */
+export function stripThinkingProcess(text: string): string {
+  if (!text) return '';
+
+  let cleaned = text;
+
+  // 1. Remove XML-like <think>...</think> tags
+  cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
+  // 2. Remove "Here's a thinking process: ... " or "Thinking Process: ..."
+  if (/^(?:Here's a thinking process:|Thinking Process:|Thought Process:)/i.test(cleaned)) {
+    // Look for common Spanish greetings, emojis, or delimiters where the actual response begins
+    const spanishStart = cleaned.search(/\n\n(?=(?:¡|Hola|Buenas|Estimad|¿|🍕|•\s*\*\*|Claro|Por supuesto|Para|En|Si|Te|Con gusto|Aquí|Exactamente|Perfecto|Muy bien|Disculpa|Lamentablemente|Entiendo))/i);
+    if (spanishStart !== -1 && spanishStart > 30) {
+      cleaned = cleaned.slice(spanishStart).trim();
+    } else {
+      // Look for "Formulate Response:" or "Final Response:"
+      const formulateMatch = cleaned.match(/[\s\S]*?(?:Formulate Response[^\n]*\n+|Final Response[^\n]*\n+|Drafting Response[^\n]*\n+)([\s\S]*)/i);
+      if (formulateMatch && formulateMatch[1].trim()) {
+        cleaned = formulateMatch[1].trim();
+      }
+    }
+  }
+
+  // Remove leading/trailing quotation marks if the whole response is quoted
+  cleaned = cleaned.replace(/^["'](.*)["']$/s, '$1').trim();
+
+  return cleaned || text;
+}
+
 const HANDOVER_KEYWORD_REGEX =
   /\b(hablar con un humano|hablar con una persona|operador|asesor|persona real|humano|reclamo|supervisor|due[ñn]o|comunicar con un agente|quiero hablar con alguien)\b/i;
 
@@ -331,11 +364,24 @@ export class AiAgentService implements OnModuleInit {
       const handoverKey = `${sessionId}:${rawChatId}`;
       const handoverExpiry = this.handoverMap.get(handoverKey);
       if (handoverExpiry && Date.now() < handoverExpiry) {
-        this.logger.debug('AI reply skipped: chat is currently handed over to human operator', {
-          sessionId,
-          chatId: rawChatId,
-          remainingMinutes: Math.round((handoverExpiry - Date.now()) / 60000),
-        });
+        const rawBody = typeof message.body === 'string' ? message.body.trim() : '';
+        if (/^#(?:bot|ia|reactivar|activar)\b/i.test(rawBody)) {
+          this.handoverMap.delete(handoverKey);
+          this.logger.log(`Handover silence manually cleared via command for ${rawChatId}`);
+          const messageService = this.resolveMessageService();
+          if (messageService) {
+            await messageService.sendText(sessionId, {
+              chatId: rawChatId,
+              text: '🤖 *Asistente de IA reactivado para este chat.* ¿En qué te puedo ayudar?',
+            });
+          }
+        } else {
+          this.logger.debug('AI reply skipped: chat is currently handed over to human operator', {
+            sessionId,
+            chatId: rawChatId,
+            remainingMinutes: Math.round((handoverExpiry - Date.now()) / 60000),
+          });
+        }
         return;
       }
 
@@ -558,6 +604,10 @@ export class AiAgentService implements OnModuleInit {
       this.logger.log(`Invoking AI agent for chat ${chatId} (${config.provider}/${config.model})`);
 
       let replyText = await this.callLlm(config, messagesForLlm);
+      if (!replyText || !replyText.trim()) return;
+
+      // Clean internal thinking/reasoning blocks (e.g. from Nemotron, DeepSeek R1, Qwen)
+      replyText = stripThinkingProcess(replyText);
       if (!replyText || !replyText.trim()) return;
 
       // Check if LLM emitted the handover tag
@@ -898,5 +948,25 @@ export class AiAgentService implements OnModuleInit {
       // MessageService not yet resolved
     }
     return this.messageService;
+  }
+
+  /**
+   * Clears the human handover silence for a specific chat or all chats of a session.
+   */
+  resetHandoverSilence(sessionId: string, chatId?: string): { success: boolean; clearedCount: number } {
+    let clearedCount = 0;
+    if (chatId) {
+      const key = `${sessionId}:${chatId}`;
+      if (this.handoverMap.delete(key)) clearedCount++;
+    } else {
+      for (const [k] of this.handoverMap.entries()) {
+        if (k.startsWith(`${sessionId}:`)) {
+          this.handoverMap.delete(k);
+          clearedCount++;
+        }
+      }
+    }
+    this.logger.log(`Handover silence reset for session ${sessionId} (cleared: ${clearedCount})`);
+    return { success: true, clearedCount };
   }
 }

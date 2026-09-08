@@ -989,6 +989,11 @@ export const aiAgentApi = {
     request<{ success: boolean }>(`/sessions/${sessionId}/ai-config/documents/${documentId}`, {
       method: 'DELETE',
     }),
+  resetSilence: (sessionId: string, chatId?: string) =>
+    request<{ success: boolean; clearedCount: number }>(
+      `/sessions/${sessionId}/ai-config/reset-silence${chatId ? `?chatId=${encodeURIComponent(chatId)}` : ''}`,
+      { method: 'POST' },
+    ),
 };
 
 // =============================================================================

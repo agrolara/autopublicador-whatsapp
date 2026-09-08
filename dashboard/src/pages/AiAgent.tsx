@@ -22,6 +22,7 @@ import {
   UploadCloud,
   Trash2,
   FileText,
+  RotateCcw,
 } from 'lucide-react';
 import { sessionApi, aiAgentApi } from '../services/api';
 import type {
@@ -170,6 +171,10 @@ export function AiAgent() {
   const [uploadingDocument, setUploadingDocument] = useState<boolean>(false);
   const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
 
+  // Handover silence reset state
+  const [resettingSilence, setResettingSilence] = useState<boolean>(false);
+  const [resetSilenceMsg, setResetSilenceMsg] = useState<string | null>(null);
+
   // Load active sessions
   useEffect(() => {
     async function loadSessions() {
@@ -270,6 +275,21 @@ export function AiAgent() {
       setError(err.message || 'Error al eliminar documento');
     } finally {
       setDeletingDocId(null);
+    }
+  };
+
+  const handleResetSilence = async () => {
+    if (!selectedSessionId) return;
+    try {
+      setResettingSilence(true);
+      setResetSilenceMsg(null);
+      const res = await aiAgentApi.resetSilence(selectedSessionId);
+      setResetSilenceMsg(`¡Silencios reseteados con éxito! (${res.clearedCount} chats reactivados)`);
+      setTimeout(() => setResetSilenceMsg(null), 4000);
+    } catch (err: any) {
+      setError(`Error al reactivar chats: ${err.message || 'Error desconocido'}`);
+    } finally {
+      setResettingSilence(false);
     }
   };
 
@@ -719,6 +739,32 @@ export function AiAgent() {
                 </span>
               </div>
             </div>
+
+            {/* Handover Silence Reset & Info */}
+            <div className="handover-reset-bar mt-3">
+              <div className="handover-reset-info">
+                <ShieldCheck size={18} className="handover-icon" />
+                <div className="handover-text">
+                  <strong>Control de Derivación Humana:</strong> Cuando un cliente pide hablar con una persona o se transfiere a soporte, el bot se silencia por 60 min en ese chat para no interrumpirte. Puedes reactivarlo enviando <code>#ia</code> o <code>#bot</code> en el chat de WhatsApp, o restablecer todos los silencios con este botón:
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn-reset-silence"
+                onClick={handleResetSilence}
+                disabled={resettingSilence || !selectedSessionId}
+                title="Reactiva inmediatamente el bot en todos los chats que estaban en pausa"
+              >
+                <RotateCcw size={15} className={resettingSilence ? 'spin' : ''} />
+                <span>{resettingSilence ? 'Reactivando...' : 'Reactivar Chats Silenciados'}</span>
+              </button>
+            </div>
+            {resetSilenceMsg && (
+              <div className="reset-silence-alert">
+                <CheckCircle2 size={16} />
+                <span>{resetSilenceMsg}</span>
+              </div>
+            )}
           </div>
 
           {/* Voice Notes Audio Transcription (Groq Whisper) */}

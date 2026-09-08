@@ -987,3 +987,89 @@
   font-size: 0.82rem;
 }
 
+/* Handover Reset Bar */
+.handover-reset-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.25rem;
+  padding: 0.85rem 1.1rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+
+.handover-reset-info {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: #334155;
+}
+
+.handover-reset-info .handover-icon {
+  color: #3b82f6;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.handover-reset-info code {
+  background: #e2e8f0;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.btn-reset-silence {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  white-space: nowrap;
+  padding: 0.55rem 0.95rem;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1d4ed8;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.btn-reset-silence:hover:not(:disabled) {
+  background: #dbeafe;
+  border-color: #93c5fd;
+}
+
+.btn-reset-silence:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.reset-silence-alert {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.65rem;
+  padding: 0.6rem 0.9rem;
+  border-radius: 8px;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #065f46;
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+
