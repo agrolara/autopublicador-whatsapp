@@ -61,6 +61,10 @@ chrome/
 # Backups
 openwa-backup-*.json
 openwa_backup_*.json
+*backup*.json
+scratch*.json
+enlaces_grupos_whatsapp.txt
+
 
 # Docker
 .docker/

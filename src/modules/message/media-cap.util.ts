@@ -1,15 +1,8 @@
 import { PayloadTooLargeException } from '@nestjs/common';
 import { inboundMediaMaxBytes } from '../../engine/adapters/inbound-media-cap';
 
-/**
- * Accept the historical `data:<mime>;base64,<payload>` form without passing its metadata prefix to
- * an engine as if it were encoded bytes. Plain base64 is returned unchanged.
- */
-export function stripBase64DataUri(base64: string | null | undefined): string | undefined {
-  if (base64 == null) return undefined;
-  const match = /^data:[^,]*;base64,/i.exec(base64);
-  return match ? base64.slice(match[0].length) : base64;
-}
+import { stripBase64DataUri } from '../../common/utils/base64.util';
+export { stripBase64DataUri };
 
 /**
  * Reject an outbound base64 media blob whose DECODED size exceeds the shared media byte cap

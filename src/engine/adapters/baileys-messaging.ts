@@ -21,6 +21,7 @@ import { toEngineParticipants } from './baileys-groups';
 import { buildVCard } from './vcard';
 import { loadRemoteMediaBuffer } from '../../common/media/load-remote-media';
 import { BadRequestException } from '@nestjs/common';
+import { parseDataUri } from '../../common/utils/base64.util';
 import { EngineRefusedError } from '../../common/errors/engine-refused.error';
 import { MessageNotFoundError } from '../../common/errors/message-not-found.error';
 import { type createLogger } from '../../common/services/logger.service';
@@ -122,11 +123,10 @@ export async function resolveMediaBuffer(media: MediaInput): Promise<{ data: Buf
 
   // 1. Data-URI scheme (data:image/...;base64,....)
   if (str.startsWith('data:') && str.includes(';base64,')) {
-    const comma = str.indexOf(',');
-    const header = str.substring(5, comma);
-    const mime = header.split(';')[0] || media.mimetype;
-    const cleanB64 = str.substring(comma + 1).replace(/\s/g, '');
-    return { data: Buffer.from(cleanB64, 'base64'), mimetype: mime };
+    const parsed = parseDataUri(str);
+    if (parsed) {
+      return { data: Buffer.from(parsed.base64, 'base64'), mimetype: parsed.mimeType || media.mimetype };
+    }
   }
 
   // 2. Direct check for local uploads folder reference (bypass network / SSRF)
