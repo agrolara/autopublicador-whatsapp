@@ -774,7 +774,8 @@ export class AiAgentService implements OnModuleInit {
     ];
 
     try {
-      const reply = await this.callLlm(config as SessionAiConfig, messagesForLlm);
+      let reply = await this.callLlm(config as SessionAiConfig, messagesForLlm);
+      reply = stripThinkingProcess(reply);
       return {
         reply,
         durationMs: Date.now() - start,
