@@ -1,0 +1,44 @@
+{
+  "id": "openwa-ai-whatsapp-gateway",
+  "name": "OpenWA AI Gateway",
+  "tagline": "Plataforma autónoma multi-sesión de WhatsApp con IA y panel de control web",
+  "version": "0.15.0",
+  "category": "Artificial Intelligence & Automation",
+  "status": "production",
+  "updatedAt": "2026-09-08T03:15:00.000Z",
+  "links": {
+    "repository": "https://github.com/agrolara/autopublicador-whatsapp",
+    "productionUrl": "https://whatsapp-autopublicaciones.agrolara.dedyn.io",
+    "documentation": "https://whatsapp-autopublicaciones.agrolara.dedyn.io/api/docs"
+  },
+  "stack": {
+    "backend": ["Node.js 22", "NestJS 10", "TypeScript 5", "TypeORM", "WebSockets"],
+    "frontend": ["React 18", "Vite 8", "Tailwind CSS", "Lucide React", "i18next"],
+    "whatsappEngine": ["Baileys", "WhatsApp-Web.js"],
+    "aiAndMl": ["OpenRouter API", "Google Gemini Flash", "Groq Whisper", "OpenAI Whisper"],
+    "database": ["SQLite 3", "PostgreSQL 16"],
+    "infrastructure": ["Docker", "Docker Compose", "Coolify Cloud PaaS", "Debian Linux", "FFmpeg"]
+  },
+  "features": [
+    "Multi-session QR authentication and connection management",
+    "Autonomous AI customer service with contextual conversation history",
+    "Multi-message natural chunking for long service catalogs and quotations",
+    "Document knowledge base indexing (PDF, DOCX, TXT, CSV)",
+    "Real-time voice note audio transcription via Whisper",
+    "Human operator detection and instant WhatsApp alert forwarding",
+    "Anti-ban send pacing and scheduled broadcast engine",
+    "Responsive real-time web dashboard with live chat, logs and analytics",
+    "Automated container healthcheck and self-healing deployment"
+  ],
+  "highlights": {
+    "supportedModels": [
+      "nvidia/nemotron-3.5-lightning:free",
+      "google/gemma-4-31b-it:free",
+      "google/gemma-4-26b-a4b-it:free",
+      "meta-llama/llama-3.3-70b-instruct",
+      "gemini-2.0-flash"
+    ],
+    "memoryFootprint": "~400MB under Baileys WebSocket engine",
+    "averageResponseLatency": "< 2.5s"
+  }
+}
