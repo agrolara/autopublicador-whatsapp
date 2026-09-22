@@ -17,6 +17,7 @@ import { StatusStoreService } from '../status-store/status-store.service';
 import { ChatMediaArchiveService } from '../chat-media/chat-media-archive.service';
 import { AutomationRulesService } from '../automation/automation-rules.service';
 import { AiAgentService } from '../ai-agent/ai-agent.service';
+import { RadarLeadService } from '../radar-lead/radar-lead.service';
 import { buildIncomingStatus } from '../status-store/incoming-status';
 import type { StatusUpdate } from '../status-store/entities/status-update.entity';
 import {
@@ -113,6 +114,9 @@ export class MessageProjector {
     // Optional AI Agent service: evaluates inbound private messages and replies with LLM
     @Optional()
     private readonly aiAgentService?: AiAgentService,
+    // Optional Radar Lead service: scans WhatsApp groups in 0ms and dispatches alerts to clients
+    @Optional()
+    private readonly radarLeadService?: RadarLeadService,
   ) {
     this.mutationProjector = new MessageMutationProjector(
       this.messageRepository,
@@ -342,6 +346,8 @@ export class MessageProjector {
     void this.automationRules?.evaluateInbound(id, finalMessage).catch(() => undefined);
     // AI Agent for private chats (fail-open, never blocks message ingestion)
     void this.aiAgentService?.handleInboundMessage(id, finalMessage).catch(() => undefined);
+    // Radar de Leads for WhatsApp groups (fail-open, never blocks message ingestion)
+    void this.radarLeadService?.evaluateInbound(id, finalMessage).catch(() => undefined);
     // Trigger native auto-forwarding to personal WhatsApp if configured
     void this.handleNativeAutoForwarding(id, finalMessage).catch(() => undefined);
     // Emit real-time event to WebSocket clients

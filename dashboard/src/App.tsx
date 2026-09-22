@@ -27,6 +27,7 @@ const GroupVault = lazy(() => import('./pages/GroupVault').then(m => ({ default:
 const Infrastructure = lazy(() => import('./pages/Infrastructure').then(m => ({ default: m.Infrastructure })));
 const Plugins = lazy(() => import('./pages/Plugins'));
 const AiAgent = lazy(() => import('./pages/AiAgent').then(m => ({ default: m.AiAgent })));
+const RadarLeads = lazy(() => import('./pages/RadarLeads').then(m => ({ default: m.RadarLeads })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -129,6 +130,7 @@ function AppContent() {
               <Route path="webhooks" element={<Webhooks />} />
               <Route path="templates" element={<Templates />} />
               <Route path="ai-agent" element={<AiAgent />} />
+              <Route path="radar-leads" element={<RadarLeads />} />
               {role === 'admin' && <Route path="api-keys" element={<ApiKeys />} />}
               <Route path="logs" element={<Logs />} />
               <Route path="message-tester" element={<MessageTester />} />

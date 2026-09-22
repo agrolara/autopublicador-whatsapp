@@ -1683,3 +1683,120 @@ export const groupVaultApi = {
   cancelJob: (jobId: string) => request<{ success: boolean }>(`/group-vault/auto-join/cancel/${jobId}`, { method: 'POST' }),
   deleteGroup: (id: string) => request<{ success: boolean }>(`/group-vault/${id}`, { method: 'DELETE' }),
 };
+
+// =============================================================================
+// Radar de Leads API
+// =============================================================================
+
+export type GroupFilterMode = 'ALL' | 'CATEGORY' | 'WHITELIST';
+
+export interface RadarSettings {
+  id: string;
+  enabled: boolean;
+  minTextLength: number;
+  ignoreMediaWithoutCaption: boolean;
+  groupFilterMode: GroupFilterMode;
+  groupCategoryKeywords: string;
+  whitelistedGroupIds: string; // JSON string
+  activeScanningSessions: string; // JSON string
+  dedupWindowSeconds: number;
+  updatedAt: string;
+}
+
+export interface UpdateRadarSettingsPayload {
+  enabled?: boolean;
+  minTextLength?: number;
+  ignoreMediaWithoutCaption?: boolean;
+  groupFilterMode?: GroupFilterMode;
+  groupCategoryKeywords?: string;
+  whitelistedGroupIds?: string[];
+  activeScanningSessions?: string[];
+  dedupWindowSeconds?: number;
+}
+
+export interface RadarClient {
+  id: string;
+  name: string;
+  rubroKey: string;
+  targetPhone: string;
+  senderSessionId: string;
+  localKeywords: string;
+  jevPromptCriteria?: string | null;
+  alertTemplate: string;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateRadarClientPayload {
+  name: string;
+  rubroKey: string;
+  targetPhone: string;
+  senderSessionId?: string;
+  localKeywords: string;
+  jevPromptCriteria?: string;
+  alertTemplate?: string;
+  active?: boolean;
+}
+
+export type UpdateRadarClientPayload = Partial<CreateRadarClientPayload>;
+
+export interface RadarGroupItem {
+  id: string;
+  name: string;
+  sessionCount: number;
+  sessions: string[];
+}
+
+export interface TestRadarPayload {
+  text: string;
+  groupName?: string;
+  senderPhone?: string;
+  sessionId?: string;
+}
+
+export interface TestRadarResult {
+  matched: boolean;
+  results: Array<{
+    clientName: string;
+    rubroKey: string;
+    targetPhone: string;
+    matchedKeyword: string;
+    formattedAlert: string;
+  }>;
+}
+
+export const radarApi = {
+  getSettings: () => request<RadarSettings>('/radar/settings'),
+  updateSettings: (data: UpdateRadarSettingsPayload) =>
+    request<RadarSettings>('/radar/settings', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  getClients: () => request<RadarClient[]>('/radar/clients'),
+  createClient: (data: CreateRadarClientPayload) =>
+    request<RadarClient>('/radar/clients', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateClient: (id: string, data: UpdateRadarClientPayload) =>
+    request<RadarClient>(`/radar/clients/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  deleteClient: (id: string) =>
+    request<{ success: boolean }>(`/radar/clients/${id}`, {
+      method: 'DELETE',
+    }),
+  toggleClient: (id: string) =>
+    request<RadarClient>(`/radar/clients/${id}/toggle`, {
+      method: 'PATCH',
+    }),
+  getGroups: () => request<RadarGroupItem[]>('/radar/groups'),
+  testEvaluate: (data: TestRadarPayload) =>
+    request<TestRadarResult>('/radar/test-evaluate', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+};
+
