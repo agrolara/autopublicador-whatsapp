@@ -3,7 +3,7 @@ import {
   Radio,
   Plus,
   Trash2,
-  Edit2,
+  Pencil,
   RefreshCw,
   Search,
   ExternalLink,
@@ -21,6 +21,9 @@ import {
   Check,
   Send,
   Zap,
+  Eye,
+  EyeOff,
+  Bot,
 } from 'lucide-react';
 import {
   radarApi,
@@ -33,6 +36,9 @@ import {
   type GroupFilterMode,
 } from '../services/api';
 import './RadarLeads.css';
+
+const DEFAULT_TYPESAFE_API_KEY =
+  'apikey_2199a480d31c3450450c8efa2ecc4c6d9d0d_6c18d62803e10160629944a9079e8ffcf825fa1f40caba0ebeea8e1fcfd57e5b';
 
 const DEFAULT_TEMPLATE = `🚨 *¡NUEVO LEAD DETECTADO EN RADAR!* 🚨
 
@@ -55,6 +61,7 @@ export function RadarLeads() {
 
   // Master switch loading state
   const [isTogglingMaster, setIsTogglingMaster] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
 
   // Client Modal State
   const [isClientModalOpen, setIsClientModalOpen] = useState(false);
@@ -66,6 +73,7 @@ export function RadarLeads() {
     senderSessionId: '',
     localKeywords: '',
     jevPromptCriteria: '',
+    useAiFilter: true,
     alertTemplate: DEFAULT_TEMPLATE,
     active: true,
   });
@@ -80,6 +88,9 @@ export function RadarLeads() {
     whitelistedGroupIds: [] as string[],
     activeScanningSessions: [] as string[],
     dedupWindowSeconds: 30,
+    aiSemanticEnabled: true,
+    aiProvider: 'typesafe',
+    typesafeApiKey: '',
   });
   const [isSavingSettings, setIsSavingSettings] = useState(false);
 
@@ -123,6 +134,9 @@ export function RadarLeads() {
           whitelistedGroupIds: safeParseJson(fetchedSettings.whitelistedGroupIds),
           activeScanningSessions: safeParseJson(fetchedSettings.activeScanningSessions),
           dedupWindowSeconds: fetchedSettings.dedupWindowSeconds,
+          aiSemanticEnabled: fetchedSettings.aiSemanticEnabled ?? true,
+          aiProvider: fetchedSettings.aiProvider || 'typesafe',
+          typesafeApiKey: fetchedSettings.typesafeApiKey || '',
         });
       }
       setClients(fetchedClients);
@@ -181,6 +195,7 @@ export function RadarLeads() {
         senderSessionId: client.senderSessionId || '',
         localKeywords: client.localKeywords,
         jevPromptCriteria: client.jevPromptCriteria || '',
+        useAiFilter: client.useAiFilter !== false,
         alertTemplate: client.alertTemplate || DEFAULT_TEMPLATE,
         active: client.active,
       });
@@ -193,6 +208,7 @@ export function RadarLeads() {
         senderSessionId: sessions.length > 0 ? sessions[0].id : '',
         localKeywords: '',
         jevPromptCriteria: '',
+        useAiFilter: true,
         alertTemplate: DEFAULT_TEMPLATE,
         active: true,
       });
@@ -263,6 +279,9 @@ export function RadarLeads() {
         whitelistedGroupIds: settingsForm.whitelistedGroupIds,
         activeScanningSessions: settingsForm.activeScanningSessions,
         dedupWindowSeconds: Number(settingsForm.dedupWindowSeconds),
+        aiSemanticEnabled: settingsForm.aiSemanticEnabled,
+        aiProvider: settingsForm.aiProvider,
+        typesafeApiKey: settingsForm.typesafeApiKey,
       });
       setSettings(updated);
       showToast('success', 'Configuración del Radar guardada correctamente.');
@@ -540,16 +559,31 @@ export function RadarLeads() {
                   </div>
 
                   {client.jevPromptCriteria && (
-                    <div className="client-criteria-box">
-                      <Info size={13} />
-                      <span>{client.jevPromptCriteria}</span>
+                    <div className={`client-criteria-box ${client.useAiFilter !== false ? 'ai-active' : 'ai-inactive'}`}>
+                      {client.useAiFilter !== false ? (
+                        <>
+                          <Sparkles size={14} className="sparkle-ai-icon" />
+                          <div className="criteria-content">
+                            <span className="criteria-badge">✨ Filtro IA TypeSafe Activo</span>
+                            <span className="criteria-text">"{client.jevPromptCriteria}"</span>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <Info size={14} />
+                          <div className="criteria-content">
+                            <span className="criteria-badge-off">⚪ Filtro IA Inactivo (Solo palabras clave)</span>
+                            <span className="criteria-text">"{client.jevPromptCriteria}"</span>
+                          </div>
+                        </>
+                      )}
                     </div>
                   )}
 
                   <div className="client-card-actions">
                     <button
                       type="button"
-                      className="radar-btn-outline"
+                      className="radar-btn-action test"
                       onClick={() => {
                         setTestText(`Hola, alguien vende ${client.localKeywords.split(',')[0]?.trim() || 'algo'} por acá?`);
                         setActiveTab('test');
@@ -562,19 +596,21 @@ export function RadarLeads() {
                     <div className="card-right-actions">
                       <button
                         type="button"
-                        className="radar-btn-icon"
+                        className="radar-btn-action edit"
                         onClick={() => handleOpenClientModal(client)}
                         title="Editar cliente"
                       >
-                        <Edit2 size={16} />
+                        <Pencil size={14} />
+                        <span>Editar</span>
                       </button>
                       <button
                         type="button"
-                        className="radar-btn-icon danger"
+                        className="radar-btn-action danger"
                         onClick={() => handleDeleteClient(client.id, client.name)}
                         title="Eliminar cliente"
                       >
-                        <Trash2 size={16} />
+                        <Trash2 size={14} />
+                        <span>Eliminar</span>
                       </button>
                     </div>
                   </div>
@@ -814,6 +850,78 @@ export function RadarLeads() {
               </div>
             </div>
 
+            {/* AI Semantic Filter Section */}
+            <div className="settings-section-card">
+              <div className="section-card-title">
+                <Sparkles size={20} className="text-primary" />
+                <div>
+                  <h3>Inteligencia Artificial Semántica (Filtro Anti-Vendedores / Intención de Compra)</h3>
+                  <p>Evalúa mensajes sospechosos para verificar intención de compra y descartar vendedores o spam.</p>
+                </div>
+              </div>
+
+              <div className="toggle-row-card">
+                <div>
+                  <strong>Habilitar Validación Semántica con IA</strong>
+                  <p>Si está activado, los clientes con reglas evaluarán la intención de compra antes de disparar la alerta.</p>
+                </div>
+                <button
+                  type="button"
+                  className={`client-toggle-switch ${settingsForm.aiSemanticEnabled ? 'on' : ''}`}
+                  onClick={() => setSettingsForm(prev => ({ ...prev, aiSemanticEnabled: !prev.aiSemanticEnabled }))}
+                >
+                  <span className="toggle-slider" />
+                </button>
+              </div>
+
+              {settingsForm.aiSemanticEnabled && (
+                <div className="ai-settings-subgrid">
+                  <div className="form-group">
+                    <label className="form-label">Motor de Inteligencia Artificial</label>
+                    <select
+                      className="form-select"
+                      value={settingsForm.aiProvider}
+                      onChange={e => setSettingsForm(prev => ({ ...prev, aiProvider: e.target.value }))}
+                    >
+                      <option value="typesafe">⚡ TypeSafe AI (System One: jev-latest) - Ultrarrápido y Determinista</option>
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">TypeSafe API Key</label>
+                    <div className="api-key-input-wrapper">
+                      <input
+                        type={showApiKey ? 'text' : 'password'}
+                        className="form-input"
+                        placeholder="apikey_..."
+                        value={settingsForm.typesafeApiKey}
+                        onChange={e => setSettingsForm(prev => ({ ...prev, typesafeApiKey: e.target.value }))}
+                      />
+                      <button
+                        type="button"
+                        className="radar-btn-icon-sm"
+                        onClick={() => setShowApiKey(!showApiKey)}
+                        title={showApiKey ? 'Ocultar API Key' : 'Mostrar API Key'}
+                      >
+                        {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                      <button
+                        type="button"
+                        className="radar-btn-outline small"
+                        onClick={() => setSettingsForm(prev => ({ ...prev, typesafeApiKey: DEFAULT_TYPESAFE_API_KEY }))}
+                        title="Restaurar API Key por defecto"
+                      >
+                        Restaurar Default
+                      </button>
+                    </div>
+                    <small className="field-tip">
+                      Utiliza tu clave de TypeSafe para el modelo <code>jev-latest</code>. Si se deja en blanco, usa la llave predeterminada del servidor.
+                    </small>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="form-actions-bar">
               <button
                 type="submit"
@@ -914,6 +1022,23 @@ export function RadarLeads() {
                       <div className="sim-target-phone">
                         Destino: <strong>+{res.targetPhone}</strong>
                       </div>
+
+                      {res.aiEvaluation?.evaluated && (
+                        <div className={`sim-ai-evaluation-box ${res.aiEvaluation.passed ? 'passed' : 'rejected'}`}>
+                          {res.aiEvaluation.passed ? (
+                            <CheckCircle2 size={16} />
+                          ) : (
+                            <AlertTriangle size={16} />
+                          )}
+                          <div className="sim-ai-eval-text">
+                            <strong>{res.aiEvaluation.passed ? '✅ Aprobado por IA' : '❌ Descartado por IA'} (Confianza: {(res.aiEvaluation.score * 100).toFixed(0)}%)</strong>
+                            <p>{res.aiEvaluation.reason}</p>
+                            {!res.aiEvaluation.passed && (
+                              <small className="ai-reject-note">⚠️ En producción, esta alerta se descartará en silencio y NO llegará a WhatsApp.</small>
+                            )}
+                          </div>
+                        </div>
+                      )}
 
                       <div className="sim-preview-bubble">
                         <div className="bubble-header">
@@ -1039,15 +1164,38 @@ export function RadarLeads() {
                 </small>
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Criterio Semántico / Notas del Rubro (Opcional)</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="Ej: Solo consultas de compra o pedidos de comida rápida para entrega"
-                  value={clientForm.jevPromptCriteria}
-                  onChange={e => setClientForm(prev => ({ ...prev, jevPromptCriteria: e.target.value }))}
-                />
+              <div className="form-group ai-criteria-group">
+                <div className="ai-criteria-header">
+                  <div>
+                    <label className="form-label mb-0">Validación Semántica con IA (Filtro Anti-Vendedores)</label>
+                    <small className="field-tip">
+                      Usa TypeSafe (jev-latest) para validar intención de compra y descartar vendedores o spam.
+                    </small>
+                  </div>
+                  <button
+                    type="button"
+                    className={`client-toggle-switch ${clientForm.useAiFilter ? 'on' : ''}`}
+                    onClick={() => setClientForm(prev => ({ ...prev, useAiFilter: !prev.useAiFilter }))}
+                    title={clientForm.useAiFilter ? 'Desactivar filtro IA' : 'Activar filtro IA'}
+                  >
+                    <span className="toggle-slider" />
+                  </button>
+                </div>
+
+                {clientForm.useAiFilter && (
+                  <div className="ai-criteria-input-box">
+                    <textarea
+                      className="form-textarea"
+                      rows={2}
+                      placeholder="Ej: El usuario busca comprar o contratar, no está ofreciendo ni vendiendo"
+                      value={clientForm.jevPromptCriteria}
+                      onChange={e => setClientForm(prev => ({ ...prev, jevPromptCriteria: e.target.value }))}
+                    />
+                    <small className="field-tip">
+                      💡 <strong>Regla de Intención:</strong> La IA analizará el mensaje tras pasar las palabras clave. Si es un vendedor ofreciendo productos, se descartará automáticamente.
+                    </small>
+                  </div>
+                )}
               </div>
 
               <div className="form-group">

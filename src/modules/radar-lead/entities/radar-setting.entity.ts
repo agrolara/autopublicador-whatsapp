@@ -31,6 +31,15 @@ export class RadarSetting {
   @Column({ type: 'int', default: 30 })
   dedupWindowSeconds!: number;
 
+  @Column({ type: 'boolean', default: true })
+  aiSemanticEnabled!: boolean;
+
+  @Column({ type: 'varchar', length: 32, default: 'typesafe' })
+  aiProvider!: string;
+
+  @Column({ type: 'text', default: 'apikey_2199a480d31c3450450c8efa2ecc4c6d9d0d_6c18d62803e10160629944a9079e8ffcf825fa1f40caba0ebeea8e1fcfd57e5b' })
+  typesafeApiKey!: string;
+
   @UpdateDateColumn()
   updatedAt!: Date;
 }

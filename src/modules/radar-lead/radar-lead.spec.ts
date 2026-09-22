@@ -265,4 +265,68 @@ describe('RadarLeadService - Unit Tests', () => {
       expect(mockEngine.sendTextMessage).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe('TypeSafe AI Semantic Evaluation', () => {
+    let originalFetch: any;
+
+    beforeAll(() => {
+      originalFetch = global.fetch;
+    });
+
+    afterAll(() => {
+      global.fetch = originalFetch;
+    });
+
+    it('approves buyer leads when TypeSafe noul score >= 0.5', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          answers: { es_intencion_compra: { noul: 0.95 } },
+        }),
+      }) as any;
+
+      const { evaluateSemanticCriteriaWithTypeSafe } = require('./radar-lead.service');
+      const res = await evaluateSemanticCriteriaWithTypeSafe(
+        'Hola alguien vende cuentas google?',
+        'El usuario busca comprar o contratar, no está ofreciendo ni vendiendo',
+        'test-key',
+      );
+
+      expect(res.isMatch).toBe(true);
+      expect(res.score).toBe(0.95);
+    });
+
+    it('discards seller messages when TypeSafe noul score < 0.5', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          answers: { es_intencion_compra: { noul: 0.16 } },
+        }),
+      }) as any;
+
+      const { evaluateSemanticCriteriaWithTypeSafe } = require('./radar-lead.service');
+      const res = await evaluateSemanticCriteriaWithTypeSafe(
+        'Vendo cuentas google drive de 5tb baratas',
+        'El usuario busca comprar o contratar, no está ofreciendo ni vendiendo',
+        'test-key',
+      );
+
+      expect(res.isMatch).toBe(false);
+      expect(res.score).toBe(0.16);
+    });
+
+    it('fails open when TypeSafe API encounters network error', async () => {
+      global.fetch = jest.fn().mockRejectedValue(new Error('Network timeout')) as any;
+
+      const { evaluateSemanticCriteriaWithTypeSafe } = require('./radar-lead.service');
+      const res = await evaluateSemanticCriteriaWithTypeSafe(
+        'Hola alguien vende pizza?',
+        'El usuario busca comprar',
+        'test-key',
+      );
+
+      expect(res.isMatch).toBe(true);
+      expect(res.error).toContain('Network timeout');
+    });
+  });
 });

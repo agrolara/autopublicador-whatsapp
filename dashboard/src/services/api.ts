@@ -1700,6 +1700,9 @@ export interface RadarSettings {
   whitelistedGroupIds: string; // JSON string
   activeScanningSessions: string; // JSON string
   dedupWindowSeconds: number;
+  aiSemanticEnabled?: boolean;
+  aiProvider?: string;
+  typesafeApiKey?: string;
   updatedAt: string;
 }
 
@@ -1712,6 +1715,9 @@ export interface UpdateRadarSettingsPayload {
   whitelistedGroupIds?: string[];
   activeScanningSessions?: string[];
   dedupWindowSeconds?: number;
+  aiSemanticEnabled?: boolean;
+  aiProvider?: string;
+  typesafeApiKey?: string;
 }
 
 export interface RadarClient {
@@ -1722,6 +1728,7 @@ export interface RadarClient {
   senderSessionId: string;
   localKeywords: string;
   jevPromptCriteria?: string | null;
+  useAiFilter?: boolean;
   alertTemplate: string;
   active: boolean;
   createdAt: string;
@@ -1735,6 +1742,7 @@ export interface CreateRadarClientPayload {
   senderSessionId?: string;
   localKeywords: string;
   jevPromptCriteria?: string;
+  useAiFilter?: boolean;
   alertTemplate?: string;
   active?: boolean;
 }
@@ -1763,6 +1771,12 @@ export interface TestRadarResult {
     targetPhone: string;
     matchedKeyword: string;
     formattedAlert: string;
+    aiEvaluation?: {
+      evaluated: boolean;
+      passed: boolean;
+      score: number;
+      reason: string;
+    };
   }>;
 }
 

@@ -34,6 +34,9 @@ export class RadarClient {
   @Column({ type: 'text', nullable: true })
   jevPromptCriteria!: string | null;
 
+  @Column({ type: 'boolean', default: true })
+  useAiFilter!: boolean;
+
   @Column({ type: 'text', default: DEFAULT_RADAR_ALERT_TEMPLATE })
   alertTemplate!: string;
 

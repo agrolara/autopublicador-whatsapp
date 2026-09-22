@@ -48,6 +48,21 @@ export class UpdateRadarSettingsDto {
   @Min(5)
   @Max(3600)
   dedupWindowSeconds?: number;
+
+  @ApiPropertyOptional({ description: 'Habilitar validación semántica con IA (filtro anti-vendedores)', default: true })
+  @IsOptional()
+  @IsBoolean()
+  aiSemanticEnabled?: boolean;
+
+  @ApiPropertyOptional({ description: 'Proveedor de IA para análisis semántico (ej: typesafe)', default: 'typesafe' })
+  @IsOptional()
+  @IsString()
+  aiProvider?: string;
+
+  @ApiPropertyOptional({ description: 'API Key de TypeSafe para el modelo jev-latest' })
+  @IsOptional()
+  @IsString()
+  typesafeApiKey?: string;
 }
 
 export class CreateRadarClientDto {
@@ -76,6 +91,11 @@ export class CreateRadarClientDto {
   @IsOptional()
   @IsString()
   jevPromptCriteria?: string;
+
+  @ApiPropertyOptional({ description: 'Activar filtro de intención con IA para este rubro', default: true })
+  @IsOptional()
+  @IsBoolean()
+  useAiFilter?: boolean;
 
   @ApiPropertyOptional({ description: 'Plantilla de mensaje de alerta para WhatsApp' })
   @IsOptional()
@@ -118,6 +138,11 @@ export class UpdateRadarClientDto {
   @IsOptional()
   @IsString()
   jevPromptCriteria?: string;
+
+  @ApiPropertyOptional({ description: 'Activar filtro de intención con IA para este rubro' })
+  @IsOptional()
+  @IsBoolean()
+  useAiFilter?: boolean;
 
   @ApiPropertyOptional({ description: 'Plantilla de mensaje de alerta para WhatsApp' })
   @IsOptional()

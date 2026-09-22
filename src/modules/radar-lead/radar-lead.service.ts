@@ -43,8 +43,86 @@ export function matchesKeywords(text: string, keywordsStr: string): { matched: b
 
 export function normalizePhoneDigits(phone: string): string {
   if (!phone) return '';
-  const noDomain = phone.split('@')[0].split(':')[0];
-  return noDomain.replace(/[^0-9]/g, '');
+  let str = phone;
+  if (str.includes('@')) {
+    str = str.split('@')[0].split(':')[0];
+  }
+  return str.replace(/[^0-9]/g, '');
+}
+
+export const DEFAULT_TYPESAFE_API_KEY =
+  'apikey_2199a480d31c3450450c8efa2ecc4c6d9d0d_6c18d62803e10160629944a9079e8ffcf825fa1f40caba0ebeea8e1fcfd57e5b';
+
+/**
+ * Calls TypeSafe System One (model: jev-latest) to evaluate whether an incoming message
+ * expresses genuine buying intent or should be discarded as seller spam.
+ * Fail-open: returns isMatch=true on network or parsing error so valid leads are never dropped.
+ */
+export async function evaluateSemanticCriteriaWithTypeSafe(
+  text: string,
+  criteriaInstructions: string,
+  apiKey: string,
+  timeoutMs = 6000,
+): Promise<{ isMatch: boolean; score: number; error?: string }> {
+  if (!text || !criteriaInstructions) {
+    return { isMatch: true, score: 1.0 };
+  }
+
+  const key = (apiKey || '').trim() || DEFAULT_TYPESAFE_API_KEY;
+  const payload = {
+    model: 'jev-latest',
+    state: text,
+    questions: {
+      es_intencion_compra: {
+        type: 'noul',
+        instructions: criteriaInstructions,
+      },
+    },
+  };
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch('https://api.typesafe.ai/v1/systemone', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      return {
+        isMatch: true, // fail-open
+        score: 1.0,
+        error: `HTTP ${res.status}: ${errText}`,
+      };
+    }
+
+    const data = await res.json();
+    const noulVal = data?.answers?.es_intencion_compra?.noul;
+    const score = typeof noulVal === 'number' ? noulVal : 1.0;
+    // Score >= 0.5 indicates affirmative buying intention
+    const isMatch = score >= 0.5;
+
+    return {
+      isMatch,
+      score,
+    };
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    return {
+      isMatch: true, // fail-open
+      score: 1.0,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
 
 @Injectable()
@@ -87,6 +165,9 @@ export class RadarLeadService implements OnModuleInit {
           whitelistedGroupIds TEXT NOT NULL DEFAULT '[]',
           activeScanningSessions TEXT NOT NULL DEFAULT '[]',
           dedupWindowSeconds INT NOT NULL DEFAULT 30,
+          aiSemanticEnabled BOOLEAN NOT NULL DEFAULT 1,
+          aiProvider VARCHAR(32) NOT NULL DEFAULT 'typesafe',
+          typesafeApiKey TEXT NOT NULL DEFAULT '',
           updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
         )
       `).catch(() => {});
@@ -100,12 +181,19 @@ export class RadarLeadService implements OnModuleInit {
           senderSessionId VARCHAR(64) NOT NULL DEFAULT '',
           localKeywords TEXT NOT NULL DEFAULT '',
           jevPromptCriteria TEXT NULL,
+          useAiFilter BOOLEAN NOT NULL DEFAULT 1,
           alertTemplate TEXT NOT NULL,
           active BOOLEAN NOT NULL DEFAULT 1,
           createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
           updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
         )
       `).catch(() => {});
+
+      // Backward compatibility migrations for existing SQLite databases
+      await this.settingsRepo.query(`ALTER TABLE radar_settings ADD COLUMN aiSemanticEnabled BOOLEAN NOT NULL DEFAULT 1`).catch(() => {});
+      await this.settingsRepo.query(`ALTER TABLE radar_settings ADD COLUMN aiProvider VARCHAR(32) NOT NULL DEFAULT 'typesafe'`).catch(() => {});
+      await this.settingsRepo.query(`ALTER TABLE radar_settings ADD COLUMN typesafeApiKey TEXT NOT NULL DEFAULT ''`).catch(() => {});
+      await this.clientsRepo.query(`ALTER TABLE radar_clients ADD COLUMN useAiFilter BOOLEAN NOT NULL DEFAULT 1`).catch(() => {});
 
       let defaultSetting = await this.settingsRepo.findOne({ where: { id: 'default' } });
       if (!defaultSetting) {
@@ -119,6 +207,9 @@ export class RadarLeadService implements OnModuleInit {
           whitelistedGroupIds: '[]',
           activeScanningSessions: '[]',
           dedupWindowSeconds: 30,
+          aiSemanticEnabled: true,
+          aiProvider: 'typesafe',
+          typesafeApiKey: DEFAULT_TYPESAFE_API_KEY,
         });
         await this.settingsRepo.save(defaultSetting);
         this.logger.log('Default Radar settings initialized');
@@ -230,6 +321,32 @@ export class RadarLeadService implements OnModuleInit {
       for (const client of this.cachedActiveClients) {
         const { matched, matchedKeyword } = matchesKeywords(text, client.localKeywords);
         if (!matched) continue;
+
+        // 0 ms Gate 9: Semantic AI Validation (Anti-vendedores / Intención de compra)
+        const isAiEnabled =
+          (settings.aiSemanticEnabled ?? true) &&
+          (client.useAiFilter ?? true) &&
+          Boolean(client.jevPromptCriteria?.trim());
+
+        if (isAiEnabled) {
+          const effectiveKey = (settings.typesafeApiKey || '').trim() || DEFAULT_TYPESAFE_API_KEY;
+          const aiCheck = await evaluateSemanticCriteriaWithTypeSafe(
+            text,
+            client.jevPromptCriteria!.trim(),
+            effectiveKey,
+          );
+
+          if (!aiCheck.isMatch) {
+            this.logger.log(
+              `[Radar Lead] DISCARDED by TypeSafe AI (score: ${aiCheck.score.toFixed(2)}) for client "${client.name}". Motivo: Vendedor o sin intención de compra. Texto: "${text.slice(0, 60)}"`,
+            );
+            continue; // Filtered out: seller or non-buyer!
+          }
+
+          this.logger.log(
+            `[Radar Lead] APPROVED by TypeSafe AI (score: ${aiCheck.score.toFixed(2)}) for client "${client.name}"`,
+          );
+        }
 
         this.logger.log(`Radar lead matched for client "${client.name}" (rubro: ${client.rubroKey}, keyword: "${matchedKeyword}")`);
 
@@ -393,6 +510,9 @@ export class RadarLeadService implements OnModuleInit {
       settings.activeScanningSessions = JSON.stringify(dto.activeScanningSessions);
     }
     if (dto.dedupWindowSeconds !== undefined) settings.dedupWindowSeconds = dto.dedupWindowSeconds;
+    if (dto.aiSemanticEnabled !== undefined) settings.aiSemanticEnabled = dto.aiSemanticEnabled;
+    if (dto.aiProvider !== undefined) settings.aiProvider = dto.aiProvider;
+    if (dto.typesafeApiKey !== undefined) settings.typesafeApiKey = dto.typesafeApiKey;
 
     const saved = await this.settingsRepo.save(settings);
     await this.reloadCache();
@@ -415,6 +535,7 @@ export class RadarLeadService implements OnModuleInit {
       senderSessionId: dto.senderSessionId || '',
       localKeywords: dto.localKeywords,
       jevPromptCriteria: dto.jevPromptCriteria || null,
+      useAiFilter: dto.useAiFilter ?? true,
       alertTemplate: dto.alertTemplate || DEFAULT_RADAR_ALERT_TEMPLATE,
       active: dto.active ?? true,
     });
@@ -435,6 +556,7 @@ export class RadarLeadService implements OnModuleInit {
     if (dto.senderSessionId !== undefined) client.senderSessionId = dto.senderSessionId;
     if (dto.localKeywords !== undefined) client.localKeywords = dto.localKeywords;
     if (dto.jevPromptCriteria !== undefined) client.jevPromptCriteria = dto.jevPromptCriteria;
+    if (dto.useAiFilter !== undefined) client.useAiFilter = dto.useAiFilter;
     if (dto.alertTemplate !== undefined) client.alertTemplate = dto.alertTemplate;
     if (dto.active !== undefined) client.active = dto.active;
 
@@ -521,13 +643,49 @@ export class RadarLeadService implements OnModuleInit {
       targetPhone: string;
       matchedKeyword: string;
       formattedAlert: string;
+      aiEvaluation?: {
+        evaluated: boolean;
+        passed: boolean;
+        score: number;
+        reason: string;
+      };
     }> = [];
 
     const clients = await this.clientsRepo.find({ where: { active: true } });
+    const settings = await this.getSettings();
 
     for (const client of clients) {
       const { matched, matchedKeyword } = matchesKeywords(text, client.localKeywords);
       if (matched) {
+        let aiEvaluation: { evaluated: boolean; passed: boolean; score: number; reason: string } = {
+          evaluated: false,
+          passed: true,
+          score: 1.0,
+          reason: 'Filtro semántico IA no configurado (Aprobado por palabras clave)',
+        };
+
+        const isAiEnabled =
+          (settings.aiSemanticEnabled ?? true) &&
+          (client.useAiFilter ?? true) &&
+          Boolean(client.jevPromptCriteria?.trim());
+
+        if (isAiEnabled) {
+          const effectiveKey = (settings.typesafeApiKey || '').trim() || DEFAULT_TYPESAFE_API_KEY;
+          const aiCheck = await evaluateSemanticCriteriaWithTypeSafe(
+            text,
+            client.jevPromptCriteria!.trim(),
+            effectiveKey,
+          );
+          aiEvaluation = {
+            evaluated: true,
+            passed: aiCheck.isMatch,
+            score: aiCheck.score,
+            reason: aiCheck.isMatch
+              ? `Aprobado por TypeSafe (jev-latest): Intención de compra confirmada (confianza: ${(aiCheck.score * 100).toFixed(0)}%)`
+              : `Descartado por TypeSafe (jev-latest): Vendedor o sin intención de compra (confianza: ${(aiCheck.score * 100).toFixed(0)}%)`,
+          };
+        }
+
         const formattedAlert = this.formatAlertMessage(client, {
           groupName,
           buyerPhone,
@@ -540,6 +698,7 @@ export class RadarLeadService implements OnModuleInit {
           targetPhone: client.targetPhone,
           matchedKeyword: matchedKeyword || '',
           formattedAlert,
+          aiEvaluation,
         });
       }
     }
