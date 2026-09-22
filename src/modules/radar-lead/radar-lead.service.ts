@@ -43,7 +43,8 @@ export function matchesKeywords(text: string, keywordsStr: string): { matched: b
 
 export function normalizePhoneDigits(phone: string): string {
   if (!phone) return '';
-  return phone.replace(/[^0-9]/g, '');
+  const noDomain = phone.split('@')[0].split(':')[0];
+  return noDomain.replace(/[^0-9]/g, '');
 }
 
 @Injectable()

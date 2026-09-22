@@ -19,6 +19,7 @@ import { StatusStoreModule } from '../status-store/status-store.module';
 import { ChatMediaModule } from '../chat-media/chat-media.module';
 import { AutomationModule } from '../automation/automation.module';
 import { AiAgentModule } from '../ai-agent/ai-agent.module';
+import { RadarLeadModule } from '../radar-lead/radar-lead.module';
 
 @Module({
   // WebhookModule/StatusStoreModule/ChatMediaModule/AutomationModule/AiAgentModule do not import SessionModule
@@ -30,6 +31,7 @@ import { AiAgentModule } from '../ai-agent/ai-agent.module';
     ChatMediaModule,
     AutomationModule,
     AiAgentModule,
+    RadarLeadModule,
   ],
   controllers: [SessionController],
   providers: [
