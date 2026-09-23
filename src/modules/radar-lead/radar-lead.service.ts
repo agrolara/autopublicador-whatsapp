@@ -1157,7 +1157,13 @@ export class RadarLeadService implements OnModuleInit {
     await this.logsRepo.save(log);
 
     const addedPhones: string[] = [];
-    if (dto.blockPhone !== false && log.buyerPhone) {
+    if (Array.isArray(dto.blockPhones)) {
+      for (const p of dto.blockPhones) {
+        const norm = normalizePhoneDigits(p);
+        if (norm) addedPhones.push(norm);
+      }
+    }
+    if (dto.blockPhone !== false && log.buyerPhone && (!dto.blockPhones || dto.blockPhones.includes(log.buyerPhone))) {
       const norm = normalizePhoneDigits(log.buyerPhone);
       if (norm) addedPhones.push(norm);
     }
@@ -1180,7 +1186,8 @@ export class RadarLeadService implements OnModuleInit {
       addedPhrases.push(dto.negativePhrase.trim());
     }
 
-    if (dto.blockScope === 'GLOBAL') {
+    const isGlobal = dto.blockScope === 'GLOBAL' || dto.scope?.toLowerCase() === 'global';
+    if (isGlobal) {
       const settings = await this.getSettings();
       const currentGlobal: string[] = this.parseJsonArray(settings.globalBlacklistedSenders);
       for (const p of uniquePhones) {

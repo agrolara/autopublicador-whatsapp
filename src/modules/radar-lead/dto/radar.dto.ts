@@ -233,6 +233,12 @@ export class FlagNegativeLeadDto {
   @IsBoolean()
   blockPhone?: boolean;
 
+  @ApiPropertyOptional({ description: 'Lista explícita de teléfonos a bloquear', type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  blockPhones?: string[];
+
   @ApiPropertyOptional({ description: 'Otros teléfonos encontrados en el texto a bloquear', type: [String] })
   @IsOptional()
   @IsArray()
@@ -243,6 +249,11 @@ export class FlagNegativeLeadDto {
   @IsOptional()
   @IsString()
   negativePhrase?: string;
+
+  @ApiPropertyOptional({ description: 'Alcance del bloqueo (client o global)', default: 'client' })
+  @IsOptional()
+  @IsString()
+  scope?: 'client' | 'global' | 'CLIENT' | 'GLOBAL';
 
   @ApiPropertyOptional({ description: 'Alcance del bloqueo: CLIENT (solo este cliente) o GLOBAL (todos los clientes)', default: 'CLIENT' })
   @IsOptional()
