@@ -18,6 +18,7 @@ import {
   ClientMetricsDto,
   FlagNegativeLeadDto,
 } from './dto/radar.dto';
+import { AiTelemetryService } from '../ai-telemetry/ai-telemetry.service';
 
 export function normalizeTextForSearch(str: string): string {
   return (str || '')
@@ -168,6 +169,8 @@ export class RadarLeadService implements OnModuleInit {
     private logsRepo?: Repository<RadarLeadLog>,
     @Optional()
     private engineRegistry?: EngineRegistry,
+    @Optional()
+    private readonly aiTelemetryService?: AiTelemetryService,
   ) {
     // Backwards-compatibility if caller passed (settingsRepo, clientsRepo, engineRegistry)
     if (this.logsRepo && !this.engineRegistry && ('get' in (this.logsRepo as any) || 'getEngine' in (this.logsRepo as any) || typeof (this.logsRepo as any).get === 'function')) {
@@ -508,6 +511,15 @@ export class RadarLeadService implements OnModuleInit {
             effectiveKey,
           );
           aiScore = aiCheck.score;
+
+          this.aiTelemetryService?.recordUsage({
+            provider: 'typesafe',
+            serviceType: 'radar_eval',
+            model: 'jev-latest',
+            sessionId,
+            costUsd: 0.0025,
+            success: true,
+          }).catch(() => {});
 
           if (!aiCheck.isMatch) {
             this.logger.log(
@@ -938,6 +950,13 @@ export class RadarLeadService implements OnModuleInit {
             client.jevPromptCriteria!.trim(),
             effectiveKey,
           );
+          this.aiTelemetryService?.recordUsage({
+            provider: 'typesafe',
+            serviceType: 'radar_eval',
+            model: 'jev-latest',
+            costUsd: 0.0025,
+            success: true,
+          }).catch(() => {});
           aiEvaluation = {
             evaluated: true,
             passed: aiCheck.isMatch,

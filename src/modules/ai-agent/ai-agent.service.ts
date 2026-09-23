@@ -11,6 +11,7 @@ import { createLogger } from '../../common/services/logger.service';
 import type { MessageService } from '../message/message.service';
 import { KnowledgeBaseService } from './knowledge-base.service';
 import { EngineRegistry } from '../../engine/engine-registry.service';
+import { AiTelemetryService } from '../ai-telemetry/ai-telemetry.service';
 
 interface DebounceEntry {
   timer: NodeJS.Timeout;
@@ -208,6 +209,8 @@ export class AiAgentService implements OnModuleInit {
     private readonly knowledgeBaseService?: KnowledgeBaseService,
     @Optional()
     private readonly engineRegistry?: EngineRegistry,
+    @Optional()
+    private readonly aiTelemetryService?: AiTelemetryService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -694,11 +697,29 @@ export class AiAgentService implements OnModuleInit {
 
         if (!response.ok) {
           const errText = await response.text().catch(() => '');
+          this.aiTelemetryService?.recordUsage({
+            provider: 'groq',
+            serviceType: 'audio_stt',
+            model: whisperModel?.trim() || 'whisper-large-v3-turbo',
+            audioSeconds: Math.max(1, Math.round(buffer.length / 3200)),
+            success: false,
+            errorDetails: `Groq HTTP ${response.status}: ${errText.slice(0, 200)}`,
+          }).catch(() => {});
           throw new Error(`Groq Whisper status ${response.status}: ${errText.slice(0, 200)}`);
         }
 
         const json = (await response.json()) as { text?: string };
-        return json.text?.trim() || '';
+        const textResult = json.text?.trim() || '';
+
+        this.aiTelemetryService?.recordUsage({
+          provider: 'groq',
+          serviceType: 'audio_stt',
+          model: whisperModel?.trim() || 'whisper-large-v3-turbo',
+          audioSeconds: Math.max(1, Math.round(buffer.length / 3200)),
+          success: true,
+        }).catch(() => {});
+
+        return textResult;
       } finally {
         clearTimeout(timeoutId);
       }
@@ -1016,10 +1037,35 @@ export class AiAgentService implements OnModuleInit {
 
     if (!response.ok) {
       const err = await response.text();
+      this.aiTelemetryService?.recordUsage({
+        provider: 'openrouter',
+        serviceType: 'chat_llm',
+        model: config.model || 'deepseek/deepseek-chat',
+        sessionId: config.sessionId,
+        success: false,
+        errorDetails: `OpenRouter HTTP ${response.status}: ${err.slice(0, 200)}`,
+      }).catch(() => {});
       throw new Error(`OpenRouter error (${response.status}): ${err}`);
     }
 
-    const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const data = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+    };
+
+    if (this.aiTelemetryService) {
+      this.aiTelemetryService.recordUsage({
+        provider: 'openrouter',
+        serviceType: 'chat_llm',
+        model: config.model || 'deepseek/deepseek-chat',
+        sessionId: config.sessionId,
+        promptTokens: data.usage?.prompt_tokens || 0,
+        completionTokens: data.usage?.completion_tokens || 0,
+        totalTokens: data.usage?.total_tokens || 0,
+        success: true,
+      }).catch(() => {});
+    }
+
     return data.choices?.[0]?.message?.content || '';
   }
 

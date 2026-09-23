@@ -25,7 +25,10 @@ import {
   RotateCcw,
   UserX,
   Plus,
+  Activity,
+  BarChart3,
 } from 'lucide-react';
+import { AiTelemetryView } from '../components/AiTelemetryView';
 import { sessionApi, aiAgentApi } from '../services/api';
 import type {
   Session,
@@ -143,6 +146,7 @@ export function AiAgent() {
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
   const [saveSuccessMessage, setSaveSuccessMessage] = useState<string>('Configuración de Inteligencia Artificial guardada correctamente.');
   const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'config' | 'telemetry'>('config');
 
   // Form state
   const [enabled, setEnabled] = useState<boolean>(false);
@@ -513,7 +517,31 @@ export function AiAgent() {
         </div>
       </div>
 
-      {error && (
+      {/* View Mode Tabs */}
+      <div className="ai-tabs-nav">
+        <button
+          type="button"
+          className={`ai-tab-btn ${activeTab === 'config' ? 'active' : ''}`}
+          onClick={() => setActiveTab('config')}
+        >
+          <Bot size={18} />
+          <span>Configuración del Asistente</span>
+        </button>
+        <button
+          type="button"
+          className={`ai-tab-btn ${activeTab === 'telemetry' ? 'active' : ''}`}
+          onClick={() => setActiveTab('telemetry')}
+        >
+          <Activity size={18} />
+          <span>Consumos, Costos y Saldos (OpenRouter / Groq / Jevs)</span>
+        </button>
+      </div>
+
+      {activeTab === 'telemetry' ? (
+        <AiTelemetryView />
+      ) : (
+        <>
+          {error && (
         <div className="ai-banner error">
           <AlertCircle size={20} />
           <span>{error}</span>
@@ -1201,6 +1229,8 @@ export function AiAgent() {
           </div>
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 }

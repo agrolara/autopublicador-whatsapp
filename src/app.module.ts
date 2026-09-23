@@ -47,6 +47,7 @@ import { SearchModule } from './modules/search/search.module';
 import { GroupVaultModule } from './modules/group-vault/group-vault.module';
 import { AiAgentModule } from './modules/ai-agent/ai-agent.module';
 import { RadarLeadModule } from './modules/radar-lead/radar-lead.module';
+import { AiTelemetryModule } from './modules/ai-telemetry/ai-telemetry.module';
 
 // Only import QueueModule if explicitly enabled to avoid Redis connection errors
 const queueModules: Array<Type | DynamicModule> = [];
@@ -314,6 +315,7 @@ if (dashboardServingEnabled && dashboardBuildPresent) {
     GroupVaultModule, // Central group link vault and progressive auto-join
     AiAgentModule, // Per-session AI Agent with strict private-only rules
     RadarLeadModule, // Native WhatsApp Group Lead Scanner ("Radar de Leads")
+    AiTelemetryModule, // AI Telemetry, token usage & live balance tracking
     ...searchModules, // Global message search (opt-out via SEARCH_ENABLED=false; default ON)
     ...mcpModules, // MCP Streamable-HTTP server (opt-in via MCP_ENABLED=true)
     ...serveStaticModules, // Bundled dashboard SPA (production single-port setup)

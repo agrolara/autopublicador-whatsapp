@@ -1897,4 +1897,130 @@ export const radarApi = {
     }),
 };
 
+// =============================================================================
+// AI Telemetry, Balances & Cost Monitoring Types & API
+// =============================================================================
+
+export interface OpenRouterBalanceInfo {
+  status: 'connected' | 'unconfigured' | 'error';
+  isLiveApi: boolean;
+  totalCredits: number;
+  totalUsage: number;
+  remainingCredits: number;
+  keyLabel?: string;
+  limit?: number | null;
+  isFreeTier?: boolean;
+  rateLimit?: any;
+  localRequestsCount: number;
+  localTokensCount: number;
+  localEstimatedCostUsd: number;
+  lastChecked: string;
+  error?: string;
+}
+
+export interface GroqBalanceInfo {
+  status: 'connected' | 'unconfigured' | 'error';
+  initialBalance: number;
+  estimatedCostUsd: number;
+  remainingBalanceUsd: number;
+  transcriptionsCount: number;
+  audioSecondsCount: number;
+  audioMinutesCount: number;
+  ratePerMinuteUsd: number;
+  freeTierDailyEstimate: {
+    maxAudiosPerDay: number;
+    usedToday: number;
+  };
+  lastActivity?: string;
+}
+
+export interface TypeSafeBalanceInfo {
+  status: 'connected' | 'unconfigured' | 'error';
+  initialBalance: number;
+  estimatedCostUsd: number;
+  remainingBalanceUsd: number;
+  evaluationsCount: number;
+  approvedLeadsCount: number;
+  discardedAdsCount: number;
+  ratePerEvaluationUsd: number;
+  lastActivity?: string;
+}
+
+export interface AiCombinedBalance {
+  totalRemainingBalanceUsd: number;
+  totalSpentUsd: number;
+  totalRequestsCount: number;
+  hasLowBalanceAlert: boolean;
+  alertMessages: string[];
+}
+
+export interface AiBalanceSummary {
+  combined: AiCombinedBalance;
+  openrouter: OpenRouterBalanceInfo;
+  groq: GroqBalanceInfo;
+  typesafe: TypeSafeBalanceInfo;
+  thresholdUsd: number;
+}
+
+export interface AiBudgetConfig {
+  id: string;
+  groqInitialBalance: number;
+  typesafeInitialBalance: number;
+  openrouterInitialBalance: number;
+  costAlertThresholdUsd: number;
+  openrouterApiKeyOverride?: string | null;
+  groqApiKeyOverride?: string | null;
+  typesafeApiKeyOverride?: string | null;
+  updatedAt: string;
+}
+
+export interface UpdateAiBudgetPayload {
+  groqInitialBalance?: number;
+  typesafeInitialBalance?: number;
+  openrouterInitialBalance?: number;
+  costAlertThresholdUsd?: number;
+  openrouterApiKeyOverride?: string;
+  groqApiKeyOverride?: string;
+  typesafeApiKeyOverride?: string;
+}
+
+export interface AiUsageLogItem {
+  id: string;
+  provider: 'openrouter' | 'groq' | 'typesafe' | 'gemini' | 'openai';
+  serviceType: 'chat_llm' | 'audio_stt' | 'radar_eval' | 'custom';
+  model: string;
+  sessionId?: string | null;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  audioSeconds: number;
+  costUsd: number;
+  success: boolean;
+  errorDetails?: string | null;
+  createdAt: string;
+}
+
+export const aiTelemetryApi = {
+  getBalances: () => request<AiBalanceSummary>('/ai-telemetry/balances'),
+  getBudget: () => request<AiBudgetConfig>('/ai-telemetry/budget'),
+  updateBudget: (data: UpdateAiBudgetPayload) =>
+    request<AiBudgetConfig>('/ai-telemetry/budget', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  getLogs: (params?: { limit?: number; provider?: string; serviceType?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set('limit', String(params.limit));
+    if (params?.provider) searchParams.set('provider', params.provider);
+    if (params?.serviceType) searchParams.set('serviceType', params.serviceType);
+    const qs = searchParams.toString();
+    return request<AiUsageLogItem[]>(`/ai-telemetry/logs${qs ? `?${qs}` : ''}`);
+  },
+  clearLogs: () =>
+    request<{ success: boolean }>('/ai-telemetry/logs', {
+      method: 'DELETE',
+    }),
+};
+
+
 
