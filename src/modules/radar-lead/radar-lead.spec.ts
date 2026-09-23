@@ -329,4 +329,82 @@ describe('RadarLeadService - Unit Tests', () => {
       expect(res.error).toContain('Network timeout');
     });
   });
+
+  describe('Telemetry & Metrics', () => {
+    let service: RadarLeadService;
+    let mockSettingsRepo: any;
+    let mockClientsRepo: any;
+    let mockLogsRepo: any;
+
+    beforeEach(() => {
+      mockSettingsRepo = {
+        findOne: jest.fn(),
+        create: jest.fn(),
+        save: jest.fn(),
+        query: jest.fn().mockResolvedValue([]),
+      };
+      mockClientsRepo = {
+        find: jest.fn().mockResolvedValue([
+          { id: 'c-1', name: 'Sushi Kura', rubroKey: 'sushi' },
+          { id: 'c-2', name: 'Google AI Pro', rubroKey: 'cuentas google' },
+        ]),
+        findOne: jest.fn(),
+        create: jest.fn(),
+        save: jest.fn(),
+        query: jest.fn().mockResolvedValue([]),
+      };
+      mockLogsRepo = {
+        create: jest.fn(d => d),
+        save: jest.fn(d => Promise.resolve(d)),
+        find: jest.fn().mockResolvedValue([
+          { clientId: 'c-1', status: 'DISPATCHED' },
+          { clientId: 'c-1', status: 'DISPATCHED' },
+          { clientId: 'c-1', status: 'DISCARDED_AI' },
+          { clientId: 'c-2', status: 'DISPATCHED' },
+          { clientId: 'c-2', status: 'DISCARDED_AI' },
+        ]),
+        clear: jest.fn().mockResolvedValue(undefined),
+      };
+      service = new RadarLeadService(mockSettingsRepo, mockClientsRepo, mockLogsRepo);
+    });
+
+    it('computes global and per-client metrics correctly', async () => {
+      const metrics = await service.getMetrics();
+
+      expect(metrics.global.totalMatches).toBe(5);
+      expect(metrics.global.approvedLeads).toBe(3);
+      expect(metrics.global.discardedAds).toBe(2);
+      expect(metrics.global.accuracyRate).toBe(60);
+
+      const sushi = metrics.byClient.find(c => c.clientId === 'c-1');
+      expect(sushi).toBeDefined();
+      expect(sushi?.totalMatches).toBe(3);
+      expect(sushi?.approvedLeads).toBe(2);
+      expect(sushi?.discardedAds).toBe(1);
+      expect(sushi?.accuracyRate).toBe(66.7);
+
+      const google = metrics.byClient.find(c => c.clientId === 'c-2');
+      expect(google).toBeDefined();
+      expect(google?.totalMatches).toBe(2);
+      expect(google?.approvedLeads).toBe(1);
+      expect(google?.discardedAds).toBe(1);
+      expect(google?.accuracyRate).toBe(50);
+    });
+
+    it('retrieves recent logs with filtering', async () => {
+      await service.getLogs({ limit: 10, clientId: 'c-1', status: 'DISPATCHED' });
+      expect(mockLogsRepo.find).toHaveBeenCalledWith({
+        where: { clientId: 'c-1', status: 'DISPATCHED' },
+        order: { createdAt: 'DESC' },
+        take: 10,
+      });
+    });
+
+    it('clears logs when requested', async () => {
+      const res = await service.clearLogs();
+      expect(res.success).toBe(true);
+      expect(mockLogsRepo.clear).toHaveBeenCalled();
+    });
+  });
 });
+

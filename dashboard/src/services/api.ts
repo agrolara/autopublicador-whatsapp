@@ -1780,6 +1780,45 @@ export interface TestRadarResult {
   }>;
 }
 
+export type RadarLeadStatus = 'DISPATCHED' | 'DISCARDED_AI';
+
+export interface RadarLeadLog {
+  id: string;
+  clientId?: string;
+  clientName: string;
+  rubroKey: string;
+  sessionId: string;
+  groupId: string;
+  groupName: string;
+  buyerPhone: string;
+  messageText: string;
+  matchedKeyword: string;
+  aiEvaluated: boolean;
+  aiScore?: number | null;
+  status: RadarLeadStatus;
+  createdAt: string;
+}
+
+export interface ClientMetrics {
+  clientId: string;
+  clientName: string;
+  rubroKey: string;
+  totalMatches: number;
+  approvedLeads: number;
+  discardedAds: number;
+  accuracyRate: number;
+}
+
+export interface RadarMetricsSummary {
+  global: {
+    totalMatches: number;
+    approvedLeads: number;
+    discardedAds: number;
+    accuracyRate: number;
+  };
+  byClient: ClientMetrics[];
+}
+
 export const radarApi = {
   getSettings: () => request<RadarSettings>('/radar/settings'),
   updateSettings: (data: UpdateRadarSettingsPayload) =>
@@ -1812,5 +1851,19 @@ export const radarApi = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  getLogs: (params?: { limit?: number; clientId?: string; status?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set('limit', String(params.limit));
+    if (params?.clientId) searchParams.set('clientId', params.clientId);
+    if (params?.status) searchParams.set('status', params.status);
+    const qs = searchParams.toString();
+    return request<RadarLeadLog[]>(`/radar/logs${qs ? `?${qs}` : ''}`);
+  },
+  getMetrics: () => request<RadarMetricsSummary>('/radar/metrics'),
+  clearLogs: () =>
+    request<{ success: boolean }>('/radar/logs', {
+      method: 'DELETE',
+    }),
 };
+
 

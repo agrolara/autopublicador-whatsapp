@@ -3,10 +3,20 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { RadarSetting, GroupFilterMode } from './entities/radar-setting.entity';
 import { RadarClient, DEFAULT_RADAR_ALERT_TEMPLATE } from './entities/radar-client.entity';
-import { CreateRadarClientDto, UpdateRadarClientDto, UpdateRadarSettingsDto, TestEvaluateDto } from './dto/radar.dto';
+import { RadarLeadLog } from './entities/radar-lead-log.entity';
+import {
+  CreateRadarClientDto,
+  UpdateRadarClientDto,
+  UpdateRadarSettingsDto,
+  TestEvaluateDto,
+  QueryRadarLogsDto,
+  RadarMetricsSummaryDto,
+  ClientMetricsDto,
+} from './dto/radar.dto';
 
 export function normalizeTextForSearch(str: string): string {
   return (str || '')
@@ -146,8 +156,17 @@ export class RadarLeadService implements OnModuleInit {
     @InjectRepository(RadarClient, 'data')
     private readonly clientsRepo: Repository<RadarClient>,
     @Optional()
-    private readonly engineRegistry?: EngineRegistry,
-  ) {}
+    @InjectRepository(RadarLeadLog, 'data')
+    private logsRepo?: Repository<RadarLeadLog>,
+    @Optional()
+    private engineRegistry?: EngineRegistry,
+  ) {
+    // Backwards-compatibility if caller passed (settingsRepo, clientsRepo, engineRegistry)
+    if (this.logsRepo && !this.engineRegistry && ('get' in (this.logsRepo as any) || 'getEngine' in (this.logsRepo as any) || typeof (this.logsRepo as any).get === 'function')) {
+      this.engineRegistry = this.logsRepo as any;
+      this.logsRepo = undefined;
+    }
+  }
 
   async onModuleInit(): Promise<void> {
     await this.ensureTables();
@@ -261,6 +280,29 @@ export class RadarLeadService implements OnModuleInit {
           updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
         )
       `).catch(() => {});
+
+      if (this.logsRepo) {
+        await this.logsRepo.query(`
+          CREATE TABLE IF NOT EXISTS radar_lead_logs (
+            id VARCHAR(36) PRIMARY KEY,
+            clientId VARCHAR(64),
+            clientName VARCHAR(128) NOT NULL,
+            rubroKey VARCHAR(64) NOT NULL DEFAULT '',
+            sessionId VARCHAR(64) NOT NULL DEFAULT '',
+            groupId VARCHAR(128) NOT NULL DEFAULT '',
+            groupName VARCHAR(255) NOT NULL DEFAULT '',
+            buyerPhone VARCHAR(32) NOT NULL DEFAULT '',
+            messageText TEXT NOT NULL,
+            matchedKeyword VARCHAR(128) NOT NULL DEFAULT '',
+            aiEvaluated BOOLEAN NOT NULL DEFAULT 0,
+            aiScore REAL,
+            status VARCHAR(32) NOT NULL,
+            createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+          )
+        `).catch(() => {});
+        await this.logsRepo.query(`CREATE INDEX IF NOT EXISTS idx_radar_logs_client ON radar_lead_logs(clientId)`).catch(() => {});
+        await this.logsRepo.query(`CREATE INDEX IF NOT EXISTS idx_radar_logs_created ON radar_lead_logs(createdAt)`).catch(() => {});
+      }
 
       // Backward compatibility migrations for existing SQLite databases
       await this.settingsRepo.query(`ALTER TABLE radar_settings ADD COLUMN aiSemanticEnabled BOOLEAN NOT NULL DEFAULT 1`).catch(() => {});
@@ -401,18 +443,37 @@ export class RadarLeadService implements OnModuleInit {
           (client.useAiFilter ?? true) &&
           Boolean(client.jevPromptCriteria?.trim());
 
+        let aiEvaluated = false;
+        let aiScore: number | null = null;
+
         if (isAiEnabled) {
+          aiEvaluated = true;
           const effectiveKey = (settings.typesafeApiKey || '').trim() || DEFAULT_TYPESAFE_API_KEY;
           const aiCheck = await evaluateSemanticCriteriaWithTypeSafe(
             text,
             client.jevPromptCriteria!.trim(),
             effectiveKey,
           );
+          aiScore = aiCheck.score;
 
           if (!aiCheck.isMatch) {
             this.logger.log(
               `[Radar Lead] DISCARDED by TypeSafe AI (score: ${aiCheck.score.toFixed(2)}) for client "${client.name}". Motivo: Vendedor o sin intención de compra. Texto: "${text.slice(0, 60)}"`,
             );
+            await this.recordLog({
+              clientId: client.id,
+              clientName: client.name,
+              rubroKey: client.rubroKey,
+              sessionId,
+              groupId,
+              groupName: groupName || groupId,
+              buyerPhone: buyerPhoneDigits,
+              messageText: text,
+              matchedKeyword: matchedKeyword || '',
+              aiEvaluated: true,
+              aiScore: aiCheck.score,
+              status: 'DISCARDED_AI',
+            });
             continue; // Filtered out: seller or non-buyer!
           }
 
@@ -420,6 +481,22 @@ export class RadarLeadService implements OnModuleInit {
             `[Radar Lead] APPROVED by TypeSafe AI (score: ${aiCheck.score.toFixed(2)}) for client "${client.name}"`,
           );
         }
+
+        // Record approved / dispatched lead log
+        await this.recordLog({
+          clientId: client.id,
+          clientName: client.name,
+          rubroKey: client.rubroKey,
+          sessionId,
+          groupId,
+          groupName: groupName || groupId,
+          buyerPhone: buyerPhoneDigits,
+          messageText: text,
+          matchedKeyword: matchedKeyword || '',
+          aiEvaluated,
+          aiScore,
+          status: 'DISPATCHED',
+        });
 
         this.logger.log(`Radar lead matched for client "${client.name}" (rubro: ${client.rubroKey}, keyword: "${matchedKeyword}")`);
 
@@ -791,6 +868,23 @@ export class RadarLeadService implements OnModuleInit {
           formattedAlert,
           aiEvaluation,
         });
+
+        if (dto.recordLog !== false) {
+          await this.recordLog({
+            clientId: client.id,
+            clientName: client.name,
+            rubroKey: client.rubroKey,
+            sessionId: dto.sessionId || 'test',
+            groupId: 'simulado@g.us',
+            groupName: `${groupName} (Simulación)`,
+            buyerPhone: buyerPhone || '56900000000',
+            messageText: text,
+            matchedKeyword: matchedKeyword || '',
+            aiEvaluated: aiEvaluation.evaluated,
+            aiScore: aiEvaluation.evaluated ? aiEvaluation.score : null,
+            status: aiEvaluation.passed ? 'DISPATCHED' : 'DISCARDED_AI',
+          });
+        }
       }
     }
 
@@ -798,6 +892,151 @@ export class RadarLeadService implements OnModuleInit {
       matched: results.length > 0,
       results,
     };
+  }
+
+  /**
+   * Records a lead event (dispatched alert or AI discard) into the telemetry table.
+   */
+  async recordLog(data: {
+    clientId?: string;
+    clientName: string;
+    rubroKey: string;
+    sessionId: string;
+    groupId: string;
+    groupName: string;
+    buyerPhone: string;
+    messageText: string;
+    matchedKeyword: string;
+    aiEvaluated: boolean;
+    aiScore?: number | null;
+    status: 'DISPATCHED' | 'DISCARDED_AI';
+  }): Promise<void> {
+    if (!this.logsRepo) return;
+    try {
+      const log = this.logsRepo.create({
+        id: crypto.randomUUID ? crypto.randomUUID() : undefined,
+        ...data,
+        aiScore: typeof data.aiScore === 'number' ? data.aiScore : null,
+      });
+      await this.logsRepo.save(log);
+    } catch (err) {
+      this.logger.warn('Failed to record radar lead log', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  /**
+   * Returns recent lead logs with optional filtering.
+   */
+  async getLogs(query: QueryRadarLogsDto = {}): Promise<RadarLeadLog[]> {
+    if (!this.logsRepo) return [];
+    const limit = Math.min(Math.max(Number(query.limit) || 50, 1), 200);
+    const where: any = {};
+    if (query.clientId && query.clientId !== 'ALL') {
+      where.clientId = query.clientId;
+    }
+    if (query.status && query.status !== 'ALL') {
+      where.status = query.status;
+    }
+
+    return this.logsRepo.find({
+      where,
+      order: { createdAt: 'DESC' },
+      take: limit,
+    });
+  }
+
+  /**
+   * Computes telemetry metrics (global KPI and per-client performance).
+   */
+  async getMetrics(): Promise<RadarMetricsSummaryDto> {
+    const allClients = await this.clientsRepo.find({ order: { name: 'ASC' } });
+    if (!this.logsRepo) {
+      return {
+        global: { totalMatches: 0, approvedLeads: 0, discardedAds: 0, accuracyRate: 0 },
+        byClient: allClients.map((c) => ({
+          clientId: c.id,
+          clientName: c.name,
+          rubroKey: c.rubroKey,
+          totalMatches: 0,
+          approvedLeads: 0,
+          discardedAds: 0,
+          accuracyRate: 0,
+        })),
+      };
+    }
+
+    const logs = await this.logsRepo.find({
+      select: { clientId: true, status: true },
+    });
+
+    let globalMatches = logs.length;
+    let globalApproved = 0;
+    let globalDiscarded = 0;
+
+    const clientMap = new Map<string, { totalMatches: number; approvedLeads: number; discardedAds: number }>();
+    for (const c of allClients) {
+      clientMap.set(c.id, { totalMatches: 0, approvedLeads: 0, discardedAds: 0 });
+    }
+
+    for (const l of logs) {
+      if (l.status === 'DISPATCHED') {
+        globalApproved++;
+      } else if (l.status === 'DISCARDED_AI') {
+        globalDiscarded++;
+      }
+
+      if (l.clientId) {
+        let stats = clientMap.get(l.clientId);
+        if (!stats) {
+          stats = { totalMatches: 0, approvedLeads: 0, discardedAds: 0 };
+          clientMap.set(l.clientId, stats);
+        }
+        stats.totalMatches++;
+        if (l.status === 'DISPATCHED') {
+          stats.approvedLeads++;
+        } else if (l.status === 'DISCARDED_AI') {
+          stats.discardedAds++;
+        }
+      }
+    }
+
+    const globalAccuracy = globalMatches > 0 ? Number(((globalApproved / globalMatches) * 100).toFixed(1)) : 0;
+
+    const byClient: ClientMetricsDto[] = allClients.map((c) => {
+      const stats = clientMap.get(c.id) || { totalMatches: 0, approvedLeads: 0, discardedAds: 0 };
+      const accuracy = stats.totalMatches > 0 ? Number(((stats.approvedLeads / stats.totalMatches) * 100).toFixed(1)) : 0;
+      return {
+        clientId: c.id,
+        clientName: c.name,
+        rubroKey: c.rubroKey,
+        totalMatches: stats.totalMatches,
+        approvedLeads: stats.approvedLeads,
+        discardedAds: stats.discardedAds,
+        accuracyRate: accuracy,
+      };
+    });
+
+    return {
+      global: {
+        totalMatches: globalMatches,
+        approvedLeads: globalApproved,
+        discardedAds: globalDiscarded,
+        accuracyRate: globalAccuracy,
+      },
+      byClient,
+    };
+  }
+
+  /**
+   * Clears telemetry logs.
+   */
+  async clearLogs(): Promise<{ success: boolean }> {
+    if (this.logsRepo) {
+      await this.logsRepo.clear();
+    }
+    return { success: true };
   }
 
   private parseJsonArray(str: string | null | undefined): string[] {

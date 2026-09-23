@@ -174,4 +174,45 @@ export class TestEvaluateDto {
   @IsOptional()
   @IsString()
   sessionId?: string;
+
+  @ApiPropertyOptional({ description: 'Guardar evento en historial de telemetría', default: true })
+  @IsOptional()
+  @IsBoolean()
+  recordLog?: boolean;
+}
+
+export class QueryRadarLogsDto {
+  @ApiPropertyOptional({ description: 'Límite de registros a retornar', default: 50 })
+  @IsOptional()
+  limit?: number;
+
+  @ApiPropertyOptional({ description: 'Filtrar por ID de cliente' })
+  @IsOptional()
+  @IsString()
+  clientId?: string;
+
+  @ApiPropertyOptional({ description: 'Filtrar por estado: DISPATCHED o DISCARDED_AI' })
+  @IsOptional()
+  @IsString()
+  status?: string;
+}
+
+export interface ClientMetricsDto {
+  clientId: string;
+  clientName: string;
+  rubroKey: string;
+  totalMatches: number;
+  approvedLeads: number;
+  discardedAds: number;
+  accuracyRate: number;
+}
+
+export interface RadarMetricsSummaryDto {
+  global: {
+    totalMatches: number;
+    approvedLeads: number;
+    discardedAds: number;
+    accuracyRate: number;
+  };
+  byClient: ClientMetricsDto[];
 }

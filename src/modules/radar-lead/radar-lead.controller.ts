@@ -1,9 +1,16 @@
-import { Controller, Get, Put, Post, Delete, Patch, Param, Body } from '@nestjs/common';
+import { Controller, Get, Put, Post, Delete, Patch, Param, Body, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { RadarLeadService } from './radar-lead.service';
 import { RadarSetting } from './entities/radar-setting.entity';
 import { RadarClient } from './entities/radar-client.entity';
-import { CreateRadarClientDto, UpdateRadarClientDto, UpdateRadarSettingsDto, TestEvaluateDto } from './dto/radar.dto';
+import { RadarLeadLog } from './entities/radar-lead-log.entity';
+import {
+  CreateRadarClientDto,
+  UpdateRadarClientDto,
+  UpdateRadarSettingsDto,
+  TestEvaluateDto,
+  QueryRadarLogsDto,
+} from './dto/radar.dto';
 import { RequireRole } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
 
@@ -90,4 +97,29 @@ export class RadarLeadController {
   async testEvaluate(@Body() dto: TestEvaluateDto) {
     return this.radarLeadService.testEvaluate(dto);
   }
+
+  @Get('logs')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Obtener historial reciente de leads y eventos de radar' })
+  @ApiResponse({ status: 200, description: 'Lista de logs de leads' })
+  async getLogs(@Query() query: QueryRadarLogsDto): Promise<RadarLeadLog[]> {
+    return this.radarLeadService.getLogs(query);
+  }
+
+  @Get('metrics')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Obtener métricas y contadores de rendimiento de radar' })
+  @ApiResponse({ status: 200, description: 'Métricas de radar' })
+  async getMetrics() {
+    return this.radarLeadService.getMetrics();
+  }
+
+  @Delete('logs')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Vaciar historial de leads' })
+  @ApiResponse({ status: 200, description: 'Historial eliminado' })
+  async clearLogs(): Promise<{ success: boolean }> {
+    return this.radarLeadService.clearLogs();
+  }
 }
+

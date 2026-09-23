@@ -24,6 +24,11 @@ import {
   Eye,
   EyeOff,
   Bot,
+  BarChart2,
+  Activity,
+  TrendingUp,
+  ShieldAlert,
+  ArrowUpRight,
 } from 'lucide-react';
 import {
   radarApi,
@@ -34,6 +39,9 @@ import {
   type Session,
   type TestRadarResult,
   type GroupFilterMode,
+  type RadarLeadLog,
+  type RadarMetricsSummary,
+  type ClientMetrics,
 } from '../services/api';
 import './RadarLeads.css';
 
@@ -57,7 +65,17 @@ export function RadarLeads() {
   const [availableGroups, setAvailableGroups] = useState<RadarGroupItem[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'clients' | 'settings' | 'test'>('clients');
+  const [activeTab, setActiveTab] = useState<'clients' | 'settings' | 'test' | 'telemetry'>('clients');
+
+  // Telemetry State
+  const [logs, setLogs] = useState<RadarLeadLog[]>([]);
+  const [metrics, setMetrics] = useState<RadarMetricsSummary | null>(null);
+  const [loadingTelemetry, setLoadingTelemetry] = useState(false);
+  const [telemetryFilterClient, setTelemetryFilterClient] = useState<string>('ALL');
+  const [telemetryFilterStatus, setTelemetryFilterStatus] = useState<string>('ALL');
+  const [telemetrySearch, setTelemetrySearch] = useState<string>('');
+  const [selectedLeadLog, setSelectedLeadLog] = useState<RadarLeadLog | null>(null);
+  const [isClearingLogs, setIsClearingLogs] = useState(false);
 
   // Master switch loading state
   const [isTogglingMaster, setIsTogglingMaster] = useState(false);
@@ -117,7 +135,7 @@ export function RadarLeads() {
   const loadAllData = async () => {
     setLoading(true);
     try {
-      const [fetchedSettings, fetchedClients, fetchedGroups, fetchedSessions] = await Promise.all([
+      const [fetchedSettings, fetchedClients, fetchedGroups, fetchedSessions, fetchedMetrics] = await Promise.all([
         radarApi.getSettings().catch(err => {
           console.error('Error al obtener configuración del radar:', err);
           return null;
@@ -128,6 +146,7 @@ export function RadarLeads() {
         }),
         radarApi.getGroups().catch(() => []),
         sessionApi.list().catch(() => []),
+        radarApi.getMetrics().catch(() => null),
       ]);
 
       if (fetchedSettings) {
@@ -150,6 +169,9 @@ export function RadarLeads() {
       }
       setAvailableGroups(fetchedGroups);
       setSessions(fetchedSessions);
+      if (fetchedMetrics) {
+        setMetrics(fetchedMetrics);
+      }
     } catch {
       showToast('error', 'Error al cargar los datos del Radar');
     } finally {
@@ -157,9 +179,59 @@ export function RadarLeads() {
     }
   };
 
+  const loadTelemetry = async (silent = false) => {
+    if (!silent) setLoadingTelemetry(true);
+    try {
+      const [fetchedLogs, fetchedMetrics] = await Promise.all([
+        radarApi.getLogs({
+          limit: 100,
+          clientId: telemetryFilterClient !== 'ALL' ? telemetryFilterClient : undefined,
+          status: telemetryFilterStatus !== 'ALL' ? telemetryFilterStatus : undefined,
+        }).catch(err => {
+          console.error('Error al obtener logs de telemetría:', err);
+          return [];
+        }),
+        radarApi.getMetrics().catch(err => {
+          console.error('Error al obtener métricas de telemetría:', err);
+          return null;
+        }),
+      ]);
+      setLogs(fetchedLogs || []);
+      if (fetchedMetrics) {
+        setMetrics(fetchedMetrics);
+      }
+    } catch {
+      if (!silent) showToast('error', 'Error al cargar telemetría');
+    } finally {
+      if (!silent) setLoadingTelemetry(false);
+    }
+  };
+
+  const handleClearLogs = async () => {
+    if (!window.confirm('¿Estás seguro de que deseas vaciar el historial de telemetría y reiniciar los contadores?')) {
+      return;
+    }
+    setIsClearingLogs(true);
+    try {
+      await radarApi.clearLogs();
+      showToast('success', 'Historial de telemetría vaciado correctamente.');
+      await loadTelemetry();
+    } catch {
+      showToast('error', 'Error al vaciar el historial.');
+    } finally {
+      setIsClearingLogs(false);
+    }
+  };
+
   useEffect(() => {
     loadAllData();
   }, []);
+
+  useEffect(() => {
+    if (activeTab === 'telemetry') {
+      loadTelemetry();
+    }
+  }, [activeTab, telemetryFilterClient, telemetryFilterStatus]);
 
   const safeParseJson = (str: string | undefined): string[] => {
     if (!str) return [];
@@ -315,6 +387,7 @@ export function RadarLeads() {
         senderPhone: testBuyerPhone,
       });
       setTestResult(res);
+      loadTelemetry(true);
       if (res.matched) {
         showToast('success', `¡Coincidencia detectada! ${res.results.length} alerta(s) generadas.`);
       } else {
@@ -363,6 +436,21 @@ export function RadarLeads() {
       g => g.name.toLowerCase().includes(q) || g.id.toLowerCase().includes(q),
     );
   }, [availableGroups, groupSearch]);
+
+  // Filtered Telemetry Logs
+  const filteredLogs = useMemo(() => {
+    if (!telemetrySearch.trim()) return logs;
+    const q = telemetrySearch.toLowerCase();
+    return logs.filter(
+      l =>
+        l.messageText.toLowerCase().includes(q) ||
+        (l.groupName && l.groupName.toLowerCase().includes(q)) ||
+        (l.clientName && l.clientName.toLowerCase().includes(q)) ||
+        (l.rubroKey && l.rubroKey.toLowerCase().includes(q)) ||
+        (l.buyerPhone && l.buyerPhone.includes(q)) ||
+        (l.matchedKeyword && l.matchedKeyword.toLowerCase().includes(q)),
+    );
+  }, [logs, telemetrySearch]);
 
   const connectedSessions = useMemo(() => {
     return sessions.filter(s => s.status === 'authenticated' || s.status === 'connected' || s.status === 'ready');
@@ -414,6 +502,22 @@ export function RadarLeads() {
                 <strong>{availableGroups.length}</strong> Grupos detectados
               </span>
             </div>
+            {metrics && (
+              <div
+                className="stat-chip highlight-leads"
+                onClick={() => {
+                  setActiveTab('telemetry');
+                  loadTelemetry();
+                }}
+                style={{ cursor: 'pointer' }}
+                title="Ver telemetría y rendimiento de leads"
+              >
+                <TrendingUp size={15} color="#34d399" />
+                <span>
+                  <strong>{metrics.global.approvedLeads}</strong> Leads ({metrics.global.accuracyRate}% precisión)
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -466,6 +570,21 @@ export function RadarLeads() {
           <Sparkles size={18} />
           <span>Simulador de Prueba</span>
           <span className="tab-badge-beta">TEST</span>
+        </button>
+        <button
+          className={`radar-tab-btn ${activeTab === 'telemetry' ? 'active' : ''}`}
+          onClick={() => {
+            setActiveTab('telemetry');
+            loadTelemetry();
+          }}
+        >
+          <BarChart2 size={18} />
+          <span>Telemetría y Rendimiento</span>
+          {metrics && (
+            <span className="tab-counter highlight">
+              {metrics.global.totalMatches}
+            </span>
+          )}
         </button>
       </div>
 
@@ -1099,6 +1218,320 @@ export function RadarLeads() {
         </div>
       )}
 
+      {/* TAB 4: TELEMETRY & LEAD PERFORMANCE */}
+      {activeTab === 'telemetry' && (
+        <div className="radar-tab-content">
+          {/* Header Controls */}
+          <div className="telemetry-top-header">
+            <div>
+              <h2 className="telemetry-section-title">
+                <Activity size={22} className="title-icon-pulse" />
+                <span>Monitoreo General y Rendimiento de Leads</span>
+              </h2>
+              <p className="telemetry-section-subtitle">
+                Telemetría en tiempo real: análisis de matches locales, validación semántica TypeSafe y efectividad por cliente.
+              </p>
+            </div>
+            <div className="telemetry-header-actions">
+              <button
+                type="button"
+                className="radar-btn-outline"
+                onClick={() => loadTelemetry()}
+                disabled={loadingTelemetry}
+              >
+                <RefreshCw size={15} className={loadingTelemetry ? 'icon-spin' : ''} />
+                <span>{loadingTelemetry ? 'Actualizando...' : 'Actualizar'}</span>
+              </button>
+              <button
+                type="button"
+                className="radar-btn-outline danger"
+                onClick={handleClearLogs}
+                disabled={isClearingLogs}
+                title="Vaciar historial de telemetría"
+              >
+                <Trash2 size={15} />
+                <span>Vaciar Historial</span>
+              </button>
+            </div>
+          </div>
+
+          {/* 4 Global KPI Cards */}
+          <div className="radar-telemetry-kpis">
+            <div className="telemetry-kpi-card match-card">
+              <div className="kpi-icon-wrap match">
+                <Search size={22} />
+              </div>
+              <div className="kpi-data">
+                <span className="kpi-value">{metrics?.global.totalMatches ?? 0}</span>
+                <span className="kpi-label">Matches Locales</span>
+                <span className="kpi-subtext">Coincidencias en grupos de WhatsApp</span>
+              </div>
+            </div>
+
+            <div className="telemetry-kpi-card approved-card">
+              <div className="kpi-icon-wrap approved">
+                <CheckCircle2 size={22} />
+              </div>
+              <div className="kpi-data">
+                <span className="kpi-value">{metrics?.global.approvedLeads ?? 0}</span>
+                <span className="kpi-label">Leads Aprobados</span>
+                <span className="kpi-subtext">Alertas enviadas con intención de compra</span>
+              </div>
+            </div>
+
+            <div className="telemetry-kpi-card discarded-card">
+              <div className="kpi-icon-wrap discarded">
+                <ShieldAlert size={22} />
+              </div>
+              <div className="kpi-data">
+                <span className="kpi-value">{metrics?.global.discardedAds ?? 0}</span>
+                <span className="kpi-label">Anuncios Descartados</span>
+                <span className="kpi-subtext">Vendedores y spam bloqueados por IA</span>
+              </div>
+            </div>
+
+            <div className="telemetry-kpi-card accuracy-card">
+              <div className="kpi-icon-wrap accuracy">
+                <TrendingUp size={22} />
+              </div>
+              <div className="kpi-data">
+                <span className="kpi-value">{metrics?.global.accuracyRate ?? 0}%</span>
+                <span className="kpi-label">Tasa de Precisión</span>
+                <span className="kpi-subtext">Efectividad real comprador vs vendedor</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Breakdown per client */}
+          <div className="telemetry-clients-section">
+            <div className="section-subheading">
+              <Users size={17} />
+              <span>Rendimiento y Contadores por Cliente</span>
+            </div>
+
+            <div className="radar-client-metrics-grid">
+              {(metrics?.byClient || []).map((cm) => (
+                <div key={cm.clientId} className="client-metric-card">
+                  <div className="client-metric-header">
+                    <div>
+                      <h4 className="client-metric-name">{cm.clientName}</h4>
+                      <span className="client-metric-rubro">{cm.rubroKey}</span>
+                    </div>
+                    <div className="accuracy-badge">
+                      <span>{cm.accuracyRate}% Efectividad</span>
+                    </div>
+                  </div>
+
+                  <div className="accuracy-progress-bar">
+                    <div
+                      className="accuracy-progress-fill"
+                      style={{ width: `${Math.min(cm.accuracyRate, 100)}%` }}
+                    />
+                  </div>
+
+                  <div className="client-metric-counters">
+                    <div className="counter-item">
+                      <span className="counter-num">{cm.totalMatches}</span>
+                      <span className="counter-lbl">Matches</span>
+                    </div>
+                    <div className="counter-item approved">
+                      <span className="counter-num">{cm.approvedLeads}</span>
+                      <span className="counter-lbl">Aprobados</span>
+                    </div>
+                    <div className="counter-item discarded">
+                      <span className="counter-num">{cm.discardedAds}</span>
+                      <span className="counter-lbl">Descartados</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Recent Lead History Table */}
+          <div className="telemetry-table-section">
+            <div className="table-controls-header">
+              <div className="section-subheading">
+                <Radio size={17} />
+                <span>Historial Reciente de Leads y Eventos ({filteredLogs.length})</span>
+              </div>
+
+              <div className="table-filters-row">
+                <div className="table-search-input">
+                  <Search size={15} />
+                  <input
+                    type="text"
+                    placeholder="Buscar por mensaje, grupo o teléfono..."
+                    value={telemetrySearch}
+                    onChange={e => setTelemetrySearch(e.target.value)}
+                  />
+                </div>
+
+                <select
+                  className="table-filter-select"
+                  value={telemetryFilterClient}
+                  onChange={e => setTelemetryFilterClient(e.target.value)}
+                >
+                  <option value="ALL">Todos los Clientes</option>
+                  {clients.map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  className="table-filter-select"
+                  value={telemetryFilterStatus}
+                  onChange={e => setTelemetryFilterStatus(e.target.value)}
+                >
+                  <option value="ALL">Todos los Estados</option>
+                  <option value="DISPATCHED">🚨 Alerta Despachada</option>
+                  <option value="DISCARDED_AI">🛡️ Descarte por IA</option>
+                </select>
+              </div>
+            </div>
+
+            {loadingTelemetry && logs.length === 0 ? (
+              <div className="radar-empty-state">
+                <RefreshCw size={28} className="icon-spin" />
+                <p>Cargando eventos de telemetría...</p>
+              </div>
+            ) : filteredLogs.length === 0 ? (
+              <div className="radar-empty-state">
+                <Bot size={36} />
+                <h4>No hay registros de telemetría aún</h4>
+                <p>
+                  Cuando los mensajes lleguen en los grupos o cuando ejecutes una prueba en el{' '}
+                  <button type="button" className="link-button" onClick={() => setActiveTab('test')}>
+                    Simulador de Prueba
+                  </button>
+                  , aparecerán aquí con sus puntajes de TypeSafe y estado final.
+                </p>
+              </div>
+            ) : (
+              <div className="radar-logs-table-wrap">
+                <table className="radar-logs-table">
+                  <thead>
+                    <tr>
+                      <th>Fecha / Hora</th>
+                      <th>Cliente</th>
+                      <th>Grupo WhatsApp</th>
+                      <th>Mensaje Detectado</th>
+                      <th>Score TypeSafe</th>
+                      <th>Estado Final</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredLogs.map(log => {
+                      const isDispatched = log.status === 'DISPATCHED';
+                      const score = log.aiScore != null ? log.aiScore : null;
+                      const scorePercent = score != null ? Math.round(score * 100) : null;
+                      const isHighConfidence = score != null && score >= 0.5;
+
+                      return (
+                        <tr
+                          key={log.id}
+                          className={`log-row ${isDispatched ? 'row-dispatched' : 'row-discarded'}`}
+                          onClick={() => setSelectedLeadLog(log)}
+                        >
+                          <td className="log-time-cell">
+                            <span className="log-date">
+                              {new Date(log.createdAt).toLocaleDateString([], {
+                                day: '2-digit',
+                                month: '2-digit',
+                                year: '2-digit',
+                              })}
+                            </span>
+                            <span className="log-hour">
+                              {new Date(log.createdAt).toLocaleTimeString([], {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                second: '2-digit',
+                              })}
+                            </span>
+                          </td>
+
+                          <td className="log-client-cell">
+                            <div className="client-tag">
+                              <strong>{log.clientName}</strong>
+                              <span className="rubro-sub">{log.rubroKey}</span>
+                            </div>
+                          </td>
+
+                          <td className="log-group-cell">
+                            <span className="group-name-truncate" title={log.groupName || log.groupId}>
+                              {log.groupName || log.groupId}
+                            </span>
+                          </td>
+
+                          <td className="log-message-cell">
+                            <p className="message-snippet" title={log.messageText}>
+                              "{log.messageText}"
+                            </p>
+                            {log.matchedKeyword && (
+                              <span className="matched-kw-pill">KW: {log.matchedKeyword}</span>
+                            )}
+                          </td>
+
+                          <td className="log-score-cell">
+                            {score != null ? (
+                              <div className={`score-badge ${isHighConfidence ? 'score-high' : 'score-low'}`}>
+                                <span className="score-num">{score.toFixed(2)}</span>
+                                <div className="score-mini-bar">
+                                  <div
+                                    className="score-mini-fill"
+                                    style={{ width: `${scorePercent}%` }}
+                                  />
+                                </div>
+                                <span className="score-verdict">
+                                  {isHighConfidence ? `${scorePercent}% Compra` : `${100 - (scorePercent || 0)}% Descarte`}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="score-badge score-na">N/A (Local)</span>
+                            )}
+                          </td>
+
+                          <td className="log-status-cell">
+                            {isDispatched ? (
+                              <span className="status-pill dispatched">
+                                <CheckCircle2 size={13} />
+                                <span>Alerta Despachada</span>
+                              </span>
+                            ) : (
+                              <span className="status-pill discarded">
+                                <ShieldAlert size={13} />
+                                <span>Descarte por IA (Publicidad)</span>
+                              </span>
+                            )}
+                          </td>
+
+                          <td className="log-action-cell">
+                            <button
+                              type="button"
+                              className="view-lead-btn"
+                              title="Ver detalles completos del mensaje"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedLeadLog(log);
+                              }}
+                            >
+                              <ArrowUpRight size={15} />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* CLIENT CREATE / EDIT MODAL */}
       {isClientModalOpen && (
         <div className="radar-modal-overlay" onClick={() => setIsClientModalOpen(false)}>
@@ -1281,6 +1714,110 @@ export function RadarLeads() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* LEAD LOG DETAIL MODAL */}
+      {selectedLeadLog && (
+        <div className="radar-modal-overlay" onClick={() => setSelectedLeadLog(null)}>
+          <div className="radar-modal-dialog lead-detail-dialog" onClick={e => e.stopPropagation()}>
+            <div className="radar-modal-header">
+              <div className="modal-title-with-badge">
+                <h3>Detalle del Evento de Lead</h3>
+                {selectedLeadLog.status === 'DISPATCHED' ? (
+                  <span className="status-pill dispatched">
+                    <CheckCircle2 size={13} /> Alerta Despachada
+                  </span>
+                ) : (
+                  <span className="status-pill discarded">
+                    <ShieldAlert size={13} /> Descarte por IA (Publicidad)
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => setSelectedLeadLog(null)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="radar-modal-body">
+              <div className="lead-detail-grid">
+                <div className="lead-detail-item">
+                  <span className="detail-label">Cliente / Rubro:</span>
+                  <span className="detail-value">
+                    <strong>{selectedLeadLog.clientName}</strong> ({selectedLeadLog.rubroKey})
+                  </span>
+                </div>
+
+                <div className="lead-detail-item">
+                  <span className="detail-label">Fecha y Hora:</span>
+                  <span className="detail-value">
+                    {new Date(selectedLeadLog.createdAt).toLocaleString()}
+                  </span>
+                </div>
+
+                <div className="lead-detail-item">
+                  <span className="detail-label">Grupo de WhatsApp:</span>
+                  <span className="detail-value">
+                    {selectedLeadLog.groupName || selectedLeadLog.groupId}
+                  </span>
+                </div>
+
+                <div className="lead-detail-item">
+                  <span className="detail-label">Teléfono del Autor:</span>
+                  <div className="detail-value-row">
+                    <span>+{selectedLeadLog.buyerPhone}</span>
+                    {selectedLeadLog.buyerPhone && (
+                      <a
+                        href={`https://wa.me/${selectedLeadLog.buyerPhone.replace(/[^0-9]/g, '')}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="radar-btn-wa small"
+                      >
+                        <ExternalLink size={12} /> wa.me
+                      </a>
+                    )}
+                  </div>
+                </div>
+
+                <div className="lead-detail-item">
+                  <span className="detail-label">Palabra clave detonante:</span>
+                  <span className="detail-value kw-badge">
+                    {selectedLeadLog.matchedKeyword || 'N/A'}
+                  </span>
+                </div>
+
+                <div className="lead-detail-item">
+                  <span className="detail-label">Validación TypeSafe (Score):</span>
+                  <span className="detail-value">
+                    {selectedLeadLog.aiScore != null
+                      ? `${selectedLeadLog.aiScore.toFixed(2)} (${(selectedLeadLog.aiScore * 100).toFixed(0)}% intención)`
+                      : 'No evaluado / Filtro local'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="lead-message-full-box">
+                <span className="detail-label">Mensaje Completo Detectado:</span>
+                <div className="full-message-bubble">
+                  {selectedLeadLog.messageText}
+                </div>
+              </div>
+            </div>
+
+            <div className="radar-modal-footer">
+              <button
+                type="button"
+                className="radar-primary-btn"
+                onClick={() => setSelectedLeadLog(null)}
+              >
+                Cerrar
+              </button>
+            </div>
           </div>
         </div>
       )}
