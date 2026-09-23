@@ -29,6 +29,7 @@ import {
   TrendingUp,
   ShieldAlert,
   ArrowUpRight,
+  Ban,
 } from 'lucide-react';
 import {
   radarApi,
@@ -76,6 +77,15 @@ export function RadarLeads() {
   const [telemetrySearch, setTelemetrySearch] = useState<string>('');
   const [selectedLeadLog, setSelectedLeadLog] = useState<RadarLeadLog | null>(null);
   const [isClearingLogs, setIsClearingLogs] = useState(false);
+
+  // Fast Negative / False Positive Modal State
+  const [flagModalLog, setFlagModalLog] = useState<RadarLeadLog | null>(null);
+  const [flagBlockPhone, setFlagBlockPhone] = useState(true);
+  const [flagExtraPhones, setFlagExtraPhones] = useState<string[]>([]);
+  const [flagSelectedExtraPhones, setFlagSelectedExtraPhones] = useState<string[]>([]);
+  const [flagNegativePhrase, setFlagNegativePhrase] = useState('');
+  const [flagBlockScope, setFlagBlockScope] = useState<'client' | 'global'>('client');
+  const [isSubmittingFlag, setIsSubmittingFlag] = useState(false);
 
   // Master switch loading state
   const [isTogglingMaster, setIsTogglingMaster] = useState(false);
@@ -240,6 +250,107 @@ export function RadarLeads() {
       return Array.isArray(parsed) ? parsed : [];
     } catch {
       return [];
+    }
+  };
+
+  // Extract phone numbers mentioned inside message body (different from author)
+  const extractSecondaryPhones = (text: string, excludePhone?: string): string[] => {
+    if (!text) return [];
+    const regex = /(?:\+?56\s?9\s?\d{4}\s?\d{4}|\+?56\s?9\d{8}|9\d{8}|\+?\d{9,15})/g;
+    const matches = text.match(regex) || [];
+    const cleanExclude = excludePhone ? excludePhone.replace(/[^0-9]/g, '') : '';
+    const unique = new Set<string>();
+    for (const m of matches) {
+      const cleaned = m.replace(/[^0-9]/g, '');
+      if (cleaned.length >= 8 && cleaned !== cleanExclude) {
+        unique.add(cleaned);
+      }
+    }
+    return Array.from(unique);
+  };
+
+  const handleOpenFlagModal = (log: RadarLeadLog) => {
+    setFlagModalLog(log);
+    setFlagBlockPhone(true);
+    const extra = extractSecondaryPhones(log.messageText, log.buyerPhone);
+    setFlagExtraPhones(extra);
+    setFlagSelectedExtraPhones(extra);
+    setFlagNegativePhrase('');
+    setFlagBlockScope('client');
+  };
+
+  const handleToggleExtraPhone = (phone: string) => {
+    setFlagSelectedExtraPhones(prev =>
+      prev.includes(phone) ? prev.filter(p => p !== phone) : [...prev, phone],
+    );
+  };
+
+  const handleConfirmFlag = async () => {
+    if (!flagModalLog) return;
+    setIsSubmittingFlag(true);
+    try {
+      const phonesToBlock: string[] = [];
+      if (flagBlockPhone && flagModalLog.buyerPhone) {
+        phonesToBlock.push(flagModalLog.buyerPhone);
+      }
+      for (const p of flagSelectedExtraPhones) {
+        if (!phonesToBlock.includes(p)) {
+          phonesToBlock.push(p);
+        }
+      }
+
+      await radarApi.flagNegative(flagModalLog.id, {
+        blockPhones: phonesToBlock,
+        negativePhrase: flagNegativePhrase.trim() || undefined,
+        scope: flagBlockScope,
+      });
+
+      showToast('success', 'Lead marcado como Falso Positivo y agregado a la lista negra (0 ms).');
+      setFlagModalLog(null);
+      if (selectedLeadLog && selectedLeadLog.id === flagModalLog.id) {
+        setSelectedLeadLog(null);
+      }
+      await loadTelemetry(true);
+      const [fetchedClients, fetchedSettings] = await Promise.all([
+        radarApi.getClients().catch(() => null),
+        radarApi.getSettings().catch(() => null),
+      ]);
+      if (fetchedClients) setClients(fetchedClients);
+      if (fetchedSettings) setSettings(fetchedSettings);
+    } catch (err: any) {
+      showToast('error', err?.response?.data?.message || 'Error al marcar como falso positivo');
+    } finally {
+      setIsSubmittingFlag(false);
+    }
+  };
+
+  const handleUnblockPhone = async (clientId: string, phone: string) => {
+    try {
+      await radarApi.unblockPhone(clientId, phone);
+      showToast('success', `Teléfono +${phone} desbloqueado.`);
+      const updatedClients = await radarApi.getClients();
+      setClients(updatedClients);
+      if (editingClient && editingClient.id === clientId) {
+        const found = updatedClients.find(c => c.id === clientId);
+        if (found) setEditingClient(found);
+      }
+    } catch {
+      showToast('error', 'Error al desbloquear teléfono');
+    }
+  };
+
+  const handleRemoveNegativePhrase = async (clientId: string, phrase: string) => {
+    try {
+      await radarApi.removeNegativePhrase(clientId, phrase);
+      showToast('success', `Frase "${phrase}" eliminada de la lista negra.`);
+      const updatedClients = await radarApi.getClients();
+      setClients(updatedClients);
+      if (editingClient && editingClient.id === clientId) {
+        const found = updatedClients.find(c => c.id === clientId);
+        if (found) setEditingClient(found);
+      }
+    } catch {
+      showToast('error', 'Error al eliminar frase de la lista negra');
     }
   };
 
@@ -720,6 +831,15 @@ export function RadarLeads() {
                           </div>
                         </>
                       )}
+                    </div>
+                  )}
+
+                  {((safeParseJson(client.blacklistedSenders).length > 0) || (safeParseJson(client.negativePhrases).length > 0)) && (
+                    <div className="client-blacklist-summary">
+                      <Ban size={13} />
+                      <span>
+                        Lista negra: {safeParseJson(client.blacklistedSenders).length} tel. | {safeParseJson(client.negativePhrases).length} frases
+                      </span>
                     </div>
                   )}
 
@@ -1290,6 +1410,17 @@ export function RadarLeads() {
               </div>
             </div>
 
+            <div className="telemetry-kpi-card false-positive-card">
+              <div className="kpi-icon-wrap false-positive">
+                <Ban size={22} />
+              </div>
+              <div className="kpi-data">
+                <span className="kpi-value">{metrics?.global.falsePositives ?? 0}</span>
+                <span className="kpi-label">Falsos Positivos</span>
+                <span className="kpi-subtext">Marcados como error / lista negra</span>
+              </div>
+            </div>
+
             <div className="telemetry-kpi-card accuracy-card">
               <div className="kpi-icon-wrap accuracy">
                 <TrendingUp size={22} />
@@ -1342,6 +1473,14 @@ export function RadarLeads() {
                       <span className="counter-num">{cm.discardedAds}</span>
                       <span className="counter-lbl">Descartados</span>
                     </div>
+                    <div className="counter-item false-positive">
+                      <span className="counter-num">{cm.falsePositives ?? 0}</span>
+                      <span className="counter-lbl">Falsos Pos.</span>
+                    </div>
+                    <div className="counter-item blacklist">
+                      <span className="counter-num">{cm.blacklistedCount ?? 0}</span>
+                      <span className="counter-lbl">Bloqueados</span>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -1388,6 +1527,8 @@ export function RadarLeads() {
                   <option value="ALL">Todos los Estados</option>
                   <option value="DISPATCHED">🚨 Alerta Despachada</option>
                   <option value="DISCARDED_AI">🛡️ Descarte por IA</option>
+                  <option value="FALSE_POSITIVE">🚫 Falso Positivo</option>
+                  <option value="DISCARDED_BLACKLIST">⛔ Lista Negra (0 ms)</option>
                 </select>
               </div>
             </div>
@@ -1433,7 +1574,15 @@ export function RadarLeads() {
                       return (
                         <tr
                           key={log.id}
-                          className={`log-row ${isDispatched ? 'row-dispatched' : 'row-discarded'}`}
+                          className={`log-row ${
+                            isDispatched
+                              ? 'row-dispatched'
+                              : log.status === 'FALSE_POSITIVE'
+                              ? 'row-false-positive'
+                              : log.status === 'DISCARDED_BLACKLIST'
+                              ? 'row-blacklisted'
+                              : 'row-discarded'
+                          }`}
                           onClick={() => setSelectedLeadLog(log)}
                         >
                           <td className="log-time-cell">
@@ -1500,6 +1649,16 @@ export function RadarLeads() {
                                 <CheckCircle2 size={13} />
                                 <span>Alerta Despachada</span>
                               </span>
+                            ) : log.status === 'FALSE_POSITIVE' ? (
+                              <span className="status-pill false-positive">
+                                <Ban size={13} />
+                                <span>Falso Positivo</span>
+                              </span>
+                            ) : log.status === 'DISCARDED_BLACKLIST' ? (
+                              <span className="status-pill blacklisted">
+                                <Ban size={13} />
+                                <span>Lista Negra (0 ms)</span>
+                              </span>
                             ) : (
                               <span className="status-pill discarded">
                                 <ShieldAlert size={13} />
@@ -1509,6 +1668,20 @@ export function RadarLeads() {
                           </td>
 
                           <td className="log-action-cell">
+                            {log.status !== 'FALSE_POSITIVE' && log.status !== 'DISCARDED_BLACKLIST' && (
+                              <button
+                                type="button"
+                                className="radar-btn-flag-negative"
+                                title="Marcar como Falso Positivo y bloquear remitente / frase"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenFlagModal(log);
+                                }}
+                              >
+                                <Ban size={13} />
+                                <span>Negativo</span>
+                              </button>
+                            )}
                             <button
                               type="button"
                               className="view-lead-btn"
@@ -1685,6 +1858,57 @@ export function RadarLeads() {
                 />
               </div>
 
+              {editingClient && (
+                <div className="client-blacklist-management">
+                  <h4 className="blacklist-title">
+                    <Ban size={15} /> Lista Negra de este Cliente (0 ms)
+                  </h4>
+                  <div className="blacklist-chips-section">
+                    <span className="blacklist-subtitle">Teléfonos bloqueados:</span>
+                    {safeParseJson(editingClient.blacklistedSenders).length === 0 ? (
+                      <span className="text-muted-sm">Ninguno registrado</span>
+                    ) : (
+                      <div className="blacklist-chips">
+                        {safeParseJson(editingClient.blacklistedSenders).map(phone => (
+                          <span key={phone} className="blacklist-chip">
+                            +{phone}
+                            <button
+                              type="button"
+                              onClick={() => handleUnblockPhone(editingClient.id, phone)}
+                              title="Desbloquear este teléfono"
+                            >
+                              ✕
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="blacklist-chips-section mt-2">
+                    <span className="blacklist-subtitle">Frases / Palabras bloqueadas:</span>
+                    {safeParseJson(editingClient.negativePhrases).length === 0 ? (
+                      <span className="text-muted-sm">Ninguna registrada</span>
+                    ) : (
+                      <div className="blacklist-chips">
+                        {safeParseJson(editingClient.negativePhrases).map(phrase => (
+                          <span key={phrase} className="blacklist-chip phrase">
+                            "{phrase}"
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveNegativePhrase(editingClient.id, phrase)}
+                              title="Eliminar esta frase de la lista negra"
+                            >
+                              ✕
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <div className="checkbox-field-row">
                 <label className="checkbox-custom-label">
                   <input
@@ -1728,6 +1952,14 @@ export function RadarLeads() {
                 {selectedLeadLog.status === 'DISPATCHED' ? (
                   <span className="status-pill dispatched">
                     <CheckCircle2 size={13} /> Alerta Despachada
+                  </span>
+                ) : selectedLeadLog.status === 'FALSE_POSITIVE' ? (
+                  <span className="status-pill false-positive">
+                    <Ban size={13} /> Falso Positivo
+                  </span>
+                ) : selectedLeadLog.status === 'DISCARDED_BLACKLIST' ? (
+                  <span className="status-pill blacklisted">
+                    <Ban size={13} /> Lista Negra (0 ms)
                   </span>
                 ) : (
                   <span className="status-pill discarded">
@@ -1810,12 +2042,158 @@ export function RadarLeads() {
             </div>
 
             <div className="radar-modal-footer">
+              {selectedLeadLog.status !== 'FALSE_POSITIVE' && selectedLeadLog.status !== 'DISCARDED_BLACKLIST' && (
+                <button
+                  type="button"
+                  className="radar-btn-flag-negative modal-action"
+                  onClick={() => {
+                    handleOpenFlagModal(selectedLeadLog);
+                  }}
+                >
+                  <Ban size={16} />
+                  <span>Marcar como Falso Positivo / Bloquear</span>
+                </button>
+              )}
               <button
                 type="button"
                 className="radar-primary-btn"
                 onClick={() => setSelectedLeadLog(null)}
               >
                 Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FLAG NEGATIVE / FALSE POSITIVE MODAL */}
+      {flagModalLog && (
+        <div className="radar-modal-overlay" onClick={() => !isSubmittingFlag && setFlagModalLog(null)}>
+          <div className="radar-modal-dialog flag-negative-dialog" onClick={e => e.stopPropagation()}>
+            <div className="radar-modal-header danger-header">
+              <div className="modal-title-with-badge">
+                <Ban size={20} className="danger-icon" />
+                <h3>Marcar como Falso Positivo / Bloquear</h3>
+              </div>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => !isSubmittingFlag && setFlagModalLog(null)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="radar-modal-body">
+              <div className="flag-lead-context-box">
+                <div className="flag-context-header">
+                  <span className="client-badge">{flagModalLog.clientName}</span>
+                  <span className="group-badge">{flagModalLog.groupName || flagModalLog.groupId}</span>
+                  <span className="time-badge">
+                    {new Date(flagModalLog.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+                <div className="flag-context-message">
+                  "{flagModalLog.messageText}"
+                </div>
+              </div>
+
+              <div className="flag-options-section">
+                <h4 className="flag-section-title">1. Teléfonos a bloquear (0 ms)</h4>
+                {flagModalLog.buyerPhone && (
+                  <label className="checkbox-custom-label block-option-row">
+                    <input
+                      type="checkbox"
+                      checked={flagBlockPhone}
+                      onChange={e => setFlagBlockPhone(e.target.checked)}
+                    />
+                    <span className="block-option-text">
+                      <strong>Bloquear emisor de WhatsApp:</strong> +{flagModalLog.buyerPhone}
+                    </span>
+                  </label>
+                )}
+
+                {flagExtraPhones.length > 0 && (
+                  <div className="extra-phones-list">
+                    <span className="sub-instruction">
+                      Teléfono(s) comercial(es) detectado(s) dentro del mensaje:
+                    </span>
+                    {flagExtraPhones.map(phone => (
+                      <label key={phone} className="checkbox-custom-label block-option-row secondary-phone">
+                        <input
+                          type="checkbox"
+                          checked={flagSelectedExtraPhones.includes(phone)}
+                          onChange={() => handleToggleExtraPhone(phone)}
+                        />
+                        <span className="block-option-text">
+                          <strong>Bloquear número de contacto:</strong> +{phone}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+
+                <h4 className="flag-section-title mt-4">2. Frase o palabra negativa a bloquear (opcional)</h4>
+                <div className="form-group mb-2">
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Ej: vendo cuenta, delivery gratis, carta disponible, lista de precios..."
+                    value={flagNegativePhrase}
+                    onChange={e => setFlagNegativePhrase(e.target.value)}
+                  />
+                  <small className="field-tip">
+                    Cualquier mensaje futuro que contenga esta frase será descartado al instante (0 ms) sin costo de IA.
+                  </small>
+                </div>
+
+                <h4 className="flag-section-title mt-4">3. Alcance del bloqueo</h4>
+                <div className="scope-radio-group">
+                  <label className="radio-custom-label">
+                    <input
+                      type="radio"
+                      name="flagScope"
+                      value="client"
+                      checked={flagBlockScope === 'client'}
+                      onChange={() => setFlagBlockScope('client')}
+                    />
+                    <span>Solo para este cliente ({flagModalLog.clientName})</span>
+                  </label>
+                  <label className="radio-custom-label">
+                    <input
+                      type="radio"
+                      name="flagScope"
+                      value="global"
+                      checked={flagBlockScope === 'global'}
+                      onChange={() => setFlagBlockScope('global')}
+                    />
+                    <span>Bloqueo Global (aplica para TODOS los clientes del Radar)</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div className="radar-modal-footer">
+              <button
+                type="button"
+                className="radar-btn-outline"
+                disabled={isSubmittingFlag}
+                onClick={() => setFlagModalLog(null)}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="radar-btn-danger"
+                disabled={isSubmittingFlag}
+                onClick={handleConfirmFlag}
+              >
+                {isSubmittingFlag ? (
+                  <RefreshCw size={16} className="spinning" />
+                ) : (
+                  <Ban size={16} />
+                )}
+                <span>Confirmar Bloqueo y Marcar Negativo</span>
               </button>
             </div>
           </div>

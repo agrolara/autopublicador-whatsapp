@@ -3,6 +3,7 @@ import {
   matchesKeywords,
   normalizeTextForSearch,
   normalizePhoneDigits,
+  extractPhonesFromText,
 } from './radar-lead.service';
 import { RadarSetting } from './entities/radar-setting.entity';
 import { RadarClient, DEFAULT_RADAR_ALERT_TEMPLATE } from './entities/radar-client.entity';
@@ -404,6 +405,140 @@ describe('RadarLeadService - Unit Tests', () => {
       const res = await service.clearLogs();
       expect(res.success).toBe(true);
       expect(mockLogsRepo.clear).toHaveBeenCalled();
+    });
+  });
+
+  describe('Phone extraction & Blacklist Gate (0 ms Feedback Loop)', () => {
+    it('extracts phone numbers from message text', () => {
+      const text1 = 'Pide al WhatsApp +56953616157 o al 987654321';
+      const phones = extractPhonesFromText(text1);
+      expect(phones).toContain('56953616157');
+      expect(phones).toContain('987654321');
+    });
+
+    it('flags a lead as false positive and blocks phone and negative phrase', async () => {
+      const mockLog = {
+        id: 'log-100',
+        clientId: 'c-1',
+        buyerPhone: '56953616157',
+        messageText: 'Promo imperdible de sushi al +56953616157',
+        status: 'DISPATCHED',
+      };
+      const mockClient = {
+        id: 'c-1',
+        name: 'Pizzería La Mascada',
+        blacklistedSenders: '[]',
+        negativePhrases: '[]',
+      };
+
+      const mockLogsRepo: any = {
+        findOne: jest.fn().mockResolvedValue(mockLog),
+        save: jest.fn().mockResolvedValue(mockLog),
+      };
+      const mockClientsRepo: any = {
+        findOne: jest.fn().mockResolvedValue(mockClient),
+        save: jest.fn().mockResolvedValue(mockClient),
+      };
+      const mockSettingsRepo: any = {
+        findOne: jest.fn().mockResolvedValue({ id: 'default' }),
+      };
+
+      const service = new RadarLeadService(mockSettingsRepo, mockClientsRepo, mockLogsRepo);
+      const res = await service.flagNegativeLead('log-100', {
+        blockPhone: true,
+        extraPhonesToBlock: ['56953616157'],
+        negativePhrase: 'Promo imperdible de sushi',
+        blockScope: 'CLIENT',
+      });
+
+      expect(res.success).toBe(true);
+      expect(mockLog.status).toBe('FALSE_POSITIVE');
+      expect(mockClient.blacklistedSenders).toContain('56953616157');
+      expect(mockClient.negativePhrases).toContain('Promo imperdible de sushi');
+    });
+
+    it('discards message in 0 ms when sender phone or phrase is in blacklist', async () => {
+      const mockClient: RadarClient = {
+        id: 'c-pizza',
+        name: 'Pizzería Mascada',
+        rubroKey: 'pizza',
+        targetPhone: '56993005959',
+        senderSessionId: 'pizzeria',
+        localKeywords: 'pizza,promo',
+        alertTemplate: DEFAULT_RADAR_ALERT_TEMPLATE,
+        active: true,
+        useAiFilter: true,
+        jevPromptCriteria: 'criterio',
+        blacklistedSenders: JSON.stringify(['56953616157']),
+        negativePhrases: JSON.stringify(['sushi icura']),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const mockSetting: RadarSetting = {
+        id: 'default',
+        enabled: true,
+        minTextLength: 8,
+        ignoreMediaWithoutCaption: true,
+        groupFilterMode: 'ALL',
+        groupCategoryKeywords: '',
+        whitelistedGroupIds: '[]',
+        activeScanningSessions: '[]',
+        dedupWindowSeconds: 30,
+        aiSemanticEnabled: true,
+        aiProvider: 'typesafe',
+        typesafeApiKey: 'key',
+        globalBlacklistedSenders: '[]',
+        updatedAt: new Date(),
+      };
+
+      const mockEngine = {
+        getGroups: jest.fn().mockResolvedValue([{ id: 'g1@g.us', name: 'Grupo' }]),
+        sendTextMessage: jest.fn(),
+      };
+      const mockEngineRegistry: any = {
+        get: jest.fn().mockReturnValue(mockEngine),
+        entries: jest.fn().mockReturnValue([['pizzeria', mockEngine]]),
+      };
+
+      const mockClientsRepo: any = {
+        find: jest.fn().mockResolvedValue([mockClient]),
+      };
+      const mockSettingsRepo: any = {
+        findOne: jest.fn().mockResolvedValue(mockSetting),
+      };
+      const mockLogsRepo: any = {
+        create: jest.fn(d => d),
+        save: jest.fn().mockResolvedValue({}),
+      };
+
+      const service = new RadarLeadService(mockSettingsRepo, mockClientsRepo, mockLogsRepo, mockEngineRegistry);
+      await service.reloadCache();
+
+      // Test 1: Sender is blacklisted phone
+      await service.evaluateInbound('pizzeria', {
+        id: 'm-1',
+        from: 'g1@g.us',
+        author: '56953616157@c.us',
+        isGroup: true,
+        fromMe: false,
+        body: 'Hola promo de pizza disponible',
+      });
+
+      // Must not dispatch alert
+      expect(mockEngine.sendTextMessage).not.toHaveBeenCalled();
+
+      // Test 2: Message contains blacklisted phrase
+      await service.evaluateInbound('pizzeria', {
+        id: 'm-2',
+        from: 'g1@g.us',
+        author: '56911223344@c.us',
+        isGroup: true,
+        fromMe: false,
+        body: 'Gran promo de pizza y sushi icura',
+      });
+
+      expect(mockEngine.sendTextMessage).not.toHaveBeenCalled();
     });
   });
 });

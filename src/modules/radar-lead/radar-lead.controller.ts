@@ -10,6 +10,7 @@ import {
   UpdateRadarSettingsDto,
   TestEvaluateDto,
   QueryRadarLogsDto,
+  FlagNegativeLeadDto,
 } from './dto/radar.dto';
 import { RequireRole } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
@@ -120,6 +121,34 @@ export class RadarLeadController {
   @ApiResponse({ status: 200, description: 'Historial eliminado' })
   async clearLogs(): Promise<{ success: boolean }> {
     return this.radarLeadService.clearLogs();
+  }
+
+  @Post('logs/:id/flag-negative')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Marcar lead como Falso Positivo / Negativo y bloquear teléfono/frases' })
+  @ApiParam({ name: 'id', description: 'ID del log de lead' })
+  @ApiResponse({ status: 200, description: 'Lead marcado como falso positivo y lista negra actualizada' })
+  async flagNegativeLead(@Param('id') id: string, @Body() dto: FlagNegativeLeadDto) {
+    return this.radarLeadService.flagNegativeLead(id, dto);
+  }
+
+  @Delete('clients/:id/blacklist/phones/:phone')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Desbloquear un teléfono de la lista negra del cliente' })
+  @ApiParam({ name: 'id', description: 'ID del cliente' })
+  @ApiParam({ name: 'phone', description: 'Teléfono a desbloquear' })
+  @ApiResponse({ status: 200, description: 'Teléfono desbloqueado' })
+  async unblockPhone(@Param('id') id: string, @Param('phone') phone: string) {
+    return this.radarLeadService.unblockPhone(id, phone);
+  }
+
+  @Delete('clients/:id/blacklist/phrases')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Eliminar una frase de la lista negra del cliente' })
+  @ApiParam({ name: 'id', description: 'ID del cliente' })
+  @ApiResponse({ status: 200, description: 'Frase eliminada de lista negra' })
+  async removeNegativePhrase(@Param('id') id: string, @Query('phrase') phrase: string) {
+    return this.radarLeadService.removeNegativePhrase(id, phrase);
   }
 }
 

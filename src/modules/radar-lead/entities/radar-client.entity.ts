@@ -43,6 +43,12 @@ export class RadarClient {
   @Column({ type: 'boolean', default: true })
   active!: boolean;
 
+  @Column({ type: 'text', default: '[]' })
+  blacklistedSenders!: string; // JSON array of blacklisted phone numbers/JIDs
+
+  @Column({ type: 'text', default: '[]' })
+  negativePhrases!: string; // JSON array of negative phrases/keywords
+
   @CreateDateColumn()
   createdAt!: Date;
 

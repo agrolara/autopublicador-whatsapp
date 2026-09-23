@@ -1965,3 +1965,305 @@
   overflow-y: auto;
 }
 
+/* Fast Negative, False Positive & Blacklist Styles */
+.kpi-icon-wrap.false-positive {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.counter-item.false-positive .counter-num {
+  color: #f87171;
+}
+
+.counter-item.blacklist .counter-num {
+  color: #ef4444;
+}
+
+.status-pill.false-positive {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #f87171;
+}
+
+.status-pill.blacklisted {
+  background: rgba(185, 28, 28, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  color: #fca5a5;
+}
+
+.log-row.row-false-positive td {
+  background: rgba(239, 68, 68, 0.03);
+}
+
+.log-row.row-blacklisted td {
+  background: rgba(185, 28, 28, 0.05);
+}
+
+.log-action-cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.radar-btn-flag-negative {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.28rem 0.6rem;
+  border-radius: 6px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #f87171;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.radar-btn-flag-negative:hover {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: #ef4444;
+  color: #fca5a5;
+  transform: translateY(-1px);
+}
+
+.radar-btn-flag-negative.modal-action {
+  padding: 0.6rem 1.15rem;
+  font-size: 0.88rem;
+}
+
+/* Flag Negative Modal */
+.flag-negative-dialog {
+  max-width: 580px;
+}
+
+.danger-header {
+  border-bottom: 1px solid rgba(239, 68, 68, 0.3) !important;
+}
+
+.danger-icon {
+  color: #ef4444;
+}
+
+.flag-lead-context-box {
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid var(--border-color, #334155);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.flag-context-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.flag-context-header .client-badge {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.flag-context-header .group-badge {
+  background: rgba(255, 255, 255, 0.08);
+  color: #cbd5e1;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+
+.flag-context-header .time-badge {
+  color: #94a3b8;
+  font-size: 0.72rem;
+  margin-left: auto;
+}
+
+.flag-context-message {
+  font-size: 0.85rem;
+  color: #e2e8f0;
+  font-style: italic;
+  line-height: 1.4;
+  border-left: 2px solid #ef4444;
+  padding-left: 0.65rem;
+}
+
+.flag-section-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 0.6rem;
+}
+
+.block-option-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 0.65rem 0.85rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.block-option-row:hover {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.block-option-row.secondary-phone {
+  margin-top: 0.4rem;
+}
+
+.block-option-text {
+  font-size: 0.85rem;
+  color: #f1f5f9;
+}
+
+.sub-instruction {
+  display: block;
+  font-size: 0.76rem;
+  color: #cbd5e1;
+  margin: 0.6rem 0 0.3rem 0;
+}
+
+.scope-radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.radio-custom-label {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+  color: #e2e8f0;
+  cursor: pointer;
+  padding: 0.5rem 0.75rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.15s ease;
+}
+
+.radio-custom-label:hover {
+  border-color: rgba(56, 189, 248, 0.4);
+}
+
+.radar-btn-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: linear-gradient(135deg, #ef4444, #b91c1c);
+  color: #ffffff;
+  border: 1px solid #f87171;
+  padding: 0.65rem 1.25rem;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.radar-btn-danger:hover:not(:disabled) {
+  background: linear-gradient(135deg, #dc2626, #991b1b);
+  box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);
+  transform: translateY(-1px);
+}
+
+.radar-btn-danger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Client blacklist management inside edit modal & card */
+.client-blacklist-management {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.06);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.blacklist-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #f87171;
+  margin-bottom: 0.75rem;
+}
+
+.blacklist-subtitle {
+  display: block;
+  font-size: 0.75rem;
+  color: #94a3b8;
+  margin-bottom: 0.35rem;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.blacklist-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.blacklist-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.55rem;
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  border-radius: 6px;
+  font-size: 0.75rem;
+  color: #fca5a5;
+  font-family: monospace;
+}
+
+.blacklist-chip.phrase {
+  font-family: inherit;
+  font-style: italic;
+}
+
+.blacklist-chip button {
+  background: transparent;
+  border: none;
+  color: #fca5a5;
+  font-size: 0.85rem;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.blacklist-chip button:hover {
+  color: #ffffff;
+}
+
+.client-blacklist-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.76rem;
+  color: #f87171;
+  padding: 0.4rem 0.6rem;
+  background: rgba(239, 68, 68, 0.08);
+  border-radius: 6px;
+  margin-top: 0.5rem;
+}
+
+

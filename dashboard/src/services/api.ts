@@ -1718,6 +1718,7 @@ export interface UpdateRadarSettingsPayload {
   aiSemanticEnabled?: boolean;
   aiProvider?: string;
   typesafeApiKey?: string;
+  globalBlacklistedSenders?: string[];
 }
 
 export interface RadarClient {
@@ -1731,6 +1732,8 @@ export interface RadarClient {
   useAiFilter?: boolean;
   alertTemplate: string;
   active: boolean;
+  blacklistedSenders?: string;
+  negativePhrases?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -1745,6 +1748,8 @@ export interface CreateRadarClientPayload {
   useAiFilter?: boolean;
   alertTemplate?: string;
   active?: boolean;
+  blacklistedSenders?: string[];
+  negativePhrases?: string[];
 }
 
 export type UpdateRadarClientPayload = Partial<CreateRadarClientPayload>;
@@ -1780,7 +1785,7 @@ export interface TestRadarResult {
   }>;
 }
 
-export type RadarLeadStatus = 'DISPATCHED' | 'DISCARDED_AI';
+export type RadarLeadStatus = 'DISPATCHED' | 'DISCARDED_AI' | 'FALSE_POSITIVE' | 'DISCARDED_BLACKLIST';
 
 export interface RadarLeadLog {
   id: string;
@@ -1806,7 +1811,9 @@ export interface ClientMetrics {
   totalMatches: number;
   approvedLeads: number;
   discardedAds: number;
+  falsePositives?: number;
   accuracyRate: number;
+  blacklistedCount?: number;
 }
 
 export interface RadarMetricsSummary {
@@ -1814,9 +1821,17 @@ export interface RadarMetricsSummary {
     totalMatches: number;
     approvedLeads: number;
     discardedAds: number;
+    falsePositives?: number;
     accuracyRate: number;
   };
   byClient: ClientMetrics[];
+}
+
+export interface FlagNegativeLeadPayload {
+  blockPhone?: boolean;
+  extraPhonesToBlock?: string[];
+  negativePhrase?: string;
+  blockScope?: 'CLIENT' | 'GLOBAL';
 }
 
 export const radarApi = {
@@ -1862,6 +1877,22 @@ export const radarApi = {
   getMetrics: () => request<RadarMetricsSummary>('/radar/metrics'),
   clearLogs: () =>
     request<{ success: boolean }>('/radar/logs', {
+      method: 'DELETE',
+    }),
+  flagNegative: (logId: string, data: FlagNegativeLeadPayload) =>
+    request<{ success: boolean; log: RadarLeadLog; blacklistedPhones: string[]; blacklistedPhrases: string[] }>(
+      `/radar/logs/${logId}/flag-negative`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    ),
+  unblockPhone: (clientId: string, phone: string) =>
+    request<RadarClient>(`/radar/clients/${clientId}/blacklist/phones/${phone}`, {
+      method: 'DELETE',
+    }),
+  removeNegativePhrase: (clientId: string, phrase: string) =>
+    request<RadarClient>(`/radar/clients/${clientId}/blacklist/phrases?phrase=${encodeURIComponent(phrase)}`, {
       method: 'DELETE',
     }),
 };

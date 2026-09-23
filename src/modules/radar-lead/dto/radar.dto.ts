@@ -63,6 +63,12 @@ export class UpdateRadarSettingsDto {
   @IsOptional()
   @IsString()
   typesafeApiKey?: string;
+
+  @ApiPropertyOptional({ description: 'Lista negra global de teléfonos emisores a descartar en 0 ms', type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  globalBlacklistedSenders?: string[];
 }
 
 export class CreateRadarClientDto {
@@ -106,6 +112,18 @@ export class CreateRadarClientDto {
   @IsOptional()
   @IsBoolean()
   active?: boolean;
+
+  @ApiPropertyOptional({ description: 'Lista de teléfonos emisores bloqueados para este cliente', type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  blacklistedSenders?: string[];
+
+  @ApiPropertyOptional({ description: 'Lista de frases/palabras clave negativas a auto-descartar', type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  negativePhrases?: string[];
 }
 
 export class UpdateRadarClientDto {
@@ -153,6 +171,18 @@ export class UpdateRadarClientDto {
   @IsOptional()
   @IsBoolean()
   active?: boolean;
+
+  @ApiPropertyOptional({ description: 'Lista de teléfonos emisores bloqueados para este cliente', type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  blacklistedSenders?: string[];
+
+  @ApiPropertyOptional({ description: 'Lista de frases/palabras clave negativas a auto-descartar', type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  negativePhrases?: string[];
 }
 
 export class TestEvaluateDto {
@@ -191,10 +221,33 @@ export class QueryRadarLogsDto {
   @IsString()
   clientId?: string;
 
-  @ApiPropertyOptional({ description: 'Filtrar por estado: DISPATCHED o DISCARDED_AI' })
+  @ApiPropertyOptional({ description: 'Filtrar por estado: DISPATCHED, DISCARDED_AI o FALSE_POSITIVE' })
   @IsOptional()
   @IsString()
   status?: string;
+}
+
+export class FlagNegativeLeadDto {
+  @ApiPropertyOptional({ description: 'Bloquear el teléfono del remitente del mensaje', default: true })
+  @IsOptional()
+  @IsBoolean()
+  blockPhone?: boolean;
+
+  @ApiPropertyOptional({ description: 'Otros teléfonos encontrados en el texto a bloquear', type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  extraPhonesToBlock?: string[];
+
+  @ApiPropertyOptional({ description: 'Frase o texto a agregar a la lista de auto-descarte' })
+  @IsOptional()
+  @IsString()
+  negativePhrase?: string;
+
+  @ApiPropertyOptional({ description: 'Alcance del bloqueo: CLIENT (solo este cliente) o GLOBAL (todos los clientes)', default: 'CLIENT' })
+  @IsOptional()
+  @IsString()
+  blockScope?: 'CLIENT' | 'GLOBAL';
 }
 
 export interface ClientMetricsDto {
@@ -204,7 +257,9 @@ export interface ClientMetricsDto {
   totalMatches: number;
   approvedLeads: number;
   discardedAds: number;
+  falsePositives: number;
   accuracyRate: number;
+  blacklistedCount: number;
 }
 
 export interface RadarMetricsSummaryDto {
@@ -212,6 +267,7 @@ export interface RadarMetricsSummaryDto {
     totalMatches: number;
     approvedLeads: number;
     discardedAds: number;
+    falsePositives: number;
     accuracyRate: number;
   };
   byClient: ClientMetricsDto[];

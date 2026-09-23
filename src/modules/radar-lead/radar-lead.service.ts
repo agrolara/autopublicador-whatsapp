@@ -7,7 +7,7 @@ import * as crypto from 'crypto';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { RadarSetting, GroupFilterMode } from './entities/radar-setting.entity';
 import { RadarClient, DEFAULT_RADAR_ALERT_TEMPLATE } from './entities/radar-client.entity';
-import { RadarLeadLog } from './entities/radar-lead-log.entity';
+import { RadarLeadLog, RadarLeadStatus } from './entities/radar-lead-log.entity';
 import {
   CreateRadarClientDto,
   UpdateRadarClientDto,
@@ -16,6 +16,7 @@ import {
   QueryRadarLogsDto,
   RadarMetricsSummaryDto,
   ClientMetricsDto,
+  FlagNegativeLeadDto,
 } from './dto/radar.dto';
 
 export function normalizeTextForSearch(str: string): string {
@@ -60,6 +61,13 @@ export function normalizePhoneDigits(phone: string): string {
     str = str.split('@')[0].split(':')[0];
   }
   return str.replace(/[^0-9]/g, '');
+}
+
+export function extractPhonesFromText(text: string): string[] {
+  if (!text) return [];
+  const matches = text.match(/(?:\+?56\s?9\s?\d{4}\s?\d{4}|\+?56\s?9\d{8}|9\d{8}|\+?\d{9,15})/g) || [];
+  const cleaned = matches.map((m) => normalizePhoneDigits(m)).filter((p) => p.length >= 8);
+  return Array.from(new Set(cleaned));
 }
 
 export const DEFAULT_TYPESAFE_API_KEY =
@@ -260,6 +268,7 @@ export class RadarLeadService implements OnModuleInit {
           aiSemanticEnabled BOOLEAN NOT NULL DEFAULT 1,
           aiProvider VARCHAR(32) NOT NULL DEFAULT 'typesafe',
           typesafeApiKey TEXT NOT NULL DEFAULT '',
+          globalBlacklistedSenders TEXT NOT NULL DEFAULT '[]',
           updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
         )
       `).catch(() => {});
@@ -276,6 +285,8 @@ export class RadarLeadService implements OnModuleInit {
           useAiFilter BOOLEAN NOT NULL DEFAULT 1,
           alertTemplate TEXT NOT NULL,
           active BOOLEAN NOT NULL DEFAULT 1,
+          blacklistedSenders TEXT NOT NULL DEFAULT '[]',
+          negativePhrases TEXT NOT NULL DEFAULT '[]',
           createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
           updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
         )
@@ -308,7 +319,10 @@ export class RadarLeadService implements OnModuleInit {
       await this.settingsRepo.query(`ALTER TABLE radar_settings ADD COLUMN aiSemanticEnabled BOOLEAN NOT NULL DEFAULT 1`).catch(() => {});
       await this.settingsRepo.query(`ALTER TABLE radar_settings ADD COLUMN aiProvider VARCHAR(32) NOT NULL DEFAULT 'typesafe'`).catch(() => {});
       await this.settingsRepo.query(`ALTER TABLE radar_settings ADD COLUMN typesafeApiKey TEXT NOT NULL DEFAULT ''`).catch(() => {});
+      await this.settingsRepo.query(`ALTER TABLE radar_settings ADD COLUMN globalBlacklistedSenders TEXT NOT NULL DEFAULT '[]'`).catch(() => {});
       await this.clientsRepo.query(`ALTER TABLE radar_clients ADD COLUMN useAiFilter BOOLEAN NOT NULL DEFAULT 1`).catch(() => {});
+      await this.clientsRepo.query(`ALTER TABLE radar_clients ADD COLUMN blacklistedSenders TEXT NOT NULL DEFAULT '[]'`).catch(() => {});
+      await this.clientsRepo.query(`ALTER TABLE radar_clients ADD COLUMN negativePhrases TEXT NOT NULL DEFAULT '[]'`).catch(() => {});
 
       let defaultSetting = await this.settingsRepo.findOne({ where: { id: 'default' } });
       if (!defaultSetting) {
@@ -436,6 +450,45 @@ export class RadarLeadService implements OnModuleInit {
       for (const client of this.cachedActiveClients) {
         const { matched, matchedKeyword } = matchesKeywords(text, client.localKeywords);
         if (!matched) continue;
+
+        // 0 ms Gate 8.5: Blacklist Gate (Sender Phone, Extracted Phones & Negative Phrases)
+        const globalBlockedPhones: string[] = this.parseJsonArray(settings.globalBlacklistedSenders);
+        const clientBlockedPhones: string[] = this.parseJsonArray(client.blacklistedSenders);
+        const clientNegativePhrases: string[] = this.parseJsonArray(client.negativePhrases);
+        const extractedPhones = extractPhonesFromText(text);
+        const allCandidatePhones = [buyerPhoneDigits, ...extractedPhones].filter(Boolean);
+
+        const isPhoneBlocked = allCandidatePhones.some(
+          (p) => globalBlockedPhones.includes(p) || clientBlockedPhones.includes(p),
+        );
+
+        const normalizedMessageText = normalizeTextForSearch(text);
+        const isPhraseBlocked = clientNegativePhrases.some((phrase) => {
+          const normPhrase = normalizeTextForSearch(phrase);
+          return normPhrase && normalizedMessageText.includes(normPhrase);
+        });
+
+        if (isPhoneBlocked || isPhraseBlocked) {
+          const reason = isPhoneBlocked
+            ? 'Emisor o teléfono en mensaje bloqueado por lista negra'
+            : 'Contiene frase prohibida en lista negra';
+          this.logger.log(`[Radar Lead] DISCARDED in 0ms by Blacklist for client "${client.name}". Motivo: ${reason}`);
+          await this.recordLog({
+            clientId: client.id,
+            clientName: client.name,
+            rubroKey: client.rubroKey,
+            sessionId,
+            groupId,
+            groupName: groupName || groupId,
+            buyerPhone: buyerPhoneDigits,
+            messageText: text,
+            matchedKeyword: matchedKeyword || '',
+            aiEvaluated: false,
+            aiScore: 0.0,
+            status: 'DISCARDED_AI',
+          });
+          continue;
+        }
 
         // 0 ms Gate 9: Semantic AI Validation (Anti-vendedores / Intención de compra)
         const isAiEnabled =
@@ -663,6 +716,9 @@ export class RadarLeadService implements OnModuleInit {
     if (dto.aiSemanticEnabled !== undefined) settings.aiSemanticEnabled = dto.aiSemanticEnabled;
     if (dto.aiProvider !== undefined) settings.aiProvider = dto.aiProvider;
     if (dto.typesafeApiKey !== undefined) settings.typesafeApiKey = dto.typesafeApiKey;
+    if (dto.globalBlacklistedSenders !== undefined) {
+      settings.globalBlacklistedSenders = JSON.stringify(dto.globalBlacklistedSenders);
+    }
 
     const saved = await this.settingsRepo.save(settings);
     await this.reloadCache();
@@ -692,6 +748,8 @@ export class RadarLeadService implements OnModuleInit {
       useAiFilter: dto.useAiFilter ?? true,
       alertTemplate: dto.alertTemplate || DEFAULT_RADAR_ALERT_TEMPLATE,
       active: dto.active ?? true,
+      blacklistedSenders: dto.blacklistedSenders ? JSON.stringify(dto.blacklistedSenders) : '[]',
+      negativePhrases: dto.negativePhrases ? JSON.stringify(dto.negativePhrases) : '[]',
     });
     const saved = await this.clientsRepo.save(client);
     await this.reloadCache();
@@ -717,6 +775,12 @@ export class RadarLeadService implements OnModuleInit {
     if (dto.useAiFilter !== undefined) client.useAiFilter = dto.useAiFilter;
     if (dto.alertTemplate !== undefined) client.alertTemplate = dto.alertTemplate;
     if (dto.active !== undefined) client.active = dto.active;
+    if (dto.blacklistedSenders !== undefined) {
+      client.blacklistedSenders = JSON.stringify(dto.blacklistedSenders);
+    }
+    if (dto.negativePhrases !== undefined) {
+      client.negativePhrases = JSON.stringify(dto.negativePhrases);
+    }
 
     const saved = await this.clientsRepo.save(client);
     await this.reloadCache();
@@ -832,12 +896,38 @@ export class RadarLeadService implements OnModuleInit {
           reason: 'Filtro semántico IA no configurado (Aprobado por palabras clave)',
         };
 
+        // Gate 8.5: Blacklist Check
+        const globalBlockedPhones: string[] = this.parseJsonArray(settings.globalBlacklistedSenders);
+        const clientBlockedPhones: string[] = this.parseJsonArray(client.blacklistedSenders);
+        const clientNegativePhrases: string[] = this.parseJsonArray(client.negativePhrases);
+        const extractedPhones = extractPhonesFromText(text);
+        const allCandidatePhones = [buyerPhone, ...extractedPhones].filter(Boolean);
+
+        const isPhoneBlocked = allCandidatePhones.some(
+          (p) => globalBlockedPhones.includes(p) || clientBlockedPhones.includes(p),
+        );
+        const normalizedMessageText = normalizeTextForSearch(text);
+        const isPhraseBlocked = clientNegativePhrases.some((phrase) => {
+          const normPhrase = normalizeTextForSearch(phrase);
+          return normPhrase && normalizedMessageText.includes(normPhrase);
+        });
+
         const isAiEnabled =
           (settings.aiSemanticEnabled ?? true) &&
           (client.useAiFilter ?? true) &&
           Boolean(client.jevPromptCriteria?.trim());
 
-        if (isAiEnabled) {
+        if (isPhoneBlocked || isPhraseBlocked) {
+          const reason = isPhoneBlocked
+            ? 'Emisor o teléfono en lista negra'
+            : 'Contiene frase prohibida en lista negra';
+          aiEvaluation = {
+            evaluated: false,
+            passed: false,
+            score: 0.0,
+            reason: `Descarte en 0 ms por Lista Negra: ${reason}`,
+          };
+        } else if (isAiEnabled) {
           const effectiveKey = (settings.typesafeApiKey || '').trim() || DEFAULT_TYPESAFE_API_KEY;
           const aiCheck = await evaluateSemanticCriteriaWithTypeSafe(
             text,
@@ -909,7 +999,7 @@ export class RadarLeadService implements OnModuleInit {
     matchedKeyword: string;
     aiEvaluated: boolean;
     aiScore?: number | null;
-    status: 'DISPATCHED' | 'DISCARDED_AI';
+    status: RadarLeadStatus;
   }): Promise<void> {
     if (!this.logsRepo) return;
     try {
@@ -954,7 +1044,7 @@ export class RadarLeadService implements OnModuleInit {
     const allClients = await this.clientsRepo.find({ order: { name: 'ASC' } });
     if (!this.logsRepo) {
       return {
-        global: { totalMatches: 0, approvedLeads: 0, discardedAds: 0, accuracyRate: 0 },
+        global: { totalMatches: 0, approvedLeads: 0, discardedAds: 0, falsePositives: 0, accuracyRate: 0 },
         byClient: allClients.map((c) => ({
           clientId: c.id,
           clientName: c.name,
@@ -962,7 +1052,9 @@ export class RadarLeadService implements OnModuleInit {
           totalMatches: 0,
           approvedLeads: 0,
           discardedAds: 0,
+          falsePositives: 0,
           accuracyRate: 0,
+          blacklistedCount: 0,
         })),
       };
     }
@@ -974,30 +1066,38 @@ export class RadarLeadService implements OnModuleInit {
     let globalMatches = logs.length;
     let globalApproved = 0;
     let globalDiscarded = 0;
+    let globalFalsePositives = 0;
 
-    const clientMap = new Map<string, { totalMatches: number; approvedLeads: number; discardedAds: number }>();
+    const clientMap = new Map<
+      string,
+      { totalMatches: number; approvedLeads: number; discardedAds: number; falsePositives: number }
+    >();
     for (const c of allClients) {
-      clientMap.set(c.id, { totalMatches: 0, approvedLeads: 0, discardedAds: 0 });
+      clientMap.set(c.id, { totalMatches: 0, approvedLeads: 0, discardedAds: 0, falsePositives: 0 });
     }
 
     for (const l of logs) {
       if (l.status === 'DISPATCHED') {
         globalApproved++;
-      } else if (l.status === 'DISCARDED_AI') {
+      } else if (l.status === 'DISCARDED_AI' || l.status === 'DISCARDED_BLACKLIST') {
         globalDiscarded++;
+      } else if (l.status === 'FALSE_POSITIVE') {
+        globalFalsePositives++;
       }
 
       if (l.clientId) {
         let stats = clientMap.get(l.clientId);
         if (!stats) {
-          stats = { totalMatches: 0, approvedLeads: 0, discardedAds: 0 };
+          stats = { totalMatches: 0, approvedLeads: 0, discardedAds: 0, falsePositives: 0 };
           clientMap.set(l.clientId, stats);
         }
         stats.totalMatches++;
         if (l.status === 'DISPATCHED') {
           stats.approvedLeads++;
-        } else if (l.status === 'DISCARDED_AI') {
+        } else if (l.status === 'DISCARDED_AI' || l.status === 'DISCARDED_BLACKLIST') {
           stats.discardedAds++;
+        } else if (l.status === 'FALSE_POSITIVE') {
+          stats.falsePositives++;
         }
       }
     }
@@ -1005,8 +1105,10 @@ export class RadarLeadService implements OnModuleInit {
     const globalAccuracy = globalMatches > 0 ? Number(((globalApproved / globalMatches) * 100).toFixed(1)) : 0;
 
     const byClient: ClientMetricsDto[] = allClients.map((c) => {
-      const stats = clientMap.get(c.id) || { totalMatches: 0, approvedLeads: 0, discardedAds: 0 };
+      const stats = clientMap.get(c.id) || { totalMatches: 0, approvedLeads: 0, discardedAds: 0, falsePositives: 0 };
       const accuracy = stats.totalMatches > 0 ? Number(((stats.approvedLeads / stats.totalMatches) * 100).toFixed(1)) : 0;
+      const blockedPhones = this.parseJsonArray(c.blacklistedSenders);
+      const negPhrases = this.parseJsonArray(c.negativePhrases);
       return {
         clientId: c.id,
         clientName: c.name,
@@ -1014,7 +1116,9 @@ export class RadarLeadService implements OnModuleInit {
         totalMatches: stats.totalMatches,
         approvedLeads: stats.approvedLeads,
         discardedAds: stats.discardedAds,
+        falsePositives: stats.falsePositives,
         accuracyRate: accuracy,
+        blacklistedCount: blockedPhones.length + negPhrases.length,
       };
     });
 
@@ -1023,10 +1127,116 @@ export class RadarLeadService implements OnModuleInit {
         totalMatches: globalMatches,
         approvedLeads: globalApproved,
         discardedAds: globalDiscarded,
+        falsePositives: globalFalsePositives,
         accuracyRate: globalAccuracy,
       },
       byClient,
     };
+  }
+
+  /**
+   * Flags a lead as false positive and dynamically adds phones/phrases to blacklist.
+   */
+  async flagNegativeLead(
+    logId: string,
+    dto: FlagNegativeLeadDto,
+  ): Promise<{ success: boolean; log: RadarLeadLog; blacklistedPhones: string[]; blacklistedPhrases: string[] }> {
+    if (!this.logsRepo) {
+      throw new BadRequestException('Logs repository not available');
+    }
+    const log = await this.logsRepo.findOne({ where: { id: logId } });
+    if (!log) {
+      throw new NotFoundException(`Lead log with id ${logId} not found`);
+    }
+
+    log.status = 'FALSE_POSITIVE';
+    await this.logsRepo.save(log);
+
+    const addedPhones: string[] = [];
+    if (dto.blockPhone !== false && log.buyerPhone) {
+      const norm = normalizePhoneDigits(log.buyerPhone);
+      if (norm) addedPhones.push(norm);
+    }
+    if (Array.isArray(dto.extraPhonesToBlock)) {
+      for (const p of dto.extraPhonesToBlock) {
+        const norm = normalizePhoneDigits(p);
+        if (norm) addedPhones.push(norm);
+      }
+    }
+
+    // Auto-extract from text if no phones provided
+    if (addedPhones.length === 0 && log.messageText) {
+      const extracted = extractPhonesFromText(log.messageText);
+      addedPhones.push(...extracted);
+    }
+
+    const uniquePhones = Array.from(new Set(addedPhones));
+    const addedPhrases: string[] = [];
+    if (dto.negativePhrase && dto.negativePhrase.trim()) {
+      addedPhrases.push(dto.negativePhrase.trim());
+    }
+
+    if (dto.blockScope === 'GLOBAL') {
+      const settings = await this.getSettings();
+      const currentGlobal: string[] = this.parseJsonArray(settings.globalBlacklistedSenders);
+      for (const p of uniquePhones) {
+        if (!currentGlobal.includes(p)) currentGlobal.push(p);
+      }
+      settings.globalBlacklistedSenders = JSON.stringify(currentGlobal);
+      await this.settingsRepo.save(settings);
+    } else if (log.clientId) {
+      const client = await this.getClientById(log.clientId);
+      if (client) {
+        const currentClientPhones: string[] = this.parseJsonArray(client.blacklistedSenders);
+        for (const p of uniquePhones) {
+          if (!currentClientPhones.includes(p)) currentClientPhones.push(p);
+        }
+        client.blacklistedSenders = JSON.stringify(currentClientPhones);
+
+        if (addedPhrases.length > 0) {
+          const currentPhrases: string[] = this.parseJsonArray(client.negativePhrases);
+          for (const phr of addedPhrases) {
+            if (!currentPhrases.includes(phr)) currentPhrases.push(phr);
+          }
+          client.negativePhrases = JSON.stringify(currentPhrases);
+        }
+
+        await this.clientsRepo.save(client);
+      }
+    }
+
+    await this.reloadCache();
+    await this.syncBackup();
+
+    return {
+      success: true,
+      log,
+      blacklistedPhones: uniquePhones,
+      blacklistedPhrases: addedPhrases,
+    };
+  }
+
+  async unblockPhone(clientId: string, phone: string): Promise<RadarClient> {
+    const client = await this.getClientById(clientId);
+    if (!client) throw new NotFoundException('Client not found');
+    const norm = normalizePhoneDigits(phone);
+    const phones: string[] = this.parseJsonArray(client.blacklistedSenders);
+    client.blacklistedSenders = JSON.stringify(phones.filter((p) => p !== norm));
+    const saved = await this.clientsRepo.save(client);
+    await this.reloadCache();
+    await this.syncBackup();
+    return saved;
+  }
+
+  async removeNegativePhrase(clientId: string, phrase: string): Promise<RadarClient> {
+    const client = await this.getClientById(clientId);
+    if (!client) throw new NotFoundException('Client not found');
+    const phrases: string[] = this.parseJsonArray(client.negativePhrases);
+    client.negativePhrases = JSON.stringify(phrases.filter((p) => p.toLowerCase() !== phrase.toLowerCase()));
+    const saved = await this.clientsRepo.save(client);
+    await this.reloadCache();
+    await this.syncBackup();
+    return saved;
   }
 
   /**
