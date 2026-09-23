@@ -776,10 +776,14 @@ export class RadarLeadService implements OnModuleInit {
     if (dto.alertTemplate !== undefined) client.alertTemplate = dto.alertTemplate;
     if (dto.active !== undefined) client.active = dto.active;
     if (dto.blacklistedSenders !== undefined) {
-      client.blacklistedSenders = JSON.stringify(dto.blacklistedSenders);
+      client.blacklistedSenders = Array.isArray(dto.blacklistedSenders)
+        ? JSON.stringify(dto.blacklistedSenders)
+        : String(dto.blacklistedSenders);
     }
     if (dto.negativePhrases !== undefined) {
-      client.negativePhrases = JSON.stringify(dto.negativePhrases);
+      client.negativePhrases = Array.isArray(dto.negativePhrases)
+        ? JSON.stringify(dto.negativePhrases)
+        : String(dto.negativePhrases);
     }
 
     const saved = await this.clientsRepo.save(client);
@@ -1252,7 +1256,12 @@ export class RadarLeadService implements OnModuleInit {
   private parseJsonArray(str: string | null | undefined): string[] {
     if (!str) return [];
     try {
-      const parsed = JSON.parse(str);
+      let parsed = JSON.parse(str);
+      if (typeof parsed === 'string') {
+        try {
+          parsed = JSON.parse(parsed);
+        } catch {}
+      }
       return Array.isArray(parsed) ? parsed : [];
     } catch {
       return [];
