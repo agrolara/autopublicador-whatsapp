@@ -118,8 +118,14 @@ export function RadarLeads() {
     setLoading(true);
     try {
       const [fetchedSettings, fetchedClients, fetchedGroups, fetchedSessions] = await Promise.all([
-        radarApi.getSettings().catch(() => null),
-        radarApi.getClients().catch(() => []),
+        radarApi.getSettings().catch(err => {
+          console.error('Error al obtener configuración del radar:', err);
+          return null;
+        }),
+        radarApi.getClients().catch(err => {
+          console.error('Error al obtener clientes del radar:', err);
+          return null;
+        }),
         radarApi.getGroups().catch(() => []),
         sessionApi.list().catch(() => []),
       ]);
@@ -139,7 +145,9 @@ export function RadarLeads() {
           typesafeApiKey: fetchedSettings.typesafeApiKey || '',
         });
       }
-      setClients(fetchedClients);
+      if (fetchedClients !== null) {
+        setClients(fetchedClients);
+      }
       setAvailableGroups(fetchedGroups);
       setSessions(fetchedSessions);
     } catch {
@@ -256,6 +264,10 @@ export function RadarLeads() {
 
   // Delete Client
   const handleDeleteClient = async (id: string, name: string) => {
+    if (!id || typeof id !== 'string' || !id.trim() || id === 'undefined' || id === 'null') {
+      showToast('error', 'Identificador de cliente no válido.');
+      return;
+    }
     if (!window.confirm(`¿Estás seguro de eliminar al cliente "${name}"?`)) return;
     try {
       await radarApi.deleteClient(id);
@@ -470,14 +482,26 @@ export function RadarLeads() {
                 onChange={e => setClientSearch(e.target.value)}
               />
             </div>
-            <button
-              type="button"
-              className="radar-primary-btn"
-              onClick={() => handleOpenClientModal()}
-            >
-              <Plus size={18} />
-              <span>Nuevo Cliente / Rubro</span>
-            </button>
+            <div className="radar-toolbar-actions">
+              <button
+                type="button"
+                className="radar-btn-outline"
+                onClick={loadAllData}
+                disabled={loading}
+                title="Recargar datos del servidor"
+              >
+                <RefreshCw size={16} className={loading ? 'spinning' : ''} />
+                <span>Refrescar</span>
+              </button>
+              <button
+                type="button"
+                className="radar-primary-btn"
+                onClick={() => handleOpenClientModal()}
+              >
+                <Plus size={18} />
+                <span>Nuevo Cliente / Rubro</span>
+              </button>
+            </div>
           </div>
 
           {loading ? (

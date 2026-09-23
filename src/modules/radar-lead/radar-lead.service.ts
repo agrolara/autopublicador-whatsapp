@@ -1,6 +1,8 @@
-import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import * as fs from 'fs';
+import * as path from 'path';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { RadarSetting, GroupFilterMode } from './entities/radar-setting.entity';
 import { RadarClient, DEFAULT_RADAR_ALERT_TEMPLATE } from './entities/radar-client.entity';
@@ -135,6 +137,9 @@ export class RadarLeadService implements OnModuleInit {
   private readonly groupNameCache = new Map<string, string>();
   private readonly dedupCache = new Map<string, number>();
 
+  private readonly clientsBackupPath = path.join(process.cwd(), 'data', 'radar_clients.json');
+  private readonly settingsBackupPath = path.join(process.cwd(), 'data', 'radar_settings.json');
+
   constructor(
     @InjectRepository(RadarSetting, 'data')
     private readonly settingsRepo: Repository<RadarSetting>,
@@ -146,7 +151,75 @@ export class RadarLeadService implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     await this.ensureTables();
+    await this.restoreFromBackup();
     await this.reloadCache();
+    await this.syncBackup();
+  }
+
+  /**
+   * Synchronizes radar clients and settings to persistent JSON backup files in data/
+   * so they are never lost even if the SQLite database is re-initialized or corrupted.
+   */
+  async syncBackup(): Promise<void> {
+    try {
+      const dataDir = path.join(process.cwd(), 'data');
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+      }
+
+      // Snapshot all clients
+      const clients = await this.clientsRepo.find({ order: { createdAt: 'DESC' } });
+      fs.writeFileSync(this.clientsBackupPath, JSON.stringify(clients, null, 2), 'utf8');
+
+      // Snapshot global settings
+      const settings = await this.settingsRepo.findOne({ where: { id: 'default' } });
+      if (settings) {
+        fs.writeFileSync(this.settingsBackupPath, JSON.stringify(settings, null, 2), 'utf8');
+      }
+    } catch (err) {
+      this.logger.warn('Failed to sync radar backup files', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  /**
+   * Restores clients and settings from persistent JSON backup files if the database table is empty.
+   */
+  async restoreFromBackup(): Promise<void> {
+    try {
+      // 1. Restore clients if table is empty
+      if (fs.existsSync(this.clientsBackupPath)) {
+        const raw = fs.readFileSync(this.clientsBackupPath, 'utf8');
+        const backupClients: RadarClient[] = JSON.parse(raw);
+        if (Array.isArray(backupClients) && backupClients.length > 0) {
+          const currentCount = await this.clientsRepo.count();
+          if (currentCount === 0) {
+            this.logger.log(`Restaurando ${backupClients.length} clientes del Radar desde archivo de respaldo...`);
+            for (const item of backupClients) {
+              const entity = this.clientsRepo.create(item);
+              await this.clientsRepo.save(entity).catch(() => {});
+            }
+          }
+        }
+      }
+
+      // 2. Restore settings if missing
+      if (fs.existsSync(this.settingsBackupPath)) {
+        const raw = fs.readFileSync(this.settingsBackupPath, 'utf8');
+        const backupSettings: Partial<RadarSetting> = JSON.parse(raw);
+        const currentSetting = await this.settingsRepo.findOne({ where: { id: 'default' } });
+        if (!currentSetting && backupSettings) {
+          this.logger.log('Restaurando configuración del Radar desde archivo de respaldo...');
+          const entity = this.settingsRepo.create(backupSettings);
+          await this.settingsRepo.save(entity).catch(() => {});
+        }
+      }
+    } catch (err) {
+      this.logger.warn('Failed to restore radar from backup files', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   /**
@@ -516,6 +589,7 @@ export class RadarLeadService implements OnModuleInit {
 
     const saved = await this.settingsRepo.save(settings);
     await this.reloadCache();
+    await this.syncBackup();
     return saved;
   }
 
@@ -524,6 +598,9 @@ export class RadarLeadService implements OnModuleInit {
   }
 
   async getClientById(id: string): Promise<RadarClient | null> {
+    if (!id || typeof id !== 'string' || !id.trim() || id === 'undefined' || id === 'null') {
+      return null;
+    }
     return this.clientsRepo.findOne({ where: { id } });
   }
 
@@ -541,13 +618,17 @@ export class RadarLeadService implements OnModuleInit {
     });
     const saved = await this.clientsRepo.save(client);
     await this.reloadCache();
+    await this.syncBackup();
     return saved;
   }
 
   async updateClient(id: string, dto: UpdateRadarClientDto): Promise<RadarClient> {
+    if (!id || typeof id !== 'string' || !id.trim() || id === 'undefined' || id === 'null') {
+      throw new BadRequestException('ID de cliente inválido');
+    }
     const client = await this.clientsRepo.findOne({ where: { id } });
     if (!client) {
-      throw new Error(`Radar client with id ${id} not found`);
+      throw new NotFoundException(`Radar client with id ${id} not found`);
     }
 
     if (dto.name !== undefined) client.name = dto.name;
@@ -562,23 +643,33 @@ export class RadarLeadService implements OnModuleInit {
 
     const saved = await this.clientsRepo.save(client);
     await this.reloadCache();
+    await this.syncBackup();
     return saved;
   }
 
   async deleteClient(id: string): Promise<boolean> {
-    const result = await this.clientsRepo.delete({ id });
+    if (!id || typeof id !== 'string' || !id.trim() || id === 'undefined' || id === 'null') {
+      throw new BadRequestException('ID de cliente inválido para eliminación');
+    }
+    // Delete passing primary key string directly to prevent TypeORM from stripping undefined fields into a table wipe
+    const result = await this.clientsRepo.delete(id);
     await this.reloadCache();
+    await this.syncBackup();
     return (result.affected ?? 0) > 0;
   }
 
   async toggleClient(id: string): Promise<RadarClient> {
+    if (!id || typeof id !== 'string' || !id.trim() || id === 'undefined' || id === 'null') {
+      throw new BadRequestException('ID de cliente inválido');
+    }
     const client = await this.clientsRepo.findOne({ where: { id } });
     if (!client) {
-      throw new Error(`Radar client with id ${id} not found`);
+      throw new NotFoundException(`Radar client with id ${id} not found`);
     }
     client.active = !client.active;
     const saved = await this.clientsRepo.save(client);
     await this.reloadCache();
+    await this.syncBackup();
     return saved;
   }
 
