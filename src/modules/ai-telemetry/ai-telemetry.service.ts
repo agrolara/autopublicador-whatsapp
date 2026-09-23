@@ -41,39 +41,75 @@ export class AiTelemetryService implements OnModuleInit {
 
   private async ensureTables() {
     try {
-      await this.budgetConfigRepo.query(`
-        CREATE TABLE IF NOT EXISTS ai_budget_configs (
-          id VARCHAR(32) PRIMARY KEY DEFAULT 'default',
-          groqInitialBalance FLOAT NOT NULL DEFAULT 5.0,
-          typesafeInitialBalance FLOAT NOT NULL DEFAULT 5.0,
-          openrouterInitialBalance FLOAT NOT NULL DEFAULT 10.0,
-          costAlertThresholdUsd FLOAT NOT NULL DEFAULT 1.0,
-          openrouterApiKeyOverride VARCHAR(255) NULL,
-          groqApiKeyOverride VARCHAR(255) NULL,
-          typesafeApiKeyOverride VARCHAR(255) NULL,
-          updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-      `).catch(() => {});
+      const isPostgres = (this.budgetConfigRepo.metadata?.connection?.options?.type as string) === 'postgres';
 
-      await this.usageLogsRepo.query(`
-        CREATE TABLE IF NOT EXISTS ai_usage_logs (
-          id VARCHAR(36) PRIMARY KEY,
-          provider VARCHAR(32) NOT NULL,
-          serviceType VARCHAR(32) NOT NULL,
-          model VARCHAR(128) NOT NULL,
-          sessionId VARCHAR(64) NULL,
-          promptTokens INT NOT NULL DEFAULT 0,
-          completionTokens INT NOT NULL DEFAULT 0,
-          totalTokens INT NOT NULL DEFAULT 0,
-          audioSeconds FLOAT NOT NULL DEFAULT 0.0,
-          costUsd FLOAT NOT NULL DEFAULT 0.0,
-          success BOOLEAN NOT NULL DEFAULT 1,
-          errorDetails TEXT NULL,
-          createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-      `).catch(() => {});
+      if (isPostgres) {
+        await this.budgetConfigRepo.query(`
+          CREATE TABLE IF NOT EXISTS ai_budget_configs (
+            id VARCHAR(32) PRIMARY KEY DEFAULT 'default',
+            "groqInitialBalance" DOUBLE PRECISION NOT NULL DEFAULT 5.0,
+            "typesafeInitialBalance" DOUBLE PRECISION NOT NULL DEFAULT 5.0,
+            "openrouterInitialBalance" DOUBLE PRECISION NOT NULL DEFAULT 10.0,
+            "costAlertThresholdUsd" DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+            "openrouterApiKeyOverride" VARCHAR(255) NULL,
+            "groqApiKeyOverride" VARCHAR(255) NULL,
+            "typesafeApiKeyOverride" VARCHAR(255) NULL,
+            "updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+          )
+        `).catch((err) => this.logger.warn('Postgres budget table create notice:', err.message));
+
+        await this.usageLogsRepo.query(`
+          CREATE TABLE IF NOT EXISTS ai_usage_logs (
+            id VARCHAR(36) PRIMARY KEY,
+            provider VARCHAR(32) NOT NULL,
+            "serviceType" VARCHAR(32) NOT NULL,
+            model VARCHAR(128) NOT NULL,
+            "sessionId" VARCHAR(64) NULL,
+            "promptTokens" INT NOT NULL DEFAULT 0,
+            "completionTokens" INT NOT NULL DEFAULT 0,
+            "totalTokens" INT NOT NULL DEFAULT 0,
+            "audioSeconds" DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+            "costUsd" DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+            success BOOLEAN NOT NULL DEFAULT TRUE,
+            "errorDetails" TEXT NULL,
+            "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+          )
+        `).catch((err) => this.logger.warn('Postgres usage table create notice:', err.message));
+      } else {
+        await this.budgetConfigRepo.query(`
+          CREATE TABLE IF NOT EXISTS ai_budget_configs (
+            id VARCHAR(32) PRIMARY KEY DEFAULT 'default',
+            groqInitialBalance FLOAT NOT NULL DEFAULT 5.0,
+            typesafeInitialBalance FLOAT NOT NULL DEFAULT 5.0,
+            openrouterInitialBalance FLOAT NOT NULL DEFAULT 10.0,
+            costAlertThresholdUsd FLOAT NOT NULL DEFAULT 1.0,
+            openrouterApiKeyOverride VARCHAR(255) NULL,
+            groqApiKeyOverride VARCHAR(255) NULL,
+            typesafeApiKeyOverride VARCHAR(255) NULL,
+            updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+          )
+        `).catch((err) => this.logger.warn('SQLite budget table create notice:', err.message));
+
+        await this.usageLogsRepo.query(`
+          CREATE TABLE IF NOT EXISTS ai_usage_logs (
+            id VARCHAR(36) PRIMARY KEY,
+            provider VARCHAR(32) NOT NULL,
+            serviceType VARCHAR(32) NOT NULL,
+            model VARCHAR(128) NOT NULL,
+            sessionId VARCHAR(64) NULL,
+            promptTokens INT NOT NULL DEFAULT 0,
+            completionTokens INT NOT NULL DEFAULT 0,
+            totalTokens INT NOT NULL DEFAULT 0,
+            audioSeconds FLOAT NOT NULL DEFAULT 0.0,
+            costUsd FLOAT NOT NULL DEFAULT 0.0,
+            success BOOLEAN NOT NULL DEFAULT 1,
+            errorDetails TEXT NULL,
+            createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+          )
+        `).catch((err) => this.logger.warn('SQLite usage table create notice:', err.message));
+      }
     } catch (err) {
-      this.logger.warn('Could not auto-create telemetry tables (may already exist)', {
+      this.logger.warn('Could not auto-create telemetry tables', {
         error: err instanceof Error ? err.message : String(err),
       });
     }
@@ -83,18 +119,34 @@ export class AiTelemetryService implements OnModuleInit {
    * Retrieves or creates default budget config.
    */
   async getBudgetConfig(): Promise<AiBudgetConfig> {
-    let config = await this.budgetConfigRepo.findOne({ where: { id: 'default' } });
-    if (!config) {
-      config = this.budgetConfigRepo.create({
+    try {
+      let config = await this.budgetConfigRepo.findOne({ where: { id: 'default' } });
+      if (!config) {
+        config = this.budgetConfigRepo.create({
+          id: 'default',
+          groqInitialBalance: 5.0,
+          typesafeInitialBalance: 5.0,
+          openrouterInitialBalance: 10.0,
+          costAlertThresholdUsd: 1.0,
+        });
+        await this.budgetConfigRepo.save(config);
+      }
+      return config;
+    } catch (err) {
+      this.logger.warn('Failed to query budgetConfig from repo, re-ensuring tables and falling back', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      await this.ensureTables();
+      const fallback = this.budgetConfigRepo.create({
         id: 'default',
         groqInitialBalance: 5.0,
         typesafeInitialBalance: 5.0,
         openrouterInitialBalance: 10.0,
         costAlertThresholdUsd: 1.0,
       });
-      await this.budgetConfigRepo.save(config);
+      await this.budgetConfigRepo.save(fallback).catch(() => {});
+      return fallback;
     }
-    return config;
   }
 
   /**

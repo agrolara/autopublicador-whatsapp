@@ -173,6 +173,7 @@ if (dashboardServingEnabled && dashboardBuildPresent) {
             __dirname + '/modules/automation/**/*.entity{.ts,.js}',
             __dirname + '/modules/ai-agent/**/*.entity{.ts,.js}',
             __dirname + '/modules/radar-lead/**/*.entity{.ts,.js}',
+            __dirname + '/modules/ai-telemetry/**/*.entity{.ts,.js}',
           ],
           migrations: [__dirname + '/database/migrations/*{.ts,.js}'],
           logging: configService.get<boolean>('dataDatabase.logging', false),
