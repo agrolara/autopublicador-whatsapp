@@ -73,6 +73,18 @@ export function extractPhonesFromText(text: string): string[] {
   return Array.from(new Set(cleaned));
 }
 
+/**
+ * Normalizes message text to a compact alphanumeric fingerprint for cross-group deduplication.
+ * Strips emojis, symbols, whitespace, and accents so that identical or near-identical broadcast
+ * messages posted across multiple WhatsApp groups match 100%.
+ */
+export function computeTextDedupFingerprint(text: string): string {
+  if (!text) return '';
+  return normalizeTextForSearch(text)
+    .replace(/[^\p{L}\p{N}]/gu, '')
+    .slice(0, 160);
+}
+
 export const DEFAULT_TYPESAFE_API_KEY =
   'apikey_2199a480d31c3450450c8efa2ecc4c6d9d0d_6c18d62803e10160629944a9079e8ffcf825fa1f40caba0ebeea8e1fcfd57e5b';
 
@@ -157,6 +169,9 @@ export class RadarLeadService implements OnModuleInit {
   private cachedActiveClients: RadarClient[] = [];
   private readonly groupNameCache = new Map<string, string>();
   private readonly dedupCache = new Map<string, number>();
+  // Anti-repetición de alertas entre distintos grupos: key -> { timestamp, groupName }
+  // Key puede ser `${clientId}:${fingerprint}` o `${targetPhone}:${fingerprint}`
+  private readonly crossGroupAlertCache = new Map<string, { timestamp: number; groupName: string }>();
 
   private readonly clientsBackupPath = path.join(process.cwd(), 'data', 'radar_clients.json');
   private readonly settingsBackupPath = path.join(process.cwd(), 'data', 'radar_settings.json');
@@ -188,6 +203,52 @@ export class RadarLeadService implements OnModuleInit {
     await this.restoreFromBackup();
     await this.reloadCache();
     await this.syncBackup();
+    await this.seedCrossGroupAlertCache();
+  }
+
+  /**
+   * Pre-seeds the cross-group alert cache from recent DISPATCHED logs in the database
+   * so duplicate prevention persists across container restarts and deployments.
+   */
+  private async seedCrossGroupAlertCache(): Promise<void> {
+    try {
+      if (!this.logsRepo) return;
+      const cutoff = new Date(Date.now() - 4 * 3600 * 1000); // last 4 hours
+      const recentLogs = await this.logsRepo.find({
+        where: {
+          status: 'DISPATCHED',
+        },
+        order: { createdAt: 'DESC' },
+        take: 200,
+      });
+
+      for (const log of recentLogs) {
+        if (!log.createdAt || new Date(log.createdAt) < cutoff) continue;
+        const fp = computeTextDedupFingerprint(log.messageText);
+        if (!fp) continue;
+        const ts = new Date(log.createdAt).getTime();
+        if (log.clientId) {
+          this.crossGroupAlertCache.set(`${log.clientId}:${fp}`, { timestamp: ts, groupName: log.groupName || log.groupId });
+        }
+      }
+      this.logger.log(`Cross-group alert cache pre-seeded with ${this.crossGroupAlertCache.size} recent fingerprints`);
+    } catch (err: any) {
+      this.logger.warn('Failed to pre-seed cross-group alert cache', { error: err?.message });
+    }
+  }
+
+  /**
+   * Prunes expired entries from crossGroupAlertCache to prevent unbounded memory growth.
+   */
+  private cleanExpiredCrossGroupAlerts(maxAgeMs: number): void {
+    if (this.crossGroupAlertCache.size > 2000) {
+      const now = Date.now();
+      for (const [k, v] of this.crossGroupAlertCache.entries()) {
+        if (now - v.timestamp > maxAgeMs) {
+          this.crossGroupAlertCache.delete(k);
+        }
+      }
+    }
   }
 
   /**
@@ -273,6 +334,7 @@ export class RadarLeadService implements OnModuleInit {
           whitelistedGroupIds TEXT NOT NULL DEFAULT '[]',
           activeScanningSessions TEXT NOT NULL DEFAULT '[]',
           dedupWindowSeconds INT NOT NULL DEFAULT 30,
+          crossGroupDedupMinutes INT NOT NULL DEFAULT 60,
           aiSemanticEnabled BOOLEAN NOT NULL DEFAULT 1,
           aiProvider VARCHAR(32) NOT NULL DEFAULT 'typesafe',
           typesafeApiKey TEXT NOT NULL DEFAULT '',
@@ -331,6 +393,7 @@ export class RadarLeadService implements OnModuleInit {
       const isPostgres = this.settingsRepo.metadata.connection.options.type === 'postgres';
       if (isPostgres) {
         await this.settingsRepo.query(`ALTER TABLE radar_settings ADD COLUMN IF NOT EXISTS "groupCategoryTags" TEXT DEFAULT '[]'`).catch(() => {});
+        await this.settingsRepo.query(`ALTER TABLE radar_settings ADD COLUMN IF NOT EXISTS "crossGroupDedupMinutes" INT DEFAULT 60`).catch(() => {});
         await this.clientsRepo.query(`ALTER TABLE radar_clients ADD COLUMN IF NOT EXISTS "groupFilterMode" VARCHAR(32) DEFAULT 'GLOBAL'`).catch(() => {});
         await this.clientsRepo.query(`ALTER TABLE radar_clients ADD COLUMN IF NOT EXISTS "groupCategoryKeywords" TEXT DEFAULT ''`).catch(() => {});
         await this.clientsRepo.query(`ALTER TABLE radar_clients ADD COLUMN IF NOT EXISTS "groupCategoryTags" TEXT DEFAULT '[]'`).catch(() => {});
@@ -341,6 +404,7 @@ export class RadarLeadService implements OnModuleInit {
         await this.settingsRepo.query(`ALTER TABLE radar_settings ADD COLUMN typesafeApiKey TEXT NOT NULL DEFAULT ''`).catch(() => {});
         await this.settingsRepo.query(`ALTER TABLE radar_settings ADD COLUMN globalBlacklistedSenders TEXT NOT NULL DEFAULT '[]'`).catch(() => {});
         await this.settingsRepo.query(`ALTER TABLE radar_settings ADD COLUMN groupCategoryTags TEXT NOT NULL DEFAULT '[]'`).catch(() => {});
+        await this.settingsRepo.query(`ALTER TABLE radar_settings ADD COLUMN crossGroupDedupMinutes INT DEFAULT 60`).catch(() => {});
 
         await this.clientsRepo.query(`ALTER TABLE radar_clients ADD COLUMN useAiFilter BOOLEAN NOT NULL DEFAULT 1`).catch(() => {});
         await this.clientsRepo.query(`ALTER TABLE radar_clients ADD COLUMN blacklistedSenders TEXT NOT NULL DEFAULT '[]'`).catch(() => {});
@@ -363,6 +427,7 @@ export class RadarLeadService implements OnModuleInit {
           whitelistedGroupIds: '[]',
           activeScanningSessions: '[]',
           dedupWindowSeconds: 30,
+          crossGroupDedupMinutes: 60,
           aiSemanticEnabled: true,
           aiProvider: 'typesafe',
           typesafeApiKey: DEFAULT_TYPESAFE_API_KEY,
@@ -528,6 +593,43 @@ export class RadarLeadService implements OnModuleInit {
           continue;
         }
 
+        // 0 ms Gate 8.8: Cross-Group Duplicate Alert Check (Anti-spam / Difusiones idénticas en múltiples grupos)
+        // Detecta si este texto idéntico ya generó una alerta reciente para este cliente o para el teléfono de destino
+        const dedupWindowMinutes = settings.crossGroupDedupMinutes ?? 60;
+        const crossGroupWindowMs = dedupWindowMinutes * 60 * 1000;
+        this.cleanExpiredCrossGroupAlerts(crossGroupWindowMs);
+
+        const textFingerprint = computeTextDedupFingerprint(text);
+        const clientDedupKey = `${client.id}:${textFingerprint}`;
+        const targetPhoneDigits = normalizePhoneDigits(client.targetPhone);
+        const targetPhoneDedupKey = targetPhoneDigits ? `${targetPhoneDigits}:${textFingerprint}` : null;
+
+        const existingAlert = textFingerprint
+          ? (this.crossGroupAlertCache.get(clientDedupKey) || (targetPhoneDedupKey ? this.crossGroupAlertCache.get(targetPhoneDedupKey) : null))
+          : null;
+
+        if (textFingerprint && existingAlert && (now - existingAlert.timestamp < crossGroupWindowMs)) {
+          const agoMin = Math.round((now - existingAlert.timestamp) / 60000);
+          this.logger.log(
+            `[Radar Lead] DISCARDED in 0ms: Mensaje duplicado ya alertado hace ${agoMin} min en grupo "${existingAlert.groupName}" para cliente "${client.name}" o su teléfono de destino.`,
+          );
+          await this.recordLog({
+            clientId: client.id,
+            clientName: client.name,
+            rubroKey: client.rubroKey,
+            sessionId,
+            groupId,
+            groupName: groupName || groupId,
+            buyerPhone: buyerPhoneDigits,
+            messageText: text,
+            matchedKeyword: matchedKeyword || '',
+            aiEvaluated: false,
+            aiScore: null,
+            status: 'DISCARDED_DUPLICATE',
+          });
+          continue; // Descarte inmediato en 0 ms: ¡no gasta tokens de TypeSafe AI ni envía spam al usuario!
+        }
+
         // 0 ms Gate 9: Semantic AI Validation (Anti-vendedores / Intención de compra)
         const isAiEnabled =
           (settings.aiSemanticEnabled ?? true) &&
@@ -547,12 +649,20 @@ export class RadarLeadService implements OnModuleInit {
           );
           aiScore = aiCheck.score;
 
+          // Tarifa oficial TypeSafe: $0.042 USD por 1M tokens ($0.000000042 / token)
+          const promptChars = (text || '').length + (client.jevPromptCriteria?.length || 0);
+          const estimatedTokens = Math.max(80, Math.ceil(promptChars / 3.5) + 30);
+          const evalCost = (estimatedTokens * 0.042) / 1_000_000;
+
           this.aiTelemetryService?.recordUsage({
             provider: 'typesafe',
             serviceType: 'radar_eval',
             model: 'jev-latest',
             sessionId,
-            costUsd: 0.0025,
+            promptTokens: estimatedTokens,
+            completionTokens: 10,
+            totalTokens: estimatedTokens + 10,
+            costUsd: evalCost,
             success: true,
           }).catch(() => {});
 
@@ -609,6 +719,15 @@ export class RadarLeadService implements OnModuleInit {
 
         // Dispatch alert via WhatsApp
         await this.dispatchAlert(client, alertMessage, sessionId);
+
+        // Registrar huella en caché inter-grupos para prevenir alertas duplicadas en otros grupos
+        if (textFingerprint) {
+          const alertEntry = { timestamp: Date.now(), groupName: groupName || groupId };
+          this.crossGroupAlertCache.set(clientDedupKey, alertEntry);
+          if (targetPhoneDedupKey) {
+            this.crossGroupAlertCache.set(targetPhoneDedupKey, alertEntry);
+          }
+        }
       }
     } catch (err) {
       this.logger.warn('Error evaluating inbound radar lead (fail-open)', {
@@ -910,6 +1029,7 @@ export class RadarLeadService implements OnModuleInit {
       settings.activeScanningSessions = JSON.stringify(dto.activeScanningSessions);
     }
     if (dto.dedupWindowSeconds !== undefined) settings.dedupWindowSeconds = dto.dedupWindowSeconds;
+    if (dto.crossGroupDedupMinutes !== undefined) settings.crossGroupDedupMinutes = dto.crossGroupDedupMinutes;
     if (dto.aiSemanticEnabled !== undefined) settings.aiSemanticEnabled = dto.aiSemanticEnabled;
     if (dto.aiProvider !== undefined) settings.aiProvider = dto.aiProvider;
     if (dto.typesafeApiKey !== undefined) settings.typesafeApiKey = dto.typesafeApiKey;
@@ -1151,11 +1271,19 @@ export class RadarLeadService implements OnModuleInit {
             client.jevPromptCriteria!.trim(),
             effectiveKey,
           );
+          // Tarifa oficial TypeSafe: $0.042 USD por 1M tokens ($0.000000042 / token)
+          const promptChars = (text || '').length + (client.jevPromptCriteria?.length || 0);
+          const estimatedTokens = Math.max(80, Math.ceil(promptChars / 3.5) + 30);
+          const evalCost = (estimatedTokens * 0.042) / 1_000_000;
+
           this.aiTelemetryService?.recordUsage({
             provider: 'typesafe',
             serviceType: 'radar_eval',
             model: 'jev-latest',
-            costUsd: 0.0025,
+            promptTokens: estimatedTokens,
+            completionTokens: 10,
+            totalTokens: estimatedTokens + 10,
+            costUsd: evalCost,
             success: true,
           }).catch(() => {});
           aiEvaluation = {
@@ -1303,7 +1431,7 @@ export class RadarLeadService implements OnModuleInit {
     for (const l of logs) {
       if (l.status === 'DISPATCHED') {
         globalApproved++;
-      } else if (l.status === 'DISCARDED_AI' || l.status === 'DISCARDED_BLACKLIST') {
+      } else if (l.status === 'DISCARDED_AI' || l.status === 'DISCARDED_BLACKLIST' || l.status === 'DISCARDED_DUPLICATE') {
         globalDiscarded++;
       } else if (l.status === 'FALSE_POSITIVE') {
         globalFalsePositives++;
@@ -1318,7 +1446,7 @@ export class RadarLeadService implements OnModuleInit {
         stats.totalMatches++;
         if (l.status === 'DISPATCHED') {
           stats.approvedLeads++;
-        } else if (l.status === 'DISCARDED_AI' || l.status === 'DISCARDED_BLACKLIST') {
+        } else if (l.status === 'DISCARDED_AI' || l.status === 'DISCARDED_BLACKLIST' || l.status === 'DISCARDED_DUPLICATE') {
           stats.discardedAds++;
         } else if (l.status === 'FALSE_POSITIVE') {
           stats.falsePositives++;

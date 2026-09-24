@@ -435,7 +435,11 @@ export const AiTelemetryView: React.FC = () => {
           <div className="provider-stats-list">
             <div className="stat-row">
               <span className="stat-label">Costo Acumulado Estimado:</span>
-              <span className="stat-value font-mono">${(typesafe?.estimatedCostUsd ?? 0).toFixed(4)} USD</span>
+              <span className="stat-value font-mono">
+                ${(typesafe?.estimatedCostUsd ?? 0) < 0.01 && (typesafe?.estimatedCostUsd ?? 0) > 0
+                  ? (typesafe?.estimatedCostUsd ?? 0).toFixed(6)
+                  : (typesafe?.estimatedCostUsd ?? 0).toFixed(4)} USD
+              </span>
             </div>
             <div className="stat-row">
               <span className="stat-label">Mensajes de Grupos Evaluados:</span>
@@ -450,8 +454,8 @@ export const AiTelemetryView: React.FC = () => {
               <span className="stat-value text-muted font-mono">{(typesafe?.discardedAdsCount ?? 0).toLocaleString()}</span>
             </div>
             <div className="stat-row">
-              <span className="stat-label">Tarifa por Evaluación:</span>
-              <span className="stat-value font-mono">$0.0025 USD / mensaje</span>
+              <span className="stat-label">Tarifa Oficial:</span>
+              <span className="stat-value font-mono">$0.042 USD / 1M tokens</span>
             </div>
           </div>
 
@@ -577,10 +581,10 @@ export const AiTelemetryView: React.FC = () => {
                     <td className="text-xs">
                       {log.totalTokens > 0 && <span>{log.totalTokens.toLocaleString()} tokens</span>}
                       {log.audioSeconds > 0 && <span>{log.audioSeconds}s audio</span>}
-                      {log.serviceType === 'radar_eval' && <span>1 evaluación</span>}
+                      {log.serviceType === 'radar_eval' && log.totalTokens === 0 && <span>1 eval (~350 tok)</span>}
                     </td>
                     <td className="font-mono text-xs text-emerald">
-                      ${log.costUsd.toFixed(5)} USD
+                      ${log.costUsd < 0.0001 && log.costUsd > 0 ? log.costUsd.toFixed(6) : log.costUsd.toFixed(5)} USD
                     </td>
                     <td>
                       {log.success ? (
@@ -673,7 +677,7 @@ export const AiTelemetryView: React.FC = () => {
                     className="ai-input"
                     required
                   />
-                  <small>TypeSafe deduce ~$0.0025 USD por evaluación del radar.</small>
+                  <small>TypeSafe (Jevs) tarifa: $0.042 USD por millón de tokens (~$0.000015 USD por eval).</small>
                 </div>
 
                 <div className="form-group">

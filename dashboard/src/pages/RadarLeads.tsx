@@ -126,6 +126,7 @@ export function RadarLeads() {
     whitelistedGroupIds: [] as string[],
     activeScanningSessions: [] as string[],
     dedupWindowSeconds: 30,
+    crossGroupDedupMinutes: 60,
     aiSemanticEnabled: true,
     aiProvider: 'typesafe',
     typesafeApiKey: '',
@@ -191,6 +192,7 @@ export function RadarLeads() {
           whitelistedGroupIds: safeParseJson(fetchedSettings.whitelistedGroupIds),
           activeScanningSessions: safeParseJson(fetchedSettings.activeScanningSessions),
           dedupWindowSeconds: fetchedSettings.dedupWindowSeconds,
+          crossGroupDedupMinutes: fetchedSettings.crossGroupDedupMinutes ?? 60,
           aiSemanticEnabled: fetchedSettings.aiSemanticEnabled ?? true,
           aiProvider: fetchedSettings.aiProvider || 'typesafe',
           typesafeApiKey: fetchedSettings.typesafeApiKey || '',
@@ -567,6 +569,7 @@ export function RadarLeads() {
         whitelistedGroupIds: settingsForm.whitelistedGroupIds,
         activeScanningSessions: settingsForm.activeScanningSessions,
         dedupWindowSeconds: Number(settingsForm.dedupWindowSeconds),
+        crossGroupDedupMinutes: Number(settingsForm.crossGroupDedupMinutes || 60),
         aiSemanticEnabled: settingsForm.aiSemanticEnabled,
         aiProvider: settingsForm.aiProvider,
         typesafeApiKey: settingsForm.typesafeApiKey,
@@ -1301,6 +1304,21 @@ export function RadarLeads() {
                     Si 2 o más sesiones están en el mismo grupo, evita enviar alertas repetidas al cliente.
                   </small>
                 </div>
+
+                <div className="form-group">
+                  <label className="form-label">Anti-Repetición entre Grupos (minutos)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={1440}
+                    className="form-input"
+                    value={settingsForm.crossGroupDedupMinutes}
+                    onChange={e => setSettingsForm(prev => ({ ...prev, crossGroupDedupMinutes: Number(e.target.value) }))}
+                  />
+                  <small className="field-tip">
+                    Si una persona publica el mismo texto en múltiples grupos, no repite la alerta durante esta ventana.
+                  </small>
+                </div>
               </div>
 
               <div className="checkbox-field-row">
@@ -1729,6 +1747,7 @@ export function RadarLeads() {
                   <option value="ALL">Todos los Estados</option>
                   <option value="DISPATCHED">🚨 Alerta Despachada</option>
                   <option value="DISCARDED_AI">🛡️ Descarte por IA</option>
+                  <option value="DISCARDED_DUPLICATE">📋 Duplicado Inter-Grupos (0 ms)</option>
                   <option value="FALSE_POSITIVE">🚫 Falso Positivo</option>
                   <option value="DISCARDED_BLACKLIST">⛔ Lista Negra (0 ms)</option>
                 </select>
@@ -1783,6 +1802,8 @@ export function RadarLeads() {
                               ? 'row-false-positive'
                               : log.status === 'DISCARDED_BLACKLIST'
                               ? 'row-blacklisted'
+                              : log.status === 'DISCARDED_DUPLICATE'
+                              ? 'row-duplicate'
                               : 'row-discarded'
                           }`}
                           onClick={() => setSelectedLeadLog(log)}
@@ -1861,6 +1882,11 @@ export function RadarLeads() {
                                 <Ban size={13} />
                                 <span>Lista Negra (0 ms)</span>
                               </span>
+                            ) : log.status === 'DISCARDED_DUPLICATE' ? (
+                              <span className="status-pill duplicate">
+                                <Copy size={13} />
+                                <span>Duplicado Inter-Grupos (0 ms)</span>
+                              </span>
                             ) : (
                               <span className="status-pill discarded">
                                 <ShieldAlert size={13} />
@@ -1870,7 +1896,7 @@ export function RadarLeads() {
                           </td>
 
                           <td className="log-action-cell">
-                            {log.status !== 'FALSE_POSITIVE' && log.status !== 'DISCARDED_BLACKLIST' && (
+                            {log.status !== 'FALSE_POSITIVE' && log.status !== 'DISCARDED_BLACKLIST' && log.status !== 'DISCARDED_DUPLICATE' && (
                               <button
                                 type="button"
                                 className="radar-btn-flag-negative"
@@ -2417,6 +2443,10 @@ export function RadarLeads() {
                   <span className="status-pill blacklisted">
                     <Ban size={13} /> Lista Negra (0 ms)
                   </span>
+                ) : selectedLeadLog.status === 'DISCARDED_DUPLICATE' ? (
+                  <span className="status-pill duplicate">
+                    <Copy size={13} /> Duplicado Inter-Grupos (0 ms)
+                  </span>
                 ) : (
                   <span className="status-pill discarded">
                     <ShieldAlert size={13} /> Descarte por IA (Publicidad)
@@ -2498,7 +2528,7 @@ export function RadarLeads() {
             </div>
 
             <div className="radar-modal-footer">
-              {selectedLeadLog.status !== 'FALSE_POSITIVE' && selectedLeadLog.status !== 'DISCARDED_BLACKLIST' && (
+              {selectedLeadLog.status !== 'FALSE_POSITIVE' && selectedLeadLog.status !== 'DISCARDED_BLACKLIST' && selectedLeadLog.status !== 'DISCARDED_DUPLICATE' && (
                 <button
                   type="button"
                   className="radar-btn-flag-negative modal-action"

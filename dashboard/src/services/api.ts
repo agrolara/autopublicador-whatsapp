@@ -1702,6 +1702,7 @@ export interface RadarSettings {
   whitelistedGroupIds: string; // JSON string
   activeScanningSessions: string; // JSON string
   dedupWindowSeconds: number;
+  crossGroupDedupMinutes?: number;
   aiSemanticEnabled?: boolean;
   aiProvider?: string;
   typesafeApiKey?: string;
@@ -1718,6 +1719,7 @@ export interface UpdateRadarSettingsPayload {
   whitelistedGroupIds?: string[];
   activeScanningSessions?: string[];
   dedupWindowSeconds?: number;
+  crossGroupDedupMinutes?: number;
   aiSemanticEnabled?: boolean;
   aiProvider?: string;
   typesafeApiKey?: string;

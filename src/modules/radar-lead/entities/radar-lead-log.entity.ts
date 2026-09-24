@@ -6,7 +6,7 @@ import {
   Index,
 } from 'typeorm';
 
-export type RadarLeadStatus = 'DISPATCHED' | 'DISCARDED_AI' | 'FALSE_POSITIVE' | 'DISCARDED_BLACKLIST';
+export type RadarLeadStatus = 'DISPATCHED' | 'DISCARDED_AI' | 'FALSE_POSITIVE' | 'DISCARDED_BLACKLIST' | 'DISCARDED_DUPLICATE';
 
 @Entity('radar_lead_logs')
 export class RadarLeadLog {

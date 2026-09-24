@@ -55,6 +55,13 @@ export class UpdateRadarSettingsDto {
   @Max(3600)
   dedupWindowSeconds?: number;
 
+  @ApiPropertyOptional({ description: 'Ventana anti-repetición de mensajes en distintos grupos (en minutos)', default: 60 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1440)
+  crossGroupDedupMinutes?: number;
+
   @ApiPropertyOptional({ description: 'Habilitar validación semántica con IA (filtro anti-vendedores)', default: true })
   @IsOptional()
   @IsBoolean()

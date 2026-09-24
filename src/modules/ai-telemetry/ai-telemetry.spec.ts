@@ -150,15 +150,18 @@ describe('AiTelemetryService - Unit Tests', () => {
       expect(logged.costUsd).toBeCloseTo(0.004, 5);
     });
 
-    it('records TypeSafe evaluation usage at fixed cost per evaluation', async () => {
+    it('records TypeSafe evaluation usage at $0.042 per 1M tokens', async () => {
       const logged = await service.recordUsage({
         provider: 'typesafe',
         serviceType: 'radar_eval',
         model: 'jev-latest',
+        promptTokens: 500,
+        totalTokens: 500,
       });
 
       expect(logged.provider).toBe('typesafe');
-      expect(logged.costUsd).toBe(0.0025);
+      // 500 tokens * $0.042 / 1,000,000 = $0.000021
+      expect(logged.costUsd).toBeCloseTo((500 * 0.042) / 1_000_000, 6);
     });
   });
 

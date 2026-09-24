@@ -34,6 +34,9 @@ export class RadarSetting {
   @Column({ type: 'int', default: 30 })
   dedupWindowSeconds!: number;
 
+  @Column({ type: 'int', default: 60 })
+  crossGroupDedupMinutes!: number; // Anti-repetición de alertas entre distintos grupos (minutos)
+
   @Column({ type: 'boolean', default: true })
   aiSemanticEnabled!: boolean;
 

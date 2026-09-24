@@ -217,7 +217,7 @@ export class AiTelemetryService implements OnModuleInit {
   private estimateCost(
     provider: AiTelemetryProvider,
     model: string,
-    usage: { promptTokens: number; completionTokens: number; audioSeconds: number },
+    usage: { promptTokens: number; completionTokens: number; audioSeconds: number; totalTokens?: number },
   ): number {
     if (provider === 'openrouter') {
       const lowerModel = (model || '').toLowerCase();
@@ -244,8 +244,10 @@ export class AiTelemetryService implements OnModuleInit {
     }
 
     if (provider === 'typesafe') {
-      // TypeSafe System One (jev-latest): ~$0.0025 per evaluation
-      return 0.0025;
+      // TypeSafe System One (jev-latest): $0.042 per 1,000,000 tokens
+      const tokens = (usage.promptTokens || 0) + (usage.completionTokens || 0) || (usage.totalTokens || 0);
+      const effectiveTokens = tokens > 0 ? tokens : 350; // fallback ~350 tokens per eval
+      return (effectiveTokens * 0.042) / 1_000_000;
     }
 
     return 0.0;
@@ -536,28 +538,45 @@ export class AiTelemetryService implements OnModuleInit {
       const qUsage = await this.usageLogsRepo
         .createQueryBuilder('log')
         .select('COUNT(log.id)', 'total')
+        .addSelect('SUM(log.totalTokens)', 'tokens')
+        .addSelect('SUM(log.costUsd)', 'cost')
         .where('log.provider = :p', { p: 'typesafe' })
         .getRawOne();
       const usageCount = Number(qUsage?.total || 0);
       if (usageCount > evaluationsCount) evaluationsCount = usageCount;
-    } catch {}
 
-    const ratePerEval = 0.0025; // ~$0.0025 USD por evaluación
-    const estimatedCost = evaluationsCount * ratePerEval;
-    const initial = budgetConfig.typesafeInitialBalance || 5.0;
-    const remaining = Math.max(0, initial - estimatedCost);
+      const loggedTokens = Number(qUsage?.tokens || 0);
+      const loggedCost = Number(qUsage?.cost || 0);
+      const effectiveTokens = loggedTokens > 0 ? loggedTokens : evaluationsCount * 350; // fallback ~350 tokens / eval
+      const estimatedCost = loggedCost > 0 ? loggedCost : (effectiveTokens * 0.042) / 1_000_000;
+      const initial = budgetConfig.typesafeInitialBalance || 5.0;
+      const remaining = Math.max(0, initial - estimatedCost);
 
-    return {
-      status: hasKey ? 'connected' : 'unconfigured',
-      initialBalance: initial,
-      estimatedCostUsd: Number(estimatedCost.toFixed(4)),
-      remainingBalanceUsd: Number(remaining.toFixed(4)),
-      evaluationsCount,
-      approvedLeadsCount,
-      discardedAdsCount,
-      ratePerEvaluationUsd: ratePerEval,
-      lastActivity,
-    };
+      return {
+        status: hasKey ? 'connected' : 'unconfigured',
+        initialBalance: initial,
+        estimatedCostUsd: Number(estimatedCost.toFixed(6)),
+        remainingBalanceUsd: Number(remaining.toFixed(4)),
+        evaluationsCount,
+        approvedLeadsCount,
+        discardedAdsCount,
+        ratePerEvaluationUsd: Number(((350 * 0.042) / 1_000_000).toFixed(6)), // ~$0.000015 USD / eval (~350 tokens @ $0.042/1M)
+        lastActivity,
+      };
+    } catch {
+      const initial = budgetConfig.typesafeInitialBalance || 5.0;
+      return {
+        status: hasKey ? 'connected' : 'unconfigured',
+        initialBalance: initial,
+        estimatedCostUsd: 0,
+        remainingBalanceUsd: initial,
+        evaluationsCount: 0,
+        approvedLeadsCount: 0,
+        discardedAdsCount: 0,
+        ratePerEvaluationUsd: Number(((350 * 0.042) / 1_000_000).toFixed(6)),
+        lastActivity,
+      };
+    }
   }
 
   /**

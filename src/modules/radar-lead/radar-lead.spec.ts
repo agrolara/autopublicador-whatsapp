@@ -4,6 +4,7 @@ import {
   normalizeTextForSearch,
   normalizePhoneDigits,
   extractPhonesFromText,
+  computeTextDedupFingerprint,
 } from './radar-lead.service';
 import { RadarSetting } from './entities/radar-setting.entity';
 import { RadarClient, DEFAULT_RADAR_ALERT_TEMPLATE } from './entities/radar-client.entity';
@@ -662,5 +663,118 @@ describe('RadarLeadService - Unit Tests', () => {
       expect(service.isGroupAllowedForClient(globalClient, mockSettings, 'other-group@g.us', 'Otro grupo', mockGroupTags)).toBe(false);
     });
   });
+
+  describe('Cross-Group Deduplication & Text Fingerprint', () => {
+    it('generates consistent fingerprint stripping emojis, accents, and punctuation', () => {
+      const text1 = '🍕 ¡Hola a todos! ¿Alguien que venda PIZZA familiar con delivery? 🛵';
+      const text2 = 'hola a todos alguien que venda pizza familiar con delivery';
+      const fp1 = computeTextDedupFingerprint(text1);
+      const fp2 = computeTextDedupFingerprint(text2);
+      expect(fp1).toBe(fp2);
+      expect(fp1.length).toBeGreaterThan(10);
+    });
+
+    it('discards duplicate messages broadcast across different groups in 0 ms', async () => {
+      const mockSetting: RadarSetting = {
+        id: 'default',
+        enabled: true,
+        minTextLength: 8,
+        ignoreMediaWithoutCaption: true,
+        groupFilterMode: 'ALL',
+        groupCategoryKeywords: '',
+        whitelistedGroupIds: '[]',
+        activeScanningSessions: '[]',
+        dedupWindowSeconds: 30,
+        crossGroupDedupMinutes: 60,
+        aiSemanticEnabled: false, // Local keyword match test
+        aiProvider: 'typesafe',
+        typesafeApiKey: '',
+        globalBlacklistedSenders: '[]',
+        updatedAt: new Date(),
+      };
+
+      const mockClient: RadarClient = {
+        id: 'c-pizza-1',
+        name: 'Pizzería Mascada',
+        rubroKey: 'pizza',
+        targetPhone: '56993005959',
+        senderSessionId: 'pizzeria',
+        localKeywords: 'pizza,delivery',
+        alertTemplate: DEFAULT_RADAR_ALERT_TEMPLATE,
+        active: true,
+        groupFilterMode: 'ALL',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const mockEngine = {
+        getGroups: jest.fn().mockResolvedValue([
+          { id: 'group-1@g.us', name: 'Vecinos Valle Lo Campino' },
+          { id: 'group-2@g.us', name: 'Avisos Quilicura Centro' },
+        ]),
+        sendTextMessage: jest.fn().mockResolvedValue({ id: 'msg-alert' }),
+      };
+
+      const mockEngineRegistry: any = {
+        get: jest.fn().mockReturnValue(mockEngine),
+        entries: jest.fn().mockReturnValue([['pizzeria', mockEngine]]),
+      };
+
+      const mockClientsRepo: any = {
+        find: jest.fn().mockResolvedValue([mockClient]),
+      };
+      const mockSettingsRepo: any = {
+        findOne: jest.fn().mockResolvedValue(mockSetting),
+      };
+      const recordedLogs: any[] = [];
+      const mockLogsRepo: any = {
+        create: jest.fn(d => d),
+        save: jest.fn(d => {
+          recordedLogs.push(d);
+          return Promise.resolve(d);
+        }),
+      };
+
+      const service = new RadarLeadService(mockSettingsRepo, mockClientsRepo, mockLogsRepo, mockEngineRegistry);
+      await service.reloadCache();
+
+      const broadcastText = 'Hola vecinos, alguien tiene delivery de pizza familiar ahora?';
+
+      // 1. Mensaje en Grupo 1 -> Debe disparar alerta y guardarse como DISPATCHED
+      await service.evaluateInbound('pizzeria', {
+        id: 'msg-grp-1',
+        from: 'group-1@g.us',
+        author: '56911223344@c.us',
+        isGroup: true,
+        fromMe: false,
+        body: broadcastText,
+      });
+
+      expect(mockEngine.sendTextMessage).toHaveBeenCalledTimes(1);
+      const firstLog = recordedLogs.find(l => l.groupId === 'group-1@g.us');
+      expect(firstLog).toBeDefined();
+      expect(firstLog.status).toBe('DISPATCHED');
+
+      // 2. Mismo mensaje publicado 10 segundos después en Grupo 2 -> Descarte en 0 ms por duplicado inter-grupos
+      await service.evaluateInbound('pizzeria', {
+        id: 'msg-grp-2',
+        from: 'group-2@g.us',
+        author: '56911223344@c.us',
+        isGroup: true,
+        fromMe: false,
+        body: broadcastText,
+      });
+
+      // No debe enviar otra alerta a WhatsApp!
+      expect(mockEngine.sendTextMessage).toHaveBeenCalledTimes(1);
+
+      // Debe haberse registrado en logs con estado DISCARDED_DUPLICATE
+      const secondLog = recordedLogs.find(l => l.groupId === 'group-2@g.us');
+      expect(secondLog).toBeDefined();
+      expect(secondLog.status).toBe('DISCARDED_DUPLICATE');
+      expect(secondLog.aiEvaluated).toBe(false);
+    });
+  });
 });
+
 
