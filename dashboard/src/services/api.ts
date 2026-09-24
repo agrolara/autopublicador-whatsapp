@@ -1689,6 +1689,7 @@ export const groupVaultApi = {
 // =============================================================================
 
 export type GroupFilterMode = 'ALL' | 'CATEGORY' | 'WHITELIST';
+export type ClientGroupFilterMode = 'GLOBAL' | 'ALL' | 'CATEGORY' | 'WHITELIST';
 
 export interface RadarSettings {
   id: string;
@@ -1697,6 +1698,7 @@ export interface RadarSettings {
   ignoreMediaWithoutCaption: boolean;
   groupFilterMode: GroupFilterMode;
   groupCategoryKeywords: string;
+  groupCategoryTags?: string; // JSON string of tag IDs
   whitelistedGroupIds: string; // JSON string
   activeScanningSessions: string; // JSON string
   dedupWindowSeconds: number;
@@ -1712,6 +1714,7 @@ export interface UpdateRadarSettingsPayload {
   ignoreMediaWithoutCaption?: boolean;
   groupFilterMode?: GroupFilterMode;
   groupCategoryKeywords?: string;
+  groupCategoryTags?: string[];
   whitelistedGroupIds?: string[];
   activeScanningSessions?: string[];
   dedupWindowSeconds?: number;
@@ -1734,6 +1737,10 @@ export interface RadarClient {
   active: boolean;
   blacklistedSenders?: string;
   negativePhrases?: string;
+  groupFilterMode?: ClientGroupFilterMode;
+  groupCategoryKeywords?: string;
+  groupCategoryTags?: string; // JSON string
+  whitelistedGroupIds?: string; // JSON string
   createdAt: string;
   updatedAt: string;
 }
@@ -1750,6 +1757,10 @@ export interface CreateRadarClientPayload {
   active?: boolean;
   blacklistedSenders?: string[];
   negativePhrases?: string[];
+  groupFilterMode?: ClientGroupFilterMode;
+  groupCategoryKeywords?: string;
+  groupCategoryTags?: string[];
+  whitelistedGroupIds?: string[];
 }
 
 export type UpdateRadarClientPayload = Partial<CreateRadarClientPayload>;
@@ -1893,6 +1904,16 @@ export const radarApi = {
     }),
   removeNegativePhrase: (clientId: string, phrase: string) =>
     request<RadarClient>(`/radar/clients/${clientId}/blacklist/phrases?phrase=${encodeURIComponent(phrase)}`, {
+      method: 'DELETE',
+    }),
+  getGroupTags: () => request<GroupTagItem[]>('/radar/group-tags'),
+  saveGroupTag: (data: { name: string; color?: string; groupIds: string[]; id?: string }) =>
+    request<GroupTagItem>('/radar/group-tags', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  deleteGroupTag: (id: string) =>
+    request<{ success: boolean }>(`/radar/group-tags/${id}`, {
       method: 'DELETE',
     }),
 };

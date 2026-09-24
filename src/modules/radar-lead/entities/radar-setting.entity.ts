@@ -23,6 +23,9 @@ export class RadarSetting {
   groupCategoryKeywords!: string;
 
   @Column({ type: 'text', default: '[]' })
+  groupCategoryTags!: string; // JSON array of GroupTag IDs for global category filtering
+
+  @Column({ type: 'text', default: '[]' })
   whitelistedGroupIds!: string; // JSON array of group JIDs
 
   @Column({ type: 'text', default: '[]' })

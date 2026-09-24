@@ -541,5 +541,126 @@ describe('RadarLeadService - Unit Tests', () => {
       expect(mockEngine.sendTextMessage).not.toHaveBeenCalled();
     });
   });
+
+  describe('Client Targeting & Group Category Segmentation', () => {
+    let service: RadarLeadService;
+    let mockSettings: RadarSetting;
+
+    beforeEach(() => {
+      service = new RadarLeadService({} as any, {} as any, {} as any, {} as any);
+      mockSettings = {
+        id: 'default',
+        enabled: true,
+        groupFilterMode: 'WHITELIST',
+        whitelistedGroupIds: JSON.stringify(['global-group-1@g.us']),
+        groupCategoryKeywords: 'santiago',
+        groupCategoryTags: JSON.stringify([]),
+        activeScanningSessions: JSON.stringify(['pizzeria']),
+        minTextLength: 5,
+        ignoreMediaWithoutCaption: true,
+        dedupWindowSeconds: 30,
+        aiSemanticEnabled: false,
+        aiProvider: 'typesafe',
+        typesafeApiKey: '',
+        lastToggledAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+    });
+
+    const mockGroupTags = [
+      { id: 'tag_quilicura', name: 'QUILICURA', groupIds: ['q-grp-1@g.us', 'q-grp-2@g.us'] },
+      { id: 'tag_renca', name: 'RENCA', groupIds: ['r-grp-1@g.us'] },
+    ];
+
+    it('allows ALL groups when client.groupFilterMode is ALL (e.g. nationwide client)', () => {
+      const nationwideClient: RadarClient = {
+        id: 'client-nationwide',
+        name: 'Google AI Pro Chile',
+        rubroKey: 'ia',
+        targetPhone: '56912345678',
+        senderSessionId: 'session-1',
+        localKeywords: 'ia,asistente',
+        jevPromptCriteria: null,
+        alertTemplate: DEFAULT_RADAR_ALERT_TEMPLATE,
+        active: true,
+        groupFilterMode: 'ALL',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      expect(service.isGroupAllowedForClient(nationwideClient, mockSettings, 'random-grp@g.us', 'Cualquier Grupo Chile', mockGroupTags)).toBe(true);
+      expect(service.isGroupAllowedForClient(nationwideClient, mockSettings, 'punta-arenas@g.us', 'Ventas Punta Arenas', mockGroupTags)).toBe(true);
+    });
+
+    it('restricts to client whitelistedGroupIds when groupFilterMode is WHITELIST', () => {
+      const whitelistClient: RadarClient = {
+        id: 'client-wl',
+        name: 'Sushi Icura',
+        rubroKey: 'sushi',
+        targetPhone: '56912345678',
+        senderSessionId: 'session-1',
+        localKeywords: 'sushi',
+        jevPromptCriteria: null,
+        alertTemplate: DEFAULT_RADAR_ALERT_TEMPLATE,
+        active: true,
+        groupFilterMode: 'WHITELIST',
+        whitelistedGroupIds: JSON.stringify(['sushi-allowed-1@g.us', 'sushi-allowed-2@g.us']),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      expect(service.isGroupAllowedForClient(whitelistClient, mockSettings, 'sushi-allowed-1@g.us', 'Grupo 1', mockGroupTags)).toBe(true);
+      expect(service.isGroupAllowedForClient(whitelistClient, mockSettings, 'other-group@g.us', 'Otro Grupo', mockGroupTags)).toBe(false);
+    });
+
+    it('filters by category tags and keyword when groupFilterMode is CATEGORY', () => {
+      const categoryClient: RadarClient = {
+        id: 'client-cat',
+        name: 'La Patroncita Miel',
+        rubroKey: 'miel',
+        targetPhone: '56912345678',
+        senderSessionId: 'session-1',
+        localKeywords: 'miel',
+        jevPromptCriteria: null,
+        alertTemplate: DEFAULT_RADAR_ALERT_TEMPLATE,
+        active: true,
+        groupFilterMode: 'CATEGORY',
+        groupCategoryTags: JSON.stringify(['tag_quilicura']),
+        groupCategoryKeywords: 'lampa, batuco',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      // Matched by tag_quilicura
+      expect(service.isGroupAllowedForClient(categoryClient, mockSettings, 'q-grp-1@g.us', 'Avisos Varios', mockGroupTags)).toBe(true);
+      // Matched by keyword "lampa"
+      expect(service.isGroupAllowedForClient(categoryClient, mockSettings, 'lampa-grp@g.us', 'Vecinos Lampa Centro', mockGroupTags)).toBe(true);
+      // Not matched: renca tag is not selected, and group name has no keyword
+      expect(service.isGroupAllowedForClient(categoryClient, mockSettings, 'r-grp-1@g.us', 'Comunidad Renca', mockGroupTags)).toBe(false);
+      expect(service.isGroupAllowedForClient(categoryClient, mockSettings, 'providencia@g.us', 'Avisos Providencia', mockGroupTags)).toBe(false);
+    });
+
+    it('inherits global settings when groupFilterMode is GLOBAL', () => {
+      const globalClient: RadarClient = {
+        id: 'client-global',
+        name: 'Cliente Heredado',
+        rubroKey: 'test',
+        targetPhone: '56912345678',
+        senderSessionId: 'session-1',
+        localKeywords: 'test',
+        jevPromptCriteria: null,
+        alertTemplate: DEFAULT_RADAR_ALERT_TEMPLATE,
+        active: true,
+        groupFilterMode: 'GLOBAL',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      // mockSettings is WHITELIST with ['global-group-1@g.us']
+      expect(service.isGroupAllowedForClient(globalClient, mockSettings, 'global-group-1@g.us', 'Cualquier nombre', mockGroupTags)).toBe(true);
+      expect(service.isGroupAllowedForClient(globalClient, mockSettings, 'other-group@g.us', 'Otro grupo', mockGroupTags)).toBe(false);
+    });
+  });
 });
 

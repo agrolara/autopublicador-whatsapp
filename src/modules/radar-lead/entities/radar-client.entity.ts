@@ -11,6 +11,8 @@ export const DEFAULT_RADAR_ALERT_TEMPLATE = `🚨 *¡NUEVO LEAD DETECTADO EN RAD
 📲 *Hablarle directo por WhatsApp:*
 {enlace_whatsapp}`;
 
+export type ClientGroupFilterMode = 'GLOBAL' | 'ALL' | 'CATEGORY' | 'WHITELIST';
+
 @Entity('radar_clients')
 export class RadarClient {
   @PrimaryGeneratedColumn('uuid')
@@ -48,6 +50,18 @@ export class RadarClient {
 
   @Column({ type: 'text', default: '[]' })
   negativePhrases!: string; // JSON array of negative phrases/keywords
+
+  @Column({ type: 'varchar', length: 32, default: 'GLOBAL' })
+  groupFilterMode!: ClientGroupFilterMode;
+
+  @Column({ type: 'text', default: '' })
+  groupCategoryKeywords!: string; // Comma-separated location/group keywords for this client
+
+  @Column({ type: 'text', default: '[]' })
+  groupCategoryTags!: string; // JSON array of GroupTag IDs assigned to this client
+
+  @Column({ type: 'text', default: '[]' })
+  whitelistedGroupIds!: string; // JSON array of group JIDs allowed for this client
 
   @CreateDateColumn()
   createdAt!: Date;

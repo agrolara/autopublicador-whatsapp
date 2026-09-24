@@ -30,6 +30,7 @@ import {
   ShieldAlert,
   ArrowUpRight,
   Ban,
+  Tag,
 } from 'lucide-react';
 import {
   radarApi,
@@ -40,10 +41,13 @@ import {
   type Session,
   type TestRadarResult,
   type GroupFilterMode,
+  type ClientGroupFilterMode,
+  type GroupTagItem,
   type RadarLeadLog,
   type RadarMetricsSummary,
   type ClientMetrics,
 } from '../services/api';
+import { GroupTagModal } from '../components/message-tester/GroupTagModal';
 import './RadarLeads.css';
 
 const DEFAULT_TYPESAFE_API_KEY =
@@ -104,8 +108,13 @@ export function RadarLeads() {
     useAiFilter: true,
     alertTemplate: DEFAULT_TEMPLATE,
     active: true,
+    groupFilterMode: 'GLOBAL' as ClientGroupFilterMode,
+    groupCategoryKeywords: '',
+    groupCategoryTags: [] as string[],
+    whitelistedGroupIds: [] as string[],
   });
   const [isSavingClient, setIsSavingClient] = useState(false);
+  const [clientGroupSearch, setClientGroupSearch] = useState('');
 
   // Settings State Form
   const [settingsForm, setSettingsForm] = useState({
@@ -113,6 +122,7 @@ export function RadarLeads() {
     ignoreMediaWithoutCaption: true,
     groupFilterMode: 'ALL' as GroupFilterMode,
     groupCategoryKeywords: '',
+    groupCategoryTags: [] as string[],
     whitelistedGroupIds: [] as string[],
     activeScanningSessions: [] as string[],
     dedupWindowSeconds: 30,
@@ -121,6 +131,16 @@ export function RadarLeads() {
     typesafeApiKey: '',
   });
   const [isSavingSettings, setIsSavingSettings] = useState(false);
+
+  // Group Categories / Tags (Segmentation) State
+  const [groupTags, setGroupTags] = useState<GroupTagItem[]>([]);
+  const [isTagModalOpen, setIsTagModalOpen] = useState(false);
+  const [editingTagId, setEditingTagId] = useState<string | null>(null);
+  const [newTagName, setNewTagName] = useState('');
+  const [newTagColor, setNewTagColor] = useState('#10b981');
+  const [selectedGroupIdsForTag, setSelectedGroupIdsForTag] = useState<Set<string>>(new Set());
+  const [tagModalGroupSearch, setTagModalGroupSearch] = useState('');
+  const [onTagSavedCallback, setOnTagSavedCallback] = useState<((createdName: string) => void) | null>(null);
 
   // Simulator / Test State
   const [testText, setTestText] = useState('Hola vecinos, ¿alguien vende pizzas familiares o empanadas con delivery ahora?');
@@ -145,7 +165,7 @@ export function RadarLeads() {
   const loadAllData = async () => {
     setLoading(true);
     try {
-      const [fetchedSettings, fetchedClients, fetchedGroups, fetchedSessions, fetchedMetrics] = await Promise.all([
+      const [fetchedSettings, fetchedClients, fetchedGroups, fetchedSessions, fetchedMetrics, fetchedTags] = await Promise.all([
         radarApi.getSettings().catch(err => {
           console.error('Error al obtener configuración del radar:', err);
           return null;
@@ -157,6 +177,7 @@ export function RadarLeads() {
         radarApi.getGroups().catch(() => []),
         sessionApi.list().catch(() => []),
         radarApi.getMetrics().catch(() => null),
+        radarApi.getGroupTags().catch(() => []),
       ]);
 
       if (fetchedSettings) {
@@ -166,6 +187,7 @@ export function RadarLeads() {
           ignoreMediaWithoutCaption: fetchedSettings.ignoreMediaWithoutCaption,
           groupFilterMode: fetchedSettings.groupFilterMode,
           groupCategoryKeywords: fetchedSettings.groupCategoryKeywords,
+          groupCategoryTags: safeParseJson(fetchedSettings.groupCategoryTags),
           whitelistedGroupIds: safeParseJson(fetchedSettings.whitelistedGroupIds),
           activeScanningSessions: safeParseJson(fetchedSettings.activeScanningSessions),
           dedupWindowSeconds: fetchedSettings.dedupWindowSeconds,
@@ -181,6 +203,9 @@ export function RadarLeads() {
       setSessions(fetchedSessions);
       if (fetchedMetrics) {
         setMetrics(fetchedMetrics);
+      }
+      if (fetchedTags) {
+        setGroupTags(fetchedTags);
       }
     } catch {
       showToast('error', 'Error al cargar los datos del Radar');
@@ -389,6 +414,10 @@ export function RadarLeads() {
         useAiFilter: client.useAiFilter !== false,
         alertTemplate: client.alertTemplate || DEFAULT_TEMPLATE,
         active: client.active,
+        groupFilterMode: (client.groupFilterMode || 'GLOBAL') as ClientGroupFilterMode,
+        groupCategoryKeywords: client.groupCategoryKeywords || '',
+        groupCategoryTags: safeParseJson(client.groupCategoryTags),
+        whitelistedGroupIds: safeParseJson(client.whitelistedGroupIds),
       });
     } else {
       setEditingClient(null);
@@ -402,9 +431,72 @@ export function RadarLeads() {
         useAiFilter: true,
         alertTemplate: DEFAULT_TEMPLATE,
         active: true,
+        groupFilterMode: 'GLOBAL' as ClientGroupFilterMode,
+        groupCategoryKeywords: '',
+        groupCategoryTags: [],
+        whitelistedGroupIds: [],
       });
     }
+    setClientGroupSearch('');
     setIsClientModalOpen(true);
+  };
+
+  // GroupTagModal handlers
+  const handleOpenCreateTagModal = (callback?: (createdName: string) => void) => {
+    setEditingTagId(null);
+    setNewTagName('');
+    setNewTagColor('#10b981');
+    setSelectedGroupIdsForTag(new Set());
+    setTagModalGroupSearch('');
+    setOnTagSavedCallback(() => callback || null);
+    setIsTagModalOpen(true);
+  };
+
+  const handleOpenEditTagModal = (tag: GroupTagItem) => {
+    setEditingTagId(tag.id);
+    setNewTagName(tag.name);
+    setNewTagColor(tag.color || '#10b981');
+    setSelectedGroupIdsForTag(new Set(tag.groupIds || []));
+    setTagModalGroupSearch('');
+    setOnTagSavedCallback(null);
+    setIsTagModalOpen(true);
+  };
+
+  const handleTagSaved = async (name: string, count: number) => {
+    try {
+      const updatedTags = await radarApi.getGroupTags();
+      setGroupTags(updatedTags);
+      if (onTagSavedCallback) {
+        onTagSavedCallback(name);
+      }
+      showToast('success', `Categoría "${name}" guardada con ${count} grupos.`);
+    } catch {
+      showToast('error', 'Error al refrescar categorías de grupos.');
+    }
+  };
+
+  const toggleClientCategoryTag = (tagId: string) => {
+    setClientForm(prev => {
+      const exists = prev.groupCategoryTags.includes(tagId);
+      return {
+        ...prev,
+        groupCategoryTags: exists
+          ? prev.groupCategoryTags.filter(id => id !== tagId)
+          : [...prev.groupCategoryTags, tagId],
+      };
+    });
+  };
+
+  const toggleSettingsCategoryTag = (tagId: string) => {
+    setSettingsForm(prev => {
+      const exists = prev.groupCategoryTags.includes(tagId);
+      return {
+        ...prev,
+        groupCategoryTags: exists
+          ? prev.groupCategoryTags.filter(id => id !== tagId)
+          : [...prev.groupCategoryTags, tagId],
+      };
+    });
   };
 
   // Save Client
@@ -471,6 +563,7 @@ export function RadarLeads() {
         ignoreMediaWithoutCaption: settingsForm.ignoreMediaWithoutCaption,
         groupFilterMode: settingsForm.groupFilterMode,
         groupCategoryKeywords: settingsForm.groupCategoryKeywords,
+        groupCategoryTags: settingsForm.groupCategoryTags,
         whitelistedGroupIds: settingsForm.whitelistedGroupIds,
         activeScanningSessions: settingsForm.activeScanningSessions,
         dedupWindowSeconds: Number(settingsForm.dedupWindowSeconds),
@@ -834,6 +927,30 @@ export function RadarLeads() {
                     </div>
                   )}
 
+                  <div className="client-scope-badge-row">
+                    {client.groupFilterMode === 'ALL' && (
+                      <span className="client-scope-badge all">
+                        🇨🇱 Todos los Grupos (Chile Completo)
+                      </span>
+                    )}
+                    {client.groupFilterMode === 'CATEGORY' && (
+                      <span className="client-scope-badge category">
+                        🏷️ Categorías ({safeParseJson(client.groupCategoryTags).length} tags
+                        {client.groupCategoryKeywords ? ` + "${client.groupCategoryKeywords.split(',')[0]}..."` : ''})
+                      </span>
+                    )}
+                    {client.groupFilterMode === 'WHITELIST' && (
+                      <span className="client-scope-badge whitelist">
+                        📋 Lista Blanca ({safeParseJson(client.whitelistedGroupIds).length} grupos)
+                      </span>
+                    )}
+                    {(!client.groupFilterMode || client.groupFilterMode === 'GLOBAL') && (
+                      <span className="client-scope-badge global">
+                        🌐 Filtro Global ({settings?.groupFilterMode || 'ALL'})
+                      </span>
+                    )}
+                  </div>
+
                   {((safeParseJson(client.blacklistedSenders).length > 0) || (safeParseJson(client.negativePhrases).length > 0)) && (
                     <div className="client-blacklist-summary">
                       <Ban size={13} />
@@ -989,22 +1106,74 @@ export function RadarLeads() {
                 </label>
               </div>
 
-              {/* Category Keywords Field */}
+              {/* Category Keywords & Segmentation Tags Field */}
               {settingsForm.groupFilterMode === 'CATEGORY' && (
                 <div className="sub-settings-field">
-                  <label className="form-label">
-                    Palabras clave en el nombre del grupo (separadas por comas)
-                  </label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    placeholder="quilicura, valle lo campino, valle grande, batuco"
-                    value={settingsForm.groupCategoryKeywords}
-                    onChange={e => setSettingsForm(prev => ({ ...prev, groupCategoryKeywords: e.target.value }))}
-                  />
-                  <small className="field-tip">
-                    El radar ignorará cualquier grupo cuyo título no contenga al menos una de estas palabras (ignora tildes y mayúsculas).
-                  </small>
+                  <div className="scope-tag-header-row">
+                    <span className="scope-sub-label">
+                      🏷️ Segmentación por Categorías de Grupos ({settingsForm.groupCategoryTags.length} seleccionadas):
+                    </span>
+                    <button
+                      type="button"
+                      className="radar-btn-outline small"
+                      onClick={() => handleOpenCreateTagModal()}
+                    >
+                      ➕ Crear Nueva Categoría
+                    </button>
+                  </div>
+
+                  {groupTags.length === 0 ? (
+                    <p className="no-items-note">
+                      No hay categorías creadas aún. Puedes crear una nueva para agrupar tus grupos y seleccionarlos en 1 clic.
+                    </p>
+                  ) : (
+                    <div className="category-tags-list">
+                      {groupTags.map(tag => {
+                        const isSelected = settingsForm.groupCategoryTags.includes(tag.id);
+                        return (
+                          <div
+                            key={tag.id}
+                            className={`category-tag-pill ${isSelected ? 'active' : ''}`}
+                            style={{
+                              borderColor: tag.color || '#10b981',
+                              background: isSelected ? (tag.color || '#10b981') : '#ffffff',
+                              color: isSelected ? '#ffffff' : '#1e293b',
+                            }}
+                            onClick={() => toggleSettingsCategoryTag(tag.id)}
+                          >
+                            <span>{isSelected ? '✓' : '+'} 🏷️ {tag.name} ({tag.groupIds?.length || 0})</span>
+                            <button
+                              type="button"
+                              className="tag-edit-inline-btn"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenEditTagModal(tag);
+                              }}
+                              title="Editar grupos de esta categoría"
+                            >
+                              ✏️
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <div className="mt-3">
+                    <label className="form-label">
+                      Palabras clave adicionales en el nombre del grupo (separadas por comas)
+                    </label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="quilicura, valle lo campino, valle grande, batuco"
+                      value={settingsForm.groupCategoryKeywords}
+                      onChange={e => setSettingsForm(prev => ({ ...prev, groupCategoryKeywords: e.target.value }))}
+                    />
+                    <small className="field-tip">
+                      El radar analizará grupos que pertenezcan a las categorías seleccionadas O cuyo título contenga estas palabras.
+                    </small>
+                  </div>
                 </div>
               )}
 
@@ -1014,6 +1183,39 @@ export function RadarLeads() {
                   <label className="form-label">
                     Seleccionar grupos autorizados ({settingsForm.whitelistedGroupIds.length} seleccionados)
                   </label>
+
+                  {groupTags.length > 0 && (
+                    <div className="whitelist-category-quickselect mb-3">
+                      <span className="quickselect-label">Selección rápida por categoría:</span>
+                      <div className="category-tags-list mini">
+                        {groupTags.map(tag => (
+                          <button
+                            type="button"
+                            key={tag.id}
+                            className="category-tag-pill mini"
+                            style={{ borderColor: tag.color || '#10b981' }}
+                            onClick={() => {
+                              const tagGroupIds = tag.groupIds || [];
+                              setSettingsForm(prev => {
+                                const set = new Set(prev.whitelistedGroupIds);
+                                const allIn = tagGroupIds.every(id => set.has(id));
+                                if (allIn) {
+                                  tagGroupIds.forEach(id => set.delete(id));
+                                } else {
+                                  tagGroupIds.forEach(id => set.add(id));
+                                }
+                                return { ...prev, whitelistedGroupIds: Array.from(set) };
+                              });
+                            }}
+                            title="Clic para seleccionar o deseleccionar todos los grupos de esta categoría"
+                          >
+                            🏷️ {tag.name} ({tag.groupIds?.length || 0})
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="whitelist-search-box">
                     <Search size={16} />
                     <input
@@ -1858,6 +2060,260 @@ export function RadarLeads() {
                 />
               </div>
 
+              {/* ALCANCE Y FILTRADO DE GRUPOS POR CLIENTE */}
+              <div className="client-group-scope-section">
+                <div className="client-group-scope-header">
+                  <Sliders size={18} />
+                  <div>
+                    <h4 className="client-scope-title">🎯 Alcance y Filtrado de Grupos para este Cliente</h4>
+                    <p className="client-scope-subtitle">
+                      Define en qué grupos de WhatsApp este cliente buscará compradores.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="filter-modes-cards client-scope-cards">
+                  <label className={`filter-mode-card ${clientForm.groupFilterMode === 'GLOBAL' ? 'selected' : ''}`}>
+                    <input
+                      type="radio"
+                      name="clientGroupFilterMode"
+                      value="GLOBAL"
+                      checked={clientForm.groupFilterMode === 'GLOBAL'}
+                      onChange={() => setClientForm(prev => ({ ...prev, groupFilterMode: 'GLOBAL' }))}
+                    />
+                    <div className="mode-card-header">
+                      <strong>🌐 Global ({settings?.groupFilterMode || 'ALL'})</strong>
+                    </div>
+                    <p>Hereda el modo y grupos configurados en la pestaña general del radar.</p>
+                  </label>
+
+                  <label className={`filter-mode-card ${clientForm.groupFilterMode === 'ALL' ? 'selected' : ''}`}>
+                    <input
+                      type="radio"
+                      name="clientGroupFilterMode"
+                      value="ALL"
+                      checked={clientForm.groupFilterMode === 'ALL'}
+                      onChange={() => setClientForm(prev => ({ ...prev, groupFilterMode: 'ALL' }))}
+                    />
+                    <div className="mode-card-header">
+                      <strong>🇨🇱 Todos los Grupos</strong>
+                    </div>
+                    <p>Analiza TODOS los grupos monitoreados (ideal para servicios en todo Chile o alcance nacional).</p>
+                  </label>
+
+                  <label className={`filter-mode-card ${clientForm.groupFilterMode === 'CATEGORY' ? 'selected' : ''}`}>
+                    <input
+                      type="radio"
+                      name="clientGroupFilterMode"
+                      value="CATEGORY"
+                      checked={clientForm.groupFilterMode === 'CATEGORY'}
+                      onChange={() => setClientForm(prev => ({ ...prev, groupFilterMode: 'CATEGORY' }))}
+                    />
+                    <div className="mode-card-header">
+                      <strong>🏷️ Por Categoría / Segmentación</strong>
+                    </div>
+                    <p>Solo grupos de categorías seleccionadas o por palabras clave de comuna/sector.</p>
+                  </label>
+
+                  <label className={`filter-mode-card ${clientForm.groupFilterMode === 'WHITELIST' ? 'selected' : ''}`}>
+                    <input
+                      type="radio"
+                      name="clientGroupFilterMode"
+                      value="WHITELIST"
+                      checked={clientForm.groupFilterMode === 'WHITELIST'}
+                      onChange={() => setClientForm(prev => ({ ...prev, groupFilterMode: 'WHITELIST' }))}
+                    />
+                    <div className="mode-card-header">
+                      <strong>📋 Lista Blanca Específica</strong>
+                    </div>
+                    <p>Solo procesa mensajes de grupos elegidos manualmente para este cliente.</p>
+                  </label>
+                </div>
+
+                {/* Sub-configuración para modo CATEGORY en cliente */}
+                {clientForm.groupFilterMode === 'CATEGORY' && (
+                  <div className="client-sub-scope-box">
+                    <div className="scope-tag-header-row">
+                      <span className="scope-sub-label">
+                        🏷️ Seleccionar Categorías de Grupos ({clientForm.groupCategoryTags.length} seleccionadas):
+                      </span>
+                      <button
+                        type="button"
+                        className="radar-btn-outline small"
+                        onClick={() => handleOpenCreateTagModal((name) => {
+                          const found = groupTags.find(t => t.name.toLowerCase() === name.toLowerCase());
+                          if (found) toggleClientCategoryTag(found.id);
+                        })}
+                      >
+                        ➕ Crear Nueva Categoría
+                      </button>
+                    </div>
+
+                    {groupTags.length === 0 ? (
+                      <p className="no-items-note">
+                        Aún no tienes categorías de grupos creadas. Puedes crear una con el botón "+ Crear Nueva Categoría".
+                      </p>
+                    ) : (
+                      <div className="category-tags-list">
+                        {groupTags.map(tag => {
+                          const isSelected = clientForm.groupCategoryTags.includes(tag.id);
+                          return (
+                            <div
+                              key={tag.id}
+                              className={`category-tag-pill ${isSelected ? 'active' : ''}`}
+                              style={{
+                                borderColor: tag.color || '#10b981',
+                                background: isSelected ? (tag.color || '#10b981') : '#ffffff',
+                                color: isSelected ? '#ffffff' : '#1e293b',
+                              }}
+                              onClick={() => toggleClientCategoryTag(tag.id)}
+                            >
+                              <span>{isSelected ? '✓' : '+'} 🏷️ {tag.name} ({tag.groupIds?.length || 0})</span>
+                              <button
+                                type="button"
+                                className="tag-edit-inline-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenEditTagModal(tag);
+                                }}
+                                title="Editar grupos de esta categoría"
+                              >
+                                ✏️
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <div className="mt-3">
+                      <label className="form-label">
+                        Palabras clave adicionales en el nombre del grupo (separadas por comas)
+                      </label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="ej: quilicura, santiago, maipu, la florida"
+                        value={clientForm.groupCategoryKeywords}
+                        onChange={e => setClientForm(prev => ({ ...prev, groupCategoryKeywords: e.target.value }))}
+                      />
+                      <small className="field-tip">
+                        Si el grupo pertenece a una categoría seleccionada O contiene estas palabras clave, se activará la búsqueda.
+                      </small>
+                    </div>
+                  </div>
+                )}
+
+                {/* Sub-configuración para modo WHITELIST en cliente */}
+                {clientForm.groupFilterMode === 'WHITELIST' && (
+                  <div className="client-sub-scope-box">
+                    <div className="whitelist-header-tools">
+                      <label className="form-label mb-0">
+                        Grupos específicos autorizados ({clientForm.whitelistedGroupIds.length} seleccionados)
+                      </label>
+                      <div className="whitelist-bulk-btns">
+                        <button
+                          type="button"
+                          className="radar-btn-outline small"
+                          onClick={() => {
+                            const allIds = availableGroups.map(g => g.id);
+                            setClientForm(prev => ({ ...prev, whitelistedGroupIds: allIds }));
+                          }}
+                        >
+                          Seleccionar Todos ({availableGroups.length})
+                        </button>
+                        <button
+                          type="button"
+                          className="radar-btn-outline small"
+                          onClick={() => setClientForm(prev => ({ ...prev, whitelistedGroupIds: [] }))}
+                        >
+                          Limpiar Selección
+                        </button>
+                      </div>
+                    </div>
+
+                    {groupTags.length > 0 && (
+                      <div className="whitelist-category-quickselect mb-2 mt-2">
+                        <span className="quickselect-label">Selección rápida por categoría:</span>
+                        <div className="category-tags-list mini">
+                          {groupTags.map(tag => (
+                            <button
+                              type="button"
+                              key={tag.id}
+                              className="category-tag-pill mini"
+                              style={{ borderColor: tag.color || '#10b981' }}
+                              onClick={() => {
+                                const tagGroupIds = tag.groupIds || [];
+                                setClientForm(prev => {
+                                  const set = new Set(prev.whitelistedGroupIds);
+                                  const allIn = tagGroupIds.every(id => set.has(id));
+                                  if (allIn) {
+                                    tagGroupIds.forEach(id => set.delete(id));
+                                  } else {
+                                    tagGroupIds.forEach(id => set.add(id));
+                                  }
+                                  return { ...prev, whitelistedGroupIds: Array.from(set) };
+                                });
+                              }}
+                              title="Clic para seleccionar o deseleccionar todos los grupos de esta categoría"
+                            >
+                              🏷️ {tag.name} ({tag.groupIds?.length || 0})
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="whitelist-search-box mt-2">
+                      <Search size={16} />
+                      <input
+                        type="text"
+                        placeholder="Buscar grupos para este cliente..."
+                        value={clientGroupSearch}
+                        onChange={e => setClientGroupSearch(e.target.value)}
+                      />
+                    </div>
+
+                    <div className="whitelist-groups-list client-group-list">
+                      {availableGroups
+                        .filter(g =>
+                          !clientGroupSearch.trim() ||
+                          (g.name || '').toLowerCase().includes(clientGroupSearch.toLowerCase()) ||
+                          g.id.toLowerCase().includes(clientGroupSearch.toLowerCase()),
+                        )
+                        .map(g => {
+                          const isSelected = clientForm.whitelistedGroupIds.includes(g.id);
+                          return (
+                            <label key={g.id} className={`whitelist-group-item ${isSelected ? 'selected' : ''}`}>
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={e => {
+                                  if (e.target.checked) {
+                                    setClientForm(prev => ({
+                                      ...prev,
+                                      whitelistedGroupIds: [...prev.whitelistedGroupIds, g.id],
+                                    }));
+                                  } else {
+                                    setClientForm(prev => ({
+                                      ...prev,
+                                      whitelistedGroupIds: prev.whitelistedGroupIds.filter(id => id !== g.id),
+                                    }));
+                                  }
+                                }}
+                              />
+                              <div className="group-item-info">
+                                <span className="group-item-name">{g.name || '(Sin nombre)'}</span>
+                                <span className="group-item-id">{g.id}</span>
+                              </div>
+                            </label>
+                          );
+                        })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {editingClient && (
                 <div className="client-blacklist-management">
                   <h4 className="blacklist-title">
@@ -2199,6 +2655,25 @@ export function RadarLeads() {
           </div>
         </div>
       )}
+
+      {/* MODAL DE SEGMENTACIÓN / CREAR Y EDITAR CATEGORÍAS DE GRUPOS */}
+      <GroupTagModal
+        isOpen={isTagModalOpen}
+        onClose={() => setIsTagModalOpen(false)}
+        session={sessions.length > 0 ? sessions[0].id : 'default'}
+        editingTagId={editingTagId}
+        newTagName={newTagName}
+        setNewTagName={setNewTagName}
+        newTagColor={newTagColor}
+        setNewTagColor={setNewTagColor}
+        selectedGroupIdsForTag={selectedGroupIdsForTag}
+        setSelectedGroupIdsForTag={setSelectedGroupIdsForTag}
+        groups={availableGroups}
+        groupTags={groupTags}
+        groupSearchQuery={tagModalGroupSearch}
+        setGroupSearchQuery={setTagModalGroupSearch}
+        onSaved={handleTagSaved}
+      />
     </div>
   );
 }

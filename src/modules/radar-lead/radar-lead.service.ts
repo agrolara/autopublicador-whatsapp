@@ -17,8 +17,10 @@ import {
   RadarMetricsSummaryDto,
   ClientMetricsDto,
   FlagNegativeLeadDto,
+  SaveGroupCategoryTagDto,
 } from './dto/radar.dto';
 import { AiTelemetryService } from '../ai-telemetry/ai-telemetry.service';
+import { GroupTagsService, GroupTag } from '../contact/group-tags.service';
 
 export function normalizeTextForSearch(str: string): string {
   return (str || '')
@@ -171,6 +173,8 @@ export class RadarLeadService implements OnModuleInit {
     private engineRegistry?: EngineRegistry,
     @Optional()
     private readonly aiTelemetryService?: AiTelemetryService,
+    @Optional()
+    private readonly groupTagsService?: GroupTagsService,
   ) {
     // Backwards-compatibility if caller passed (settingsRepo, clientsRepo, engineRegistry)
     if (this.logsRepo && !this.engineRegistry && ('get' in (this.logsRepo as any) || 'getEngine' in (this.logsRepo as any) || typeof (this.logsRepo as any).get === 'function')) {
@@ -265,6 +269,7 @@ export class RadarLeadService implements OnModuleInit {
           ignoreMediaWithoutCaption BOOLEAN NOT NULL DEFAULT 1,
           groupFilterMode VARCHAR(32) NOT NULL DEFAULT 'ALL',
           groupCategoryKeywords TEXT NOT NULL DEFAULT 'quilicura,valle lo campino,valle grande',
+          groupCategoryTags TEXT NOT NULL DEFAULT '[]',
           whitelistedGroupIds TEXT NOT NULL DEFAULT '[]',
           activeScanningSessions TEXT NOT NULL DEFAULT '[]',
           dedupWindowSeconds INT NOT NULL DEFAULT 30,
@@ -290,6 +295,10 @@ export class RadarLeadService implements OnModuleInit {
           active BOOLEAN NOT NULL DEFAULT 1,
           blacklistedSenders TEXT NOT NULL DEFAULT '[]',
           negativePhrases TEXT NOT NULL DEFAULT '[]',
+          groupFilterMode VARCHAR(32) NOT NULL DEFAULT 'GLOBAL',
+          groupCategoryKeywords TEXT NOT NULL DEFAULT '',
+          groupCategoryTags TEXT NOT NULL DEFAULT '[]',
+          whitelistedGroupIds TEXT NOT NULL DEFAULT '[]',
           createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
           updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
         )
@@ -318,14 +327,29 @@ export class RadarLeadService implements OnModuleInit {
         await this.logsRepo.query(`CREATE INDEX IF NOT EXISTS idx_radar_logs_created ON radar_lead_logs(createdAt)`).catch(() => {});
       }
 
-      // Backward compatibility migrations for existing SQLite databases
-      await this.settingsRepo.query(`ALTER TABLE radar_settings ADD COLUMN aiSemanticEnabled BOOLEAN NOT NULL DEFAULT 1`).catch(() => {});
-      await this.settingsRepo.query(`ALTER TABLE radar_settings ADD COLUMN aiProvider VARCHAR(32) NOT NULL DEFAULT 'typesafe'`).catch(() => {});
-      await this.settingsRepo.query(`ALTER TABLE radar_settings ADD COLUMN typesafeApiKey TEXT NOT NULL DEFAULT ''`).catch(() => {});
-      await this.settingsRepo.query(`ALTER TABLE radar_settings ADD COLUMN globalBlacklistedSenders TEXT NOT NULL DEFAULT '[]'`).catch(() => {});
-      await this.clientsRepo.query(`ALTER TABLE radar_clients ADD COLUMN useAiFilter BOOLEAN NOT NULL DEFAULT 1`).catch(() => {});
-      await this.clientsRepo.query(`ALTER TABLE radar_clients ADD COLUMN blacklistedSenders TEXT NOT NULL DEFAULT '[]'`).catch(() => {});
-      await this.clientsRepo.query(`ALTER TABLE radar_clients ADD COLUMN negativePhrases TEXT NOT NULL DEFAULT '[]'`).catch(() => {});
+      // Backward compatibility migrations for existing databases (Postgres & SQLite)
+      const isPostgres = this.settingsRepo.metadata.connection.options.type === 'postgres';
+      if (isPostgres) {
+        await this.settingsRepo.query(`ALTER TABLE radar_settings ADD COLUMN IF NOT EXISTS "groupCategoryTags" TEXT DEFAULT '[]'`).catch(() => {});
+        await this.clientsRepo.query(`ALTER TABLE radar_clients ADD COLUMN IF NOT EXISTS "groupFilterMode" VARCHAR(32) DEFAULT 'GLOBAL'`).catch(() => {});
+        await this.clientsRepo.query(`ALTER TABLE radar_clients ADD COLUMN IF NOT EXISTS "groupCategoryKeywords" TEXT DEFAULT ''`).catch(() => {});
+        await this.clientsRepo.query(`ALTER TABLE radar_clients ADD COLUMN IF NOT EXISTS "groupCategoryTags" TEXT DEFAULT '[]'`).catch(() => {});
+        await this.clientsRepo.query(`ALTER TABLE radar_clients ADD COLUMN IF NOT EXISTS "whitelistedGroupIds" TEXT DEFAULT '[]'`).catch(() => {});
+      } else {
+        await this.settingsRepo.query(`ALTER TABLE radar_settings ADD COLUMN aiSemanticEnabled BOOLEAN NOT NULL DEFAULT 1`).catch(() => {});
+        await this.settingsRepo.query(`ALTER TABLE radar_settings ADD COLUMN aiProvider VARCHAR(32) NOT NULL DEFAULT 'typesafe'`).catch(() => {});
+        await this.settingsRepo.query(`ALTER TABLE radar_settings ADD COLUMN typesafeApiKey TEXT NOT NULL DEFAULT ''`).catch(() => {});
+        await this.settingsRepo.query(`ALTER TABLE radar_settings ADD COLUMN globalBlacklistedSenders TEXT NOT NULL DEFAULT '[]'`).catch(() => {});
+        await this.settingsRepo.query(`ALTER TABLE radar_settings ADD COLUMN groupCategoryTags TEXT NOT NULL DEFAULT '[]'`).catch(() => {});
+
+        await this.clientsRepo.query(`ALTER TABLE radar_clients ADD COLUMN useAiFilter BOOLEAN NOT NULL DEFAULT 1`).catch(() => {});
+        await this.clientsRepo.query(`ALTER TABLE radar_clients ADD COLUMN blacklistedSenders TEXT NOT NULL DEFAULT '[]'`).catch(() => {});
+        await this.clientsRepo.query(`ALTER TABLE radar_clients ADD COLUMN negativePhrases TEXT NOT NULL DEFAULT '[]'`).catch(() => {});
+        await this.clientsRepo.query(`ALTER TABLE radar_clients ADD COLUMN groupFilterMode VARCHAR(32) NOT NULL DEFAULT 'GLOBAL'`).catch(() => {});
+        await this.clientsRepo.query(`ALTER TABLE radar_clients ADD COLUMN groupCategoryKeywords TEXT NOT NULL DEFAULT ''`).catch(() => {});
+        await this.clientsRepo.query(`ALTER TABLE radar_clients ADD COLUMN groupCategoryTags TEXT NOT NULL DEFAULT '[]'`).catch(() => {});
+        await this.clientsRepo.query(`ALTER TABLE radar_clients ADD COLUMN whitelistedGroupIds TEXT NOT NULL DEFAULT '[]'`).catch(() => {});
+      }
 
       let defaultSetting = await this.settingsRepo.findOne({ where: { id: 'default' } });
       if (!defaultSetting) {
@@ -437,9 +461,15 @@ export class RadarLeadService implements OnModuleInit {
       }
       this.dedupCache.set(dedupKey, now);
 
-      // 0 ms Gate 7: Group Filter Check
+      // 0 ms Gate 7: Group Filter Pre-Check
       const groupName = await this.resolveGroupName(sessionId, groupId);
-      if (!this.checkGroupAllowed(settings, groupId, groupName)) {
+      const groupTags = this.loadGroupTags();
+
+      // Discard in 0 ms if no active client listens to this group
+      const anyClientListens = this.cachedActiveClients.some(client =>
+        this.isGroupAllowedForClient(client, settings, groupId, groupName, groupTags),
+      );
+      if (!anyClientListens) {
         return;
       }
 
@@ -451,6 +481,11 @@ export class RadarLeadService implements OnModuleInit {
       const buyerPhoneDigits = normalizePhoneDigits(author);
 
       for (const client of this.cachedActiveClients) {
+        // Individual client group scope check (ALL, CATEGORY, WHITELIST, GLOBAL)
+        if (!this.isGroupAllowedForClient(client, settings, groupId, groupName, groupTags)) {
+          continue;
+        }
+
         const { matched, matchedKeyword } = matchesKeywords(text, client.localKeywords);
         if (!matched) continue;
 
@@ -583,9 +618,82 @@ export class RadarLeadService implements OnModuleInit {
   }
 
   /**
+   * Loads group categories and segmentations from GroupTagsService or data/group-tags.json fallback.
+   */
+  loadGroupTags(): GroupTag[] {
+    if (this.groupTagsService) {
+      try {
+        const tags = this.groupTagsService.getTags();
+        if (Array.isArray(tags)) return tags;
+      } catch (err: any) {
+        this.logger.warn('Failed to load group tags from service, reading file fallback', { error: err?.message });
+      }
+    }
+    try {
+      const filePath = path.join(process.cwd(), 'data', 'group-tags.json');
+      if (fs.existsSync(filePath)) {
+        const raw = fs.readFileSync(filePath, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
+  }
+
+  getGroupTags(): GroupTag[] {
+    return this.loadGroupTags();
+  }
+
+  saveGroupTag(dto: SaveGroupCategoryTagDto): GroupTag {
+    if (this.groupTagsService) {
+      return this.groupTagsService.saveTag('global', dto);
+    }
+    const tags = this.loadGroupTags();
+    let existing = dto.id ? tags.find(t => t.id === dto.id) : null;
+    if (!existing) {
+      existing = tags.find(t => t.name.toLowerCase() === dto.name.toLowerCase());
+    }
+    if (existing) {
+      existing.name = dto.name;
+      if (dto.color) existing.color = dto.color;
+      existing.groupIds = Array.from(new Set([...dto.groupIds]));
+    } else {
+      existing = {
+        id: `tag_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        sessionId: 'global',
+        name: dto.name,
+        color: dto.color || '#10b981',
+        groupIds: Array.from(new Set([...dto.groupIds])),
+        createdAt: new Date().toISOString(),
+      };
+      tags.push(existing);
+    }
+    const filePath = path.join(process.cwd(), 'data', 'group-tags.json');
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, JSON.stringify(tags, null, 2), 'utf8');
+    return existing;
+  }
+
+  deleteGroupTag(id: string): { success: boolean } {
+    if (this.groupTagsService) {
+      const success = this.groupTagsService.deleteTag('global', id);
+      return { success };
+    }
+    const tags = this.loadGroupTags();
+    const idx = tags.findIndex(t => t.id === id);
+    if (idx !== -1) {
+      tags.splice(idx, 1);
+      const filePath = path.join(process.cwd(), 'data', 'group-tags.json');
+      fs.writeFileSync(filePath, JSON.stringify(tags, null, 2), 'utf8');
+      return { success: true };
+    }
+    return { success: false };
+  }
+
+  /**
    * Checks if group satisfies current filter settings.
    */
-  private checkGroupAllowed(settings: RadarSetting, groupId: string, groupName: string): boolean {
+  checkGroupAllowed(settings: RadarSetting, groupId: string, groupName: string, tags?: GroupTag[]): boolean {
     const mode = settings.groupFilterMode || 'ALL';
 
     if (mode === 'ALL') {
@@ -598,13 +706,87 @@ export class RadarLeadService implements OnModuleInit {
     }
 
     if (mode === 'CATEGORY') {
-      const categoryKeywords = settings.groupCategoryKeywords || '';
-      if (!categoryKeywords.trim()) return true;
-      const { matched } = matchesKeywords(groupName, categoryKeywords);
-      return matched;
+      const categoryKeywords = (settings.groupCategoryKeywords || '').trim();
+      const categoryTags: string[] = this.parseJsonArray(settings.groupCategoryTags);
+
+      // Check category tags (segmentation)
+      if (categoryTags.length > 0 && tags && tags.length > 0) {
+        const belongsToTag = tags.some(
+          t => (categoryTags.includes(t.id) || categoryTags.includes(t.name)) && Array.isArray(t.groupIds) && t.groupIds.includes(groupId),
+        );
+        if (belongsToTag) return true;
+      }
+
+      // Check keywords in group name
+      if (categoryKeywords) {
+        const { matched } = matchesKeywords(groupName, categoryKeywords);
+        if (matched) return true;
+      }
+
+      // If both tags and keywords are empty, allow all
+      if (!categoryKeywords && categoryTags.length === 0) return true;
+
+      return false;
     }
 
     return true;
+  }
+
+  /**
+   * Checks if group satisfies a specific client's filter settings.
+   */
+  isGroupAllowedForClient(
+    client: RadarClient,
+    settings: RadarSetting,
+    groupId: string,
+    groupName: string,
+    tags?: GroupTag[],
+  ): boolean {
+    const clientMode = client.groupFilterMode || 'GLOBAL';
+
+    if (clientMode === 'ALL') {
+      return true;
+    }
+
+    if (clientMode === 'WHITELIST') {
+      const clientWhitelist: string[] = this.parseJsonArray(client.whitelistedGroupIds);
+      if (clientWhitelist.length > 0) {
+        return clientWhitelist.includes(groupId);
+      }
+      // Fallback to global whitelist if client whitelist is empty
+      const globalWhitelist: string[] = this.parseJsonArray(settings.whitelistedGroupIds);
+      return globalWhitelist.includes(groupId);
+    }
+
+    if (clientMode === 'CATEGORY') {
+      const clientKeywords = (client.groupCategoryKeywords || '').trim();
+      const clientTags: string[] = this.parseJsonArray(client.groupCategoryTags);
+
+      // 1. Check client category tags (segmentation)
+      if (clientTags.length > 0 && tags && tags.length > 0) {
+        const belongsToTag = tags.some(
+          t => (clientTags.includes(t.id) || clientTags.includes(t.name)) && Array.isArray(t.groupIds) && t.groupIds.includes(groupId),
+        );
+        if (belongsToTag) return true;
+      }
+
+      // 2. Check client keywords in group name (or fallback to settings keywords)
+      const effectiveKeywords = clientKeywords || (settings.groupCategoryKeywords || '').trim();
+      if (effectiveKeywords) {
+        const { matched } = matchesKeywords(groupName, effectiveKeywords);
+        if (matched) return true;
+      }
+
+      // If both tags and keywords are empty, allow all
+      if (!clientKeywords && clientTags.length === 0 && !settings.groupCategoryKeywords) {
+        return true;
+      }
+
+      return false;
+    }
+
+    // Default: 'GLOBAL' - inherit radar general settings
+    return this.checkGroupAllowed(settings, groupId, groupName, tags);
   }
 
   /**
@@ -718,6 +900,9 @@ export class RadarLeadService implements OnModuleInit {
     if (dto.ignoreMediaWithoutCaption !== undefined) settings.ignoreMediaWithoutCaption = dto.ignoreMediaWithoutCaption;
     if (dto.groupFilterMode !== undefined) settings.groupFilterMode = dto.groupFilterMode;
     if (dto.groupCategoryKeywords !== undefined) settings.groupCategoryKeywords = dto.groupCategoryKeywords;
+    if (dto.groupCategoryTags !== undefined) {
+      settings.groupCategoryTags = JSON.stringify(dto.groupCategoryTags);
+    }
     if (dto.whitelistedGroupIds !== undefined) {
       settings.whitelistedGroupIds = JSON.stringify(dto.whitelistedGroupIds);
     }
@@ -762,6 +947,10 @@ export class RadarLeadService implements OnModuleInit {
       active: dto.active ?? true,
       blacklistedSenders: dto.blacklistedSenders ? JSON.stringify(dto.blacklistedSenders) : '[]',
       negativePhrases: dto.negativePhrases ? JSON.stringify(dto.negativePhrases) : '[]',
+      groupFilterMode: dto.groupFilterMode || 'GLOBAL',
+      groupCategoryKeywords: dto.groupCategoryKeywords || '',
+      groupCategoryTags: dto.groupCategoryTags ? JSON.stringify(dto.groupCategoryTags) : '[]',
+      whitelistedGroupIds: dto.whitelistedGroupIds ? JSON.stringify(dto.whitelistedGroupIds) : '[]',
     });
     const saved = await this.clientsRepo.save(client);
     await this.reloadCache();
@@ -796,6 +985,18 @@ export class RadarLeadService implements OnModuleInit {
       client.negativePhrases = Array.isArray(dto.negativePhrases)
         ? JSON.stringify(dto.negativePhrases)
         : String(dto.negativePhrases);
+    }
+    if (dto.groupFilterMode !== undefined) client.groupFilterMode = dto.groupFilterMode;
+    if (dto.groupCategoryKeywords !== undefined) client.groupCategoryKeywords = dto.groupCategoryKeywords;
+    if (dto.groupCategoryTags !== undefined) {
+      client.groupCategoryTags = Array.isArray(dto.groupCategoryTags)
+        ? JSON.stringify(dto.groupCategoryTags)
+        : String(dto.groupCategoryTags);
+    }
+    if (dto.whitelistedGroupIds !== undefined) {
+      client.whitelistedGroupIds = Array.isArray(dto.whitelistedGroupIds)
+        ? JSON.stringify(dto.whitelistedGroupIds)
+        : String(dto.whitelistedGroupIds);
     }
 
     const saved = await this.clientsRepo.save(client);

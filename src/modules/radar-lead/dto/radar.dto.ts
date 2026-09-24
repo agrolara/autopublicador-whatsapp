@@ -30,6 +30,12 @@ export class UpdateRadarSettingsDto {
   @IsString()
   groupCategoryKeywords?: string;
 
+  @ApiPropertyOptional({ description: 'IDs de categorías/tags de grupos para filtrado por categoría', type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  groupCategoryTags?: string[];
+
   @ApiPropertyOptional({ description: 'Lista blanca de IDs de grupos permitidos', type: [String] })
   @IsOptional()
   @IsArray()
@@ -124,6 +130,28 @@ export class CreateRadarClientDto {
   @IsArray()
   @IsString({ each: true })
   negativePhrases?: string[];
+
+  @ApiPropertyOptional({ description: 'Modo de filtrado de grupos para este cliente', enum: ['GLOBAL', 'ALL', 'CATEGORY', 'WHITELIST'], default: 'GLOBAL' })
+  @IsOptional()
+  @IsEnum(['GLOBAL', 'ALL', 'CATEGORY', 'WHITELIST'])
+  groupFilterMode?: 'GLOBAL' | 'ALL' | 'CATEGORY' | 'WHITELIST';
+
+  @ApiPropertyOptional({ description: 'Palabras clave en el nombre del grupo para este cliente' })
+  @IsOptional()
+  @IsString()
+  groupCategoryKeywords?: string;
+
+  @ApiPropertyOptional({ description: 'IDs de categorías/tags de grupos asignadas a este cliente', type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  groupCategoryTags?: string[];
+
+  @ApiPropertyOptional({ description: 'Lista blanca de IDs de grupos permitidos para este cliente', type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  whitelistedGroupIds?: string[];
 }
 
 export class UpdateRadarClientDto {
@@ -183,6 +211,49 @@ export class UpdateRadarClientDto {
   @IsArray()
   @IsString({ each: true })
   negativePhrases?: string[];
+
+  @ApiPropertyOptional({ description: 'Modo de filtrado de grupos para este cliente', enum: ['GLOBAL', 'ALL', 'CATEGORY', 'WHITELIST'] })
+  @IsOptional()
+  @IsEnum(['GLOBAL', 'ALL', 'CATEGORY', 'WHITELIST'])
+  groupFilterMode?: 'GLOBAL' | 'ALL' | 'CATEGORY' | 'WHITELIST';
+
+  @ApiPropertyOptional({ description: 'Palabras clave en el nombre del grupo para este cliente' })
+  @IsOptional()
+  @IsString()
+  groupCategoryKeywords?: string;
+
+  @ApiPropertyOptional({ description: 'IDs de categorías/tags de grupos asignadas a este cliente', type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  groupCategoryTags?: string[];
+
+  @ApiPropertyOptional({ description: 'Lista blanca de IDs de grupos permitidos para este cliente', type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  whitelistedGroupIds?: string[];
+}
+
+export class SaveGroupCategoryTagDto {
+  @ApiPropertyOptional({ description: 'ID de la categoría si se está editando' })
+  @IsOptional()
+  @IsString()
+  id?: string;
+
+  @ApiProperty({ description: 'Nombre de la categoría de grupos', example: 'QUILICURA COMPRAS' })
+  @IsString()
+  name!: string;
+
+  @ApiPropertyOptional({ description: 'Color identificador en hexadecimal', example: '#10b981' })
+  @IsOptional()
+  @IsString()
+  color?: string;
+
+  @ApiProperty({ description: 'Lista de IDs de grupos de WhatsApp', type: [String] })
+  @IsArray()
+  @IsString({ each: true })
+  groupIds!: string[];
 }
 
 export class TestEvaluateDto {

@@ -11,6 +11,7 @@ import {
   TestEvaluateDto,
   QueryRadarLogsDto,
   FlagNegativeLeadDto,
+  SaveGroupCategoryTagDto,
 } from './dto/radar.dto';
 import { RequireRole } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
@@ -149,6 +150,31 @@ export class RadarLeadController {
   @ApiResponse({ status: 200, description: 'Frase eliminada de lista negra' })
   async removeNegativePhrase(@Param('id') id: string, @Query('phrase') phrase: string) {
     return this.radarLeadService.removeNegativePhrase(id, phrase);
+  }
+
+  @Get('group-tags')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Obtener todas las categorías y segmentaciones de grupos' })
+  @ApiResponse({ status: 200, description: 'Lista de categorías de grupos' })
+  async getGroupTags() {
+    return this.radarLeadService.getGroupTags();
+  }
+
+  @Post('group-tags')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Crear o editar una categoría/segmentación de grupos' })
+  @ApiResponse({ status: 201, description: 'Categoría guardada exitosamente' })
+  async saveGroupTag(@Body() dto: SaveGroupCategoryTagDto) {
+    return this.radarLeadService.saveGroupTag(dto);
+  }
+
+  @Delete('group-tags/:id')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Eliminar una categoría/segmentación de grupos' })
+  @ApiParam({ name: 'id', description: 'ID de la categoría' })
+  @ApiResponse({ status: 200, description: 'Categoría eliminada' })
+  async deleteGroupTag(@Param('id') id: string) {
+    return this.radarLeadService.deleteGroupTag(id);
   }
 }
 
