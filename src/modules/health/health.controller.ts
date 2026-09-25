@@ -1,4 +1,5 @@
 import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
+import * as v8 from 'v8';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { HealthCheckResponseDto, LivenessResponseDto, ReadinessResponseDto } from './dto/health-response.dto';
 import { InjectDataSource } from '@nestjs/typeorm';
@@ -38,11 +39,18 @@ export class HealthController {
   @Get()
   @ApiOperation({ summary: 'Basic health check' })
   @ApiResponse({ status: 200, description: 'Application is healthy', type: HealthCheckResponseDto })
-  check(): { status: string; timestamp: string; version: string } {
+  check(): { status: string; timestamp: string; version: string; memory: { heapSizeLimitMB: number; totalHeapMB: number; usedHeapMB: number; nodeOptions: string } } {
+    const heap = v8.getHeapStatistics();
     return {
       status: 'ok',
       timestamp: new Date().toISOString(),
       version: APP_VERSION,
+      memory: {
+        heapSizeLimitMB: Math.round(heap.heap_size_limit / 1024 / 1024),
+        totalHeapMB: Math.round(heap.total_heap_size / 1024 / 1024),
+        usedHeapMB: Math.round(heap.used_heap_size / 1024 / 1024),
+        nodeOptions: process.env.NODE_OPTIONS || 'none',
+      },
     };
   }
 
