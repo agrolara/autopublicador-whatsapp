@@ -28,6 +28,7 @@ const Infrastructure = lazy(() => import('./pages/Infrastructure').then(m => ({ 
 const Plugins = lazy(() => import('./pages/Plugins'));
 const AiAgent = lazy(() => import('./pages/AiAgent').then(m => ({ default: m.AiAgent })));
 const RadarLeads = lazy(() => import('./pages/RadarLeads').then(m => ({ default: m.RadarLeads })));
+const ClientsManager = lazy(() => import('./pages/ClientsManager').then(m => ({ default: m.ClientsManager })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -131,6 +132,7 @@ function AppContent() {
               <Route path="templates" element={<Templates />} />
               <Route path="ai-agent" element={<AiAgent />} />
               <Route path="radar-leads" element={<RadarLeads />} />
+              {role === 'admin' && <Route path="clients" element={<ClientsManager />} />}
               {role === 'admin' && <Route path="api-keys" element={<ApiKeys />} />}
               <Route path="logs" element={<Logs />} />
               <Route path="message-tester" element={<MessageTester />} />

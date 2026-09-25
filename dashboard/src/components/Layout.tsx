@@ -26,6 +26,7 @@ import {
   FolderGit2,
   Bot,
   Radio,
+  UserCheck,
 } from 'lucide-react';
 import { useTheme } from '../hooks/useTheme';
 import { type UserRole } from '../hooks/useRole';
@@ -49,6 +50,7 @@ const allNavItems = [
   { to: '/templates', icon: ClipboardList, key: 'templates' as const, adminOnly: false },
   { to: '/ai-agent', icon: Bot, key: 'aiAgent' as const, adminOnly: false },
   { to: '/radar-leads', icon: Radio, key: 'radarLeads' as const, adminOnly: false },
+  { to: '/clients', icon: UserCheck, key: 'clients' as const, adminOnly: true },
   { to: '/api-keys', icon: Key, key: 'apiKeys' as const, adminOnly: true },
   { to: '/message-tester', icon: Send, key: 'messageTester' as const, adminOnly: false },
   // Backend /infra/* is ADMIN-only; hide the nav item from non-admins (UX + defense-in-depth).
@@ -201,6 +203,8 @@ export function Layout({ onLogout, userRole }: LayoutProps) {
                 ? 'Asistente IA'
                 : key === 'radarLeads'
                 ? 'Radar de Leads'
+                : key === 'clients'
+                ? 'Clientes SaaS'
                 : t(`nav.${key}`);
             return (
               <NavLink

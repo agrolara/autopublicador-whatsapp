@@ -29,6 +29,7 @@ import {
   BarChart3,
 } from 'lucide-react';
 import { AiTelemetryView } from '../components/AiTelemetryView';
+import { useRole } from '../hooks/useRole';
 import { sessionApi, aiAgentApi } from '../services/api';
 import type {
   Session,
@@ -138,6 +139,7 @@ const SUGGESTED_MODELS: Record<AiProvider, SuggestedModelItem[]> = {
 };
 
 export function AiAgent() {
+  const { role } = useRole();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(true);
@@ -527,17 +529,19 @@ export function AiAgent() {
           <Bot size={18} />
           <span>Configuración del Asistente</span>
         </button>
-        <button
-          type="button"
-          className={`ai-tab-btn ${activeTab === 'telemetry' ? 'active' : ''}`}
-          onClick={() => setActiveTab('telemetry')}
-        >
-          <Activity size={18} />
-          <span>Consumos, Costos y Saldos (OpenRouter / Groq / Jevs)</span>
-        </button>
+        {role === 'admin' && (
+          <button
+            type="button"
+            className={`ai-tab-btn ${activeTab === 'telemetry' ? 'active' : ''}`}
+            onClick={() => setActiveTab('telemetry')}
+          >
+            <Activity size={18} />
+            <span>Consumos, Costos y Saldos (OpenRouter / Groq / Jevs)</span>
+          </button>
+        )}
       </div>
 
-      {activeTab === 'telemetry' ? (
+      {activeTab === 'telemetry' && role === 'admin' ? (
         <AiTelemetryView />
       ) : (
         <>

@@ -739,7 +739,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
   const response = await fetch(url, { ...options, headers });
 
-  if (response.status === 401) {
+  if (response.status === 401 && !endpoint.startsWith('/auth/login') && !endpoint.startsWith('/auth/otp')) {
     // The stored API key is invalid/expired/revoked — clear it and return to login
     // so the user isn't stuck on a dashboard that 401s every request.
     sessionStorage.removeItem('openwa_api_key');
@@ -2041,6 +2041,101 @@ export const aiTelemetryApi = {
   },
   clearLogs: () =>
     request<{ success: boolean }>('/ai-telemetry/logs', {
+      method: 'DELETE',
+    }),
+};
+
+// =============================================================================
+// Client Accounts & Multi-Tenant Authentication API
+// =============================================================================
+
+export interface ClientAccount {
+  id: string;
+  name: string;
+  phone?: string | null;
+  username?: string | null;
+  role: 'admin' | 'operator' | 'readonly';
+  allowedSessions?: string[] | null;
+  paymentStatus: 'active' | 'suspended_unpaid' | 'trial';
+  isActive: boolean;
+  monthlyFee?: number | null;
+  nextBillingDate?: string | null;
+  clientToken?: string | null;
+  notes?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateClientAccountPayload {
+  name: string;
+  username?: string;
+  phone?: string;
+  password?: string;
+  role?: 'admin' | 'operator' | 'readonly';
+  allowedSessions?: string[];
+  paymentStatus?: 'active' | 'suspended_unpaid' | 'trial';
+  monthlyFee?: number;
+  nextBillingDate?: string;
+  notes?: string;
+}
+
+export interface UpdateClientAccountPayload {
+  name?: string;
+  username?: string;
+  phone?: string;
+  password?: string;
+  allowedSessions?: string[];
+  paymentStatus?: 'active' | 'suspended_unpaid' | 'trial';
+  isActive?: boolean;
+  monthlyFee?: number;
+  nextBillingDate?: string;
+  notes?: string;
+}
+
+export interface AuthLoginResponse {
+  valid: boolean;
+  token: string;
+  role: string;
+  name: string;
+  username?: string | null;
+  allowedSessions?: string[] | null;
+  paymentStatus: string;
+}
+
+export const authApi = {
+  loginWithPassword: (data: { usernameOrPhone: string; password?: string }) =>
+    request<AuthLoginResponse>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  requestOtp: (data: { phone: string }) =>
+    request<{ success: boolean; message: string; expiresInSeconds: number; cleanPhone: string }>('/auth/otp/request', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  verifyOtp: (data: { phone: string; code: string }) =>
+    request<AuthLoginResponse>('/auth/otp/verify', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  validate: () => request<AuthLoginResponse>('/auth/validate'),
+};
+
+export const clientAccountApi = {
+  list: () => request<ClientAccount[]>('/auth/clients'),
+  get: (id: string) => request<ClientAccount>(`/auth/clients/${id}`),
+  create: (data: CreateClientAccountPayload) =>
+    request<ClientAccount>('/auth/clients', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  update: (id: string, data: UpdateClientAccountPayload) =>
+    request<ClientAccount>(`/auth/clients/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  delete: (id: string) =>
+    request<{ success: boolean }>(`/auth/clients/${id}`, {
       method: 'DELETE',
     }),
 };

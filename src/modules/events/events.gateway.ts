@@ -74,13 +74,14 @@ export function isSessionSubscriptionAllowed(allowedSessions: string[] | null | 
 }
 
 /** Why an API key's live WebSocket sockets are being torn down — drives the client-facing message. */
-export type ApiKeyEvictionReason = 'revoked' | 'deleted' | 'authorization_changed' | 'expired';
+export type ApiKeyEvictionReason = 'revoked' | 'deleted' | 'authorization_changed' | 'expired' | 'payment_suspended';
 
 const EVICTION_MESSAGES: Record<ApiKeyEvictionReason, string> = {
   revoked: 'API key has been revoked',
   deleted: 'API key has been deleted',
   authorization_changed: 'API key authorization changed; please reconnect',
   expired: 'API key has expired',
+  payment_suspended: 'Account suspended for pending payment; please contact support',
 };
 
 @WebSocketGateway({

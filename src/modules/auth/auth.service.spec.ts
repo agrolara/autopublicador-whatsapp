@@ -5,12 +5,13 @@ jest.mock('fs', () => ({ __esModule: true, ...jest.requireActual<typeof import('
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { FindOperator, Repository } from 'typeorm';
-import { UnauthorizedException, NotFoundException, ConflictException } from '@nestjs/common';
+import { UnauthorizedException, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { createHash, createHmac } from 'crypto';
 import * as fs from 'fs';
 import { AuthService, resolveSeedApiKey, bannerKeyLine } from './auth.service';
 import { ApiKeyUsageTracker } from './api-key-usage-tracker.service';
 import { ApiKey, ApiKeyRole } from './entities/api-key.entity';
+import { Session } from '../session/entities/session.entity';
 
 // Helpers
 const hashKey = (key: string) => createHash('sha256').update(key).digest('hex');
@@ -103,6 +104,11 @@ describe('AuthService', () => {
       increment: jest.fn(),
     };
 
+    const sessionRepository = {
+      find: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue(null),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
@@ -110,6 +116,10 @@ describe('AuthService', () => {
         {
           provide: getRepositoryToken(ApiKey, 'main'),
           useValue: repository,
+        },
+        {
+          provide: getRepositoryToken(Session, 'main'),
+          useValue: sessionRepository,
         },
       ],
     }).compile();
@@ -1032,6 +1042,115 @@ describe('AuthService', () => {
       delete process.env.API_KEY_PEPPER;
       const queried = await queriedHash('owa_raw_key');
       expect(queried).toBe(createHash('sha256').update('owa_raw_key').digest('hex'));
+    });
+  });
+
+  // ── Multi-Tenant SaaS, Password Login, Suspension & WhatsApp OTP ─────────
+  describe('Multi-Tenant Client Accounts & Kill-Switch', () => {
+    it('loginWithPassword allows master admin key immediately', async () => {
+      process.env.ADMIN_API_KEY = 'master-secret-1280';
+      const result = await service.loginWithPassword('master-secret-1280', 'master-secret-1280');
+      expect(result.valid).toBe(true);
+      expect(result.role).toBe('admin');
+      expect(result.paymentStatus).toBe('active');
+    });
+
+    it('loginWithPassword rejects invalid credentials', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValue(null);
+      await expect(service.loginWithPassword('unknown_user', 'bad_pass')).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('loginWithPassword throws ForbiddenException if account is suspended for unpaid bill', async () => {
+      const client = createMockApiKey({
+        username: 'sushicliente',
+        passwordHash: service.hashPassword('mypassword123'),
+        paymentStatus: 'suspended_unpaid',
+        isActive: false,
+      });
+      (repository.findOne as jest.Mock).mockResolvedValue(client);
+
+      await expect(service.loginWithPassword('sushicliente', 'mypassword123')).rejects.toThrow(
+        /CUENTA_SUSPENDIDA_PAGO_PENDIENTE/,
+      );
+    });
+
+    it('loginWithPassword returns clientToken and scope on correct credentials', async () => {
+      const client = createMockApiKey({
+        name: 'Sushi Icura',
+        username: 'sushiicura',
+        passwordHash: service.hashPassword('correct_pass'),
+        paymentStatus: 'active',
+        isActive: true,
+        allowedSessions: ['session-sushi'],
+        clientToken: 'owa_cl_test_token_123',
+      });
+      (repository.findOne as jest.Mock).mockResolvedValue(client);
+
+      const res = await service.loginWithPassword('sushiicura', 'correct_pass');
+      expect(res.valid).toBe(true);
+      expect(res.token).toBe('owa_cl_test_token_123');
+      expect(res.allowedSessions).toEqual(['session-sushi']);
+      expect(res.paymentStatus).toBe('active');
+    });
+
+    it('isSessionSuspended returns true if session belongs to an unpaid client account', async () => {
+      (repository.find as jest.Mock).mockResolvedValue([
+        createMockApiKey({
+          name: 'Cliente Moroso',
+          paymentStatus: 'suspended_unpaid',
+          isActive: false,
+          allowedSessions: ['session-moroso-1'],
+        }),
+        createMockApiKey({
+          name: 'Cliente Al Día',
+          paymentStatus: 'active',
+          isActive: true,
+          allowedSessions: ['session-aldia-2'],
+        }),
+      ]);
+
+      const isSuspended = await service.isSessionSuspended('session-moroso-1');
+      expect(isSuspended).toBe(true);
+
+      const isAlDiaSuspended = await service.isSessionSuspended('session-aldia-2');
+      expect(isAlDiaSuspended).toBe(false);
+    });
+
+    it('verifyWhatsAppOtp validates code, checks expiry, and returns token', async () => {
+      const futureDate = new Date(Date.now() + 5 * 60 * 1000);
+      const client = createMockApiKey({
+        name: 'Cliente WhatsApp',
+        phone: '56911223344',
+        otpCode: '852963',
+        otpExpiresAt: futureDate,
+        paymentStatus: 'active',
+        isActive: true,
+        clientToken: 'owa_cl_otp_verified_token',
+      });
+      (repository.findOne as jest.Mock).mockResolvedValue(client);
+      (repository.save as jest.Mock).mockImplementation(async (acc) => acc);
+
+      const res = await service.verifyWhatsAppOtp('56911223344', '852963');
+      expect(res.valid).toBe(true);
+      expect(res.token).toBe('owa_cl_otp_verified_token');
+      expect(client.otpCode).toBeNull();
+    });
+
+    it('verifyWhatsAppOtp rejects expired OTP code', async () => {
+      const pastDate = new Date(Date.now() - 60 * 1000);
+      const client = createMockApiKey({
+        name: 'Cliente WhatsApp',
+        phone: '56911223344',
+        otpCode: '123456',
+        otpExpiresAt: pastDate,
+        paymentStatus: 'active',
+        isActive: true,
+      });
+      (repository.findOne as jest.Mock).mockResolvedValue(client);
+
+      await expect(service.verifyWhatsAppOtp('56911223344', '123456')).rejects.toThrow(
+        /código de verificación ha expirado/i,
+      );
     });
   });
 });

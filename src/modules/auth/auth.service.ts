@@ -3,23 +3,27 @@ import {
   Injectable,
   NotFoundException,
   UnauthorizedException,
+  ForbiddenException,
+  BadRequestException,
+  Optional,
   OnModuleInit,
   OnModuleDestroy,
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Equal, IsNull, MoreThan, Not, Repository } from 'typeorm';
-import { randomBytes } from 'crypto';
+import { randomBytes, createHash } from 'crypto';
 import { ipMatches } from '../../common/utils/ip';
 import { hashApiKey } from './api-key-hash';
 import { ApiKey, ApiKeyRole } from './entities/api-key.entity';
 import { Session } from '../session/entities/session.entity';
-import { CreateApiKeyDto, UpdateApiKeyDto } from './dto';
+import { CreateApiKeyDto, UpdateApiKeyDto, CreateClientAccountDto, UpdateClientAccountDto } from './dto';
 import { createLogger } from '../../common/services/logger.service';
 import { readBootstrapKey, removeBootstrapKey, writeBootstrapKey } from './bootstrap-key-file';
 import { ApiKeyUsageTracker } from './api-key-usage-tracker.service';
 import { EventsGateway, type ApiKeyEvictionReason } from '../events/events.gateway';
 import { KeyedAsyncLock } from '../integration/ordering-lock';
+import { EngineRegistry } from '../../engine/engine-registry.service';
 
 /**
  * Resolves the API key to seed on first boot (when no keys exist yet).
@@ -78,9 +82,13 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
     private readonly sessionRepository: Repository<Session>,
     private readonly usageTracker: ApiKeyUsageTracker,
     private readonly moduleRef: ModuleRef,
+    @Optional()
+    private readonly engineRegistry?: EngineRegistry,
   ) {}
 
   async onModuleInit(): Promise<void> {
+    await this.ensureColumns();
+
     // Seed a default API key if none exist
     const count = await this.apiKeyRepository.count();
     let displayKey: string;
@@ -433,11 +441,19 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
     // authenticates over REST but fails on the WebSocket handshake (the CONNECT payload carries the
     // literal string) — the dashboard then runs commands fine while never receiving events, and the
     // session looks permanently disconnected. Whitespace is never part of a key.
-    const keyHash = this.hashKey(rawKey?.trim());
-    const apiKey = await this.apiKeyRepository.findOne({ where: { keyHash } });
+    const trimmed = rawKey?.trim();
+    const keyHash = this.hashKey(trimmed);
+    let apiKey = await this.apiKeyRepository.findOne({ where: { keyHash } });
+    if (!apiKey) {
+      apiKey = await this.apiKeyRepository.findOne({ where: { clientToken: trimmed } });
+    }
 
     if (!apiKey) {
       throw new UnauthorizedException('Invalid API key');
+    }
+
+    if (apiKey.paymentStatus === 'suspended_unpaid') {
+      throw new ForbiddenException('CUENTA_SUSPENDIDA_PAGO_PENDIENTE: Tu cuenta se encuentra suspendida por pago pendiente.');
     }
 
     if (!apiKey.isActive) {
@@ -504,5 +520,354 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
     };
 
     return roleHierarchy[apiKey.role] >= roleHierarchy[requiredRole];
+  }
+
+  /**
+   * Ensures new client management and multi-tenant columns exist on api_keys table.
+   */
+  private async ensureColumns(): Promise<void> {
+    const columns = [
+      { name: 'phone', type: 'VARCHAR(32)' },
+      { name: 'username', type: 'VARCHAR(64)' },
+      { name: 'passwordHash', type: 'VARCHAR(256)' },
+      { name: 'paymentStatus', type: "VARCHAR(32) DEFAULT 'active'" },
+      { name: 'monthlyFee', type: 'INT DEFAULT 0' },
+      { name: 'nextBillingDate', type: 'DATETIME' },
+      { name: 'otpCode', type: 'VARCHAR(16)' },
+      { name: 'otpExpiresAt', type: 'DATETIME' },
+      { name: 'clientToken', type: 'VARCHAR(128)' },
+      { name: 'notes', type: 'TEXT' },
+    ];
+    for (const col of columns) {
+      try {
+        await this.apiKeyRepository.query(`ALTER TABLE api_keys ADD COLUMN ${col.name} ${col.type}`);
+      } catch {
+        // column already exists
+      }
+    }
+  }
+
+  hashPassword(password: string): string {
+    return createHash('sha256').update(`pwd_${password}_salt_openwa`).digest('hex');
+  }
+
+  verifyPassword(password: string, storedHash?: string | null): boolean {
+    if (!storedHash) return false;
+    return this.hashPassword(password) === storedHash;
+  }
+
+  async createClientAccount(dto: CreateClientAccountDto): Promise<{ client: ApiKey; rawKey: string }> {
+    const cleanPhone = dto.phone ? dto.phone.replace(/[^0-9]/g, '') : null;
+    const cleanUsername = dto.username?.trim().toLowerCase() || (cleanPhone ? `user_${cleanPhone}` : `client_${Date.now()}`);
+
+    if (cleanPhone) {
+      const existingPhone = await this.apiKeyRepository.findOne({ where: { phone: cleanPhone } });
+      if (existingPhone) {
+        throw new ConflictException(`Ya existe una cuenta registrada con el teléfono +${cleanPhone}`);
+      }
+    }
+    const existingUser = await this.apiKeyRepository.findOne({ where: { username: cleanUsername } });
+    if (existingUser) {
+      throw new ConflictException(`El nombre de usuario '${cleanUsername}' ya está en uso`);
+    }
+
+    const rawKey = `owa_cl_${randomBytes(24).toString('hex')}`;
+    const keyHash = this.hashKey(rawKey);
+    const keyPrefix = rawKey.substring(0, 12);
+    const passwordHash = dto.password ? this.hashPassword(dto.password) : null;
+
+    const apiKey = this.apiKeyRepository.create({
+      name: dto.name,
+      username: cleanUsername,
+      phone: cleanPhone,
+      passwordHash,
+      keyHash,
+      keyPrefix,
+      clientToken: rawKey,
+      role: ApiKeyRole.OPERATOR,
+      allowedSessions: dto.allowedSessions || null,
+      paymentStatus: 'active',
+      isActive: true,
+      monthlyFee: dto.monthlyFee || 0,
+      nextBillingDate: dto.nextBillingDate ? new Date(dto.nextBillingDate) : null,
+      notes: dto.notes || null,
+    });
+
+    const saved = await this.apiKeyRepository.save(apiKey);
+    this.logger.log(`Client account created: ${saved.name} (user: ${saved.username}, phone: ${saved.phone})`);
+    return { client: saved, rawKey };
+  }
+
+  async updateClientAccount(id: string, dto: UpdateClientAccountDto): Promise<ApiKey> {
+    const account = await this.apiKeyRepository.findOne({ where: { id } });
+    if (!account) {
+      throw new NotFoundException(`Cliente con ID '${id}' no encontrado`);
+    }
+
+    if (dto.name !== undefined) account.name = dto.name;
+    if (dto.username !== undefined) {
+      const cleanUsername = dto.username.trim().toLowerCase();
+      const existing = await this.apiKeyRepository.findOne({ where: { username: cleanUsername } });
+      if (existing && existing.id !== id) {
+        throw new ConflictException(`El nombre de usuario '${cleanUsername}' ya está en uso`);
+      }
+      account.username = cleanUsername;
+    }
+    if (dto.phone !== undefined) {
+      account.phone = dto.phone ? dto.phone.replace(/[^0-9]/g, '') : null;
+    }
+    if (dto.password) {
+      account.passwordHash = this.hashPassword(dto.password);
+    }
+    if (dto.allowedSessions !== undefined) {
+      account.allowedSessions = dto.allowedSessions;
+    }
+    if (dto.paymentStatus !== undefined) {
+      account.paymentStatus = dto.paymentStatus;
+      if (dto.paymentStatus === 'suspended_unpaid') {
+        account.isActive = false;
+        this.evictActiveSockets(id, 'payment_suspended');
+      } else if (dto.paymentStatus === 'active') {
+        account.isActive = true;
+      }
+    }
+    if (dto.isActive !== undefined) {
+      account.isActive = dto.isActive;
+      if (!dto.isActive) {
+        this.evictActiveSockets(id, 'revoked');
+      }
+    }
+    if (dto.monthlyFee !== undefined) account.monthlyFee = dto.monthlyFee;
+    if (dto.nextBillingDate !== undefined) {
+      account.nextBillingDate = dto.nextBillingDate ? new Date(dto.nextBillingDate) : null;
+    }
+    if (dto.notes !== undefined) account.notes = dto.notes;
+
+    return this.apiKeyRepository.save(account);
+  }
+
+  async deleteClientAccount(id: string): Promise<boolean> {
+    const account = await this.apiKeyRepository.findOne({ where: { id } });
+    if (!account) {
+      throw new NotFoundException(`Cliente con ID '${id}' no encontrado`);
+    }
+    this.evictActiveSockets(id, 'deleted');
+    const result = await this.apiKeyRepository.delete(id);
+    return (result.affected ?? 0) > 0;
+  }
+
+  async listClientAccounts(): Promise<ApiKey[]> {
+    return this.apiKeyRepository.find({
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async getClientAccount(id: string): Promise<ApiKey> {
+    const account = await this.apiKeyRepository.findOne({ where: { id } });
+    if (!account) {
+      throw new NotFoundException(`Cliente con ID '${id}' no encontrado`);
+    }
+    return account;
+  }
+
+  async loginWithPassword(usernameOrPhone: string, password: string): Promise<{ valid: boolean; token: string; role: string; name: string; username?: string | null; allowedSessions?: string[] | null; paymentStatus: string }> {
+    const term = (usernameOrPhone || '').trim();
+    const cleanDigits = term.replace(/[^0-9]/g, '');
+
+    // 1. Direct master admin key check
+    const masterKey = process.env.ADMIN_API_KEY || process.env.API_MASTER_KEY;
+    if (masterKey && (term === masterKey || password === masterKey)) {
+      return {
+        valid: true,
+        token: masterKey,
+        role: 'admin',
+        name: 'Super Admin Master',
+        username: 'admin',
+        allowedSessions: null,
+        paymentStatus: 'active',
+      };
+    }
+
+    // 2. Find by username, phone or name
+    let account = await this.apiKeyRepository.findOne({ where: { username: term.toLowerCase() } });
+    if (!account && cleanDigits.length >= 8) {
+      account = await this.apiKeyRepository.findOne({ where: { phone: cleanDigits } });
+    }
+    if (!account) {
+      account = await this.apiKeyRepository.findOne({ where: { name: term } });
+    }
+
+    // 3. Fallback: match by raw API Key
+    if (!account) {
+      const hash = this.hashKey(term);
+      account = await this.apiKeyRepository.findOne({ where: [{ keyHash: hash }, { clientToken: term }] });
+      if (account) {
+        if (account.paymentStatus === 'suspended_unpaid' || !account.isActive) {
+          throw new ForbiddenException('CUENTA_SUSPENDIDA_PAGO_PENDIENTE: Tu cuenta se encuentra suspendida por pago pendiente. Contacta al administrador.');
+        }
+        return {
+          valid: true,
+          token: term,
+          role: account.role,
+          name: account.name,
+          username: account.username,
+          allowedSessions: account.allowedSessions,
+          paymentStatus: account.paymentStatus,
+        };
+      }
+      throw new UnauthorizedException('Credenciales inválidas. Verifica tu usuario, teléfono o contraseña.');
+    }
+
+    if (!account.passwordHash || !this.verifyPassword(password, account.passwordHash)) {
+      throw new UnauthorizedException('Contraseña incorrecta.');
+    }
+
+    if (account.paymentStatus === 'suspended_unpaid' || !account.isActive) {
+      throw new ForbiddenException('CUENTA_SUSPENDIDA_PAGO_PENDIENTE: Tu cuenta se encuentra suspendida por pago pendiente. Contacta al administrador.');
+    }
+
+    if (account.expiresAt && account.expiresAt < new Date()) {
+      throw new ForbiddenException('CUENTA_SUSPENDIDA_PAGO_PENDIENTE: Tu suscripción ha vencido.');
+    }
+
+    let token = account.clientToken;
+    if (!token) {
+      token = `owa_cl_${randomBytes(24).toString('hex')}`;
+      account.clientToken = token;
+      account.keyHash = this.hashKey(token);
+      account.keyPrefix = token.substring(0, 12);
+      await this.apiKeyRepository.save(account);
+    }
+
+    return {
+      valid: true,
+      token,
+      role: account.role,
+      name: account.name,
+      username: account.username,
+      allowedSessions: account.allowedSessions,
+      paymentStatus: account.paymentStatus,
+    };
+  }
+
+  async requestWhatsAppOtp(phone: string): Promise<{ success: boolean; message: string; expiresInSeconds: number; cleanPhone: string }> {
+    const cleanPhone = phone.replace(/[^0-9]/g, '');
+    if (cleanPhone.length < 8) {
+      throw new BadRequestException('Número de teléfono de WhatsApp inválido');
+    }
+
+    let account = await this.apiKeyRepository.findOne({ where: { phone: cleanPhone } });
+    if (!account) {
+      const allWithPhone = await this.apiKeyRepository.find({ where: { isActive: true } });
+      account = allWithPhone.find(a => a.phone && (a.phone.endsWith(cleanPhone) || cleanPhone.endsWith(a.phone))) || null;
+    }
+
+    if (!account) {
+      throw new NotFoundException(`No existe ninguna cuenta asociada al teléfono WhatsApp +${cleanPhone}. Solicita tu alta con el administrador.`);
+    }
+
+    if (account.paymentStatus === 'suspended_unpaid' || !account.isActive) {
+      throw new ForbiddenException('CUENTA_SUSPENDIDA_PAGO_PENDIENTE: Tu suscripción está suspendida por pago pendiente. Contacta al administrador.');
+    }
+
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    account.otpCode = code;
+    account.otpExpiresAt = new Date(Date.now() + 5 * 60 * 1000);
+    await this.apiKeyRepository.save(account);
+
+    let engineSent = false;
+    let fallbackSessionId = '';
+    if (this.engineRegistry) {
+      const entries = this.engineRegistry.entries();
+      if (entries.length > 0) {
+        const [sid, engine] = entries[0];
+        fallbackSessionId = sid;
+        try {
+          const otpMessage = `🔐 *OpenWA - Código de Acceso*\n\nHola *${account.name}*,\n\nTu código de verificación para ingresar a la plataforma es:\n👉 *${code}*\n\n_(Válido por 5 minutos. No compartas este código con nadie)_`;
+          await (engine as any).sendTextMessage(`${cleanPhone}@c.us`, otpMessage);
+          engineSent = true;
+          this.logger.log(`OTP enviado exitosamente a WhatsApp +${cleanPhone} mediante sesión ${fallbackSessionId}`);
+        } catch (err: any) {
+          this.logger.warn(`No se pudo enviar OTP por WhatsApp a ${cleanPhone}`, { error: err?.message });
+        }
+      }
+    }
+
+    return {
+      success: true,
+      message: engineSent
+        ? `Código enviado por WhatsApp al +${cleanPhone}`
+        : `Código generado. Ingresa con tu código o usa tu contraseña si tu WhatsApp no está conectado.`,
+      expiresInSeconds: 300,
+      cleanPhone,
+    };
+  }
+
+  async verifyWhatsAppOtp(phone: string, code: string): Promise<{ valid: boolean; token: string; role: string; name: string; username?: string | null; allowedSessions?: string[] | null; paymentStatus: string }> {
+    const cleanPhone = phone.replace(/[^0-9]/g, '');
+    const cleanCode = (code || '').trim();
+
+    let account = await this.apiKeyRepository.findOne({ where: { phone: cleanPhone } });
+    if (!account) {
+      const allWithPhone = await this.apiKeyRepository.find({ where: { isActive: true } });
+      account = allWithPhone.find(a => a.phone && (a.phone.endsWith(cleanPhone) || cleanPhone.endsWith(a.phone))) || null;
+    }
+
+    if (!account) {
+      throw new NotFoundException('Cuenta no encontrada.');
+    }
+
+    if (account.paymentStatus === 'suspended_unpaid' || !account.isActive) {
+      throw new ForbiddenException('CUENTA_SUSPENDIDA_PAGO_PENDIENTE: Tu cuenta se encuentra suspendida por pago pendiente. Contacta al administrador.');
+    }
+
+    if (!account.otpCode || account.otpCode !== cleanCode) {
+      throw new UnauthorizedException('Código de verificación incorrecto.');
+    }
+
+    if (!account.otpExpiresAt || account.otpExpiresAt < new Date()) {
+      throw new UnauthorizedException('El código de verificación ha expirado. Solicita uno nuevo.');
+    }
+
+    // Clear used OTP
+    account.otpCode = null;
+    account.otpExpiresAt = null;
+
+    let token = account.clientToken;
+    if (!token) {
+      token = `owa_cl_${randomBytes(24).toString('hex')}`;
+      account.clientToken = token;
+      account.keyHash = this.hashKey(token);
+      account.keyPrefix = token.substring(0, 12);
+    }
+    await this.apiKeyRepository.save(account);
+
+    return {
+      valid: true,
+      token,
+      role: account.role,
+      name: account.name,
+      username: account.username,
+      allowedSessions: account.allowedSessions,
+      paymentStatus: account.paymentStatus,
+    };
+  }
+
+  async isSessionSuspended(sessionId: string): Promise<boolean> {
+    if (!sessionId) return false;
+    try {
+      const accounts = await this.apiKeyRepository.find();
+      for (const acc of accounts) {
+        if (acc.paymentStatus === 'suspended_unpaid' || !acc.isActive) {
+          if (acc.allowedSessions && Array.isArray(acc.allowedSessions) && acc.allowedSessions.includes(sessionId)) {
+            return true;
+          }
+        }
+      }
+      return false;
+    } catch (err: any) {
+      this.logger.error(`Error checking if session ${sessionId} is suspended: ${err.message}`);
+      return false;
+    }
   }
 }

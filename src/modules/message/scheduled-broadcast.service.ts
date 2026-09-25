@@ -1,9 +1,10 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy, Inject, forwardRef, Optional } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
 import { BulkMessageService } from './bulk-message.service';
 import { SendBulkMessageDto } from './dto/bulk-message.dto';
 import { EngineRegistry } from '../../engine/engine-registry.service';
+import { AuthService } from '../auth/auth.service';
 
 export interface BroadcastResultDetail {
   chatId: string;
@@ -84,6 +85,9 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
     @Inject(forwardRef(() => BulkMessageService))
     private readonly bulkMessageService: BulkMessageService,
     private readonly engines: EngineRegistry,
+    @Optional()
+    @Inject(forwardRef(() => AuthService))
+    private readonly authService?: AuthService,
   ) {
     this.loadFromFile();
   }
@@ -503,6 +507,12 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
         const currentMinuteStr = `${todayYMD}T${currentHHMM}`;
 
         if (lastRunMinute !== currentMinuteStr) {
+          // Check if session belongs to a suspended client account
+          if (this.authService && (await this.authService.isSessionSuspended(item.sessionId))) {
+            this.logger.warn(`⏸️ Scheduled broadcast ${item.id} skipped for session ${item.sessionId}: client account is suspended for unpaid bill.`);
+            continue;
+          }
+
           this.logger.log(`🚀 Executing due scheduled broadcast ${item.id} (${item.scheduledTime} Chile Time) for session ${item.sessionId}...`);
           item.lastRunAt = `${todayYMD}T${currentHHMM}:00Z`;
           this.saveToFile();

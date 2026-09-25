@@ -48,6 +48,42 @@ export class ApiKey {
   @Column({ type: 'int', default: 0 })
   usageCount!: number;
 
+  @Index()
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  phone!: string | null;
+
+  @Index()
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  username!: string | null;
+
+  @Column({ type: 'varchar', length: 256, nullable: true })
+  passwordHash!: string | null;
+
+  @Column({
+    type: 'varchar',
+    length: 32,
+    default: 'active',
+  })
+  paymentStatus!: 'active' | 'suspended_unpaid' | 'trial';
+
+  @Column({ type: 'int', default: 0 })
+  monthlyFee!: number;
+
+  @Column({ type: 'datetime', nullable: true })
+  nextBillingDate!: Date | null;
+
+  @Column({ type: 'varchar', length: 16, nullable: true })
+  otpCode!: string | null;
+
+  @Column({ type: 'datetime', nullable: true })
+  otpExpiresAt!: Date | null;
+
+  @Column({ type: 'varchar', length: 128, nullable: true })
+  clientToken!: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  notes!: string | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 
