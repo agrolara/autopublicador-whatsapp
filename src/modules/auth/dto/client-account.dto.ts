@@ -1,5 +1,6 @@
-import { IsString, IsOptional, IsArray, IsEnum, IsInt, Min, MaxLength, MinLength } from 'class-validator';
+import { IsString, IsOptional, IsArray, IsEnum, IsInt, Min, MaxLength, MinLength, IsBoolean } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiKeyRole } from '../entities/api-key.entity';
 
 export class CreateClientAccountDto {
   @ApiProperty({
@@ -20,14 +21,37 @@ export class CreateClientAccountDto {
   @MaxLength(64)
   username?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     description: 'Número de WhatsApp registrado para login por OTP y alertas',
     example: '56953616157',
   })
+  @IsOptional()
   @IsString()
-  @MinLength(8)
-  @MaxLength(32)
-  phone!: string;
+  phone?: string;
+
+  @ApiPropertyOptional({
+    description: 'Rol del cliente',
+    example: 'operator',
+  })
+  @IsOptional()
+  @IsEnum(ApiKeyRole)
+  role?: ApiKeyRole;
+
+  @ApiPropertyOptional({
+    description: 'Estado inicial de suscripción/pago',
+    example: 'active',
+  })
+  @IsOptional()
+  @IsEnum(['active', 'suspended_unpaid', 'trial'])
+  paymentStatus?: 'active' | 'suspended_unpaid' | 'trial';
+
+  @ApiPropertyOptional({
+    description: 'Si la cuenta está activa',
+    example: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
 
   @ApiPropertyOptional({
     description: 'Contraseña para login alternativo',
@@ -125,6 +149,7 @@ export class UpdateClientAccountDto {
 
   @ApiPropertyOptional()
   @IsOptional()
+  @IsBoolean()
   isActive?: boolean;
 }
 
