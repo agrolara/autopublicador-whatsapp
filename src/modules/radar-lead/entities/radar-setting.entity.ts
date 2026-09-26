@@ -7,7 +7,7 @@ export class RadarSetting {
   @PrimaryColumn({ type: 'varchar', length: 32, default: 'default' })
   id!: string;
 
-  @Column({ type: 'boolean', default: false })
+  @Column({ type: 'boolean', default: true })
   enabled!: boolean;
 
   @Column({ type: 'int', default: 8 })

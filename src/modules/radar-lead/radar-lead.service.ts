@@ -254,6 +254,7 @@ export class RadarLeadService implements OnModuleInit {
   /**
    * Synchronizes radar clients and settings to persistent JSON backup files in data/
    * so they are never lost even if the SQLite database is re-initialized or corrupted.
+   * Uses atomic write (.tmp -> renameSync) to avoid file corruption on container kills/reboots.
    */
   async syncBackup(): Promise<void> {
     try {
@@ -264,12 +265,30 @@ export class RadarLeadService implements OnModuleInit {
 
       // Snapshot all clients
       const clients = await this.clientsRepo.find({ order: { createdAt: 'DESC' } });
-      fs.writeFileSync(this.clientsBackupPath, JSON.stringify(clients, null, 2), 'utf8');
+      if (clients && clients.length > 0) {
+        const tmpClientsPath = `${this.clientsBackupPath}.tmp`;
+        fs.writeFileSync(tmpClientsPath, JSON.stringify(clients, null, 2), 'utf8');
+        try {
+          fs.renameSync(tmpClientsPath, this.clientsBackupPath);
+        } catch {
+          fs.copyFileSync(tmpClientsPath, this.clientsBackupPath);
+          fs.unlinkSync(tmpClientsPath);
+        }
+      } else if (!fs.existsSync(this.clientsBackupPath)) {
+        fs.writeFileSync(this.clientsBackupPath, '[]', 'utf8');
+      }
 
       // Snapshot global settings
       const settings = await this.settingsRepo.findOne({ where: { id: 'default' } });
       if (settings) {
-        fs.writeFileSync(this.settingsBackupPath, JSON.stringify(settings, null, 2), 'utf8');
+        const tmpSettingsPath = `${this.settingsBackupPath}.tmp`;
+        fs.writeFileSync(tmpSettingsPath, JSON.stringify(settings, null, 2), 'utf8');
+        try {
+          fs.renameSync(tmpSettingsPath, this.settingsBackupPath);
+        } catch {
+          fs.copyFileSync(tmpSettingsPath, this.settingsBackupPath);
+          fs.unlinkSync(tmpSettingsPath);
+        }
       }
     } catch (err) {
       this.logger.warn('Failed to sync radar backup files', {
@@ -279,35 +298,141 @@ export class RadarLeadService implements OnModuleInit {
   }
 
   /**
-   * Restores clients and settings from persistent JSON backup files if the database table is empty.
+   * Restores clients and settings from persistent JSON backup files in data/
+   * Guarantees persistence of radar enabled status, group whitelist, tags, and client rules across container restarts.
    */
   async restoreFromBackup(): Promise<void> {
     try {
-      // 1. Restore clients if table is empty
+      // 1. Restore clients if table is empty or missing backup records
       if (fs.existsSync(this.clientsBackupPath)) {
-        const raw = fs.readFileSync(this.clientsBackupPath, 'utf8');
-        const backupClients: RadarClient[] = JSON.parse(raw);
-        if (Array.isArray(backupClients) && backupClients.length > 0) {
-          const currentCount = await this.clientsRepo.count();
-          if (currentCount === 0) {
-            this.logger.log(`Restaurando ${backupClients.length} clientes del Radar desde archivo de respaldo...`);
-            for (const item of backupClients) {
-              const entity = this.clientsRepo.create(item);
-              await this.clientsRepo.save(entity).catch(() => {});
+        try {
+          const raw = fs.readFileSync(this.clientsBackupPath, 'utf8');
+          const backupClients: RadarClient[] = JSON.parse(raw);
+          if (Array.isArray(backupClients) && backupClients.length > 0) {
+            const currentCount = await this.clientsRepo.count();
+            if (currentCount === 0) {
+              this.logger.log(`Restaurando ${backupClients.length} clientes del Radar desde archivo de respaldo...`);
+              for (const item of backupClients) {
+                const entity = this.clientsRepo.create(item);
+                await this.clientsRepo.save(entity).catch(() => {});
+              }
+            } else {
+              // Ensure any clients present in backup that are not in DB are restored
+              for (const item of backupClients) {
+                if (!item.id) continue;
+                const exists = await this.clientsRepo.findOne({ where: { id: item.id } });
+                if (!exists) {
+                  const entity = this.clientsRepo.create(item);
+                  await this.clientsRepo.save(entity).catch(() => {});
+                }
+              }
             }
           }
+        } catch (clientErr) {
+          this.logger.warn('Failed parsing radar clients backup', { error: String(clientErr) });
         }
       }
 
-      // 2. Restore settings if missing
+      // 2. Restore settings from persistent backup file if available
+      let backupSettings: Partial<RadarSetting> | null = null;
       if (fs.existsSync(this.settingsBackupPath)) {
-        const raw = fs.readFileSync(this.settingsBackupPath, 'utf8');
-        const backupSettings: Partial<RadarSetting> = JSON.parse(raw);
-        const currentSetting = await this.settingsRepo.findOne({ where: { id: 'default' } });
-        if (!currentSetting && backupSettings) {
+        try {
+          const raw = fs.readFileSync(this.settingsBackupPath, 'utf8');
+          backupSettings = JSON.parse(raw);
+        } catch (backupParseErr) {
+          this.logger.warn('Failed parsing radar settings backup', { error: String(backupParseErr) });
+        }
+      }
+
+      const currentSetting = await this.settingsRepo.findOne({ where: { id: 'default' } });
+
+      if (!currentSetting) {
+        // No DB row: restore from backup or create default
+        if (backupSettings && typeof backupSettings === 'object') {
           this.logger.log('Restaurando configuración del Radar desde archivo de respaldo...');
-          const entity = this.settingsRepo.create(backupSettings);
-          await this.settingsRepo.save(entity).catch(() => {});
+          const entity = this.settingsRepo.create({
+            id: 'default',
+            enabled: backupSettings.enabled !== undefined ? Boolean(backupSettings.enabled) : true,
+            minTextLength: backupSettings.minTextLength ?? 8,
+            ignoreMediaWithoutCaption: backupSettings.ignoreMediaWithoutCaption ?? true,
+            groupFilterMode: backupSettings.groupFilterMode || 'ALL',
+            groupCategoryKeywords: backupSettings.groupCategoryKeywords ?? 'quilicura,valle lo campino,valle grande',
+            groupCategoryTags: typeof backupSettings.groupCategoryTags === 'string' ? backupSettings.groupCategoryTags : JSON.stringify(backupSettings.groupCategoryTags || []),
+            whitelistedGroupIds: typeof backupSettings.whitelistedGroupIds === 'string' ? backupSettings.whitelistedGroupIds : JSON.stringify(backupSettings.whitelistedGroupIds || []),
+            activeScanningSessions: typeof backupSettings.activeScanningSessions === 'string' ? backupSettings.activeScanningSessions : JSON.stringify(backupSettings.activeScanningSessions || []),
+            dedupWindowSeconds: backupSettings.dedupWindowSeconds ?? 30,
+            crossGroupDedupMinutes: backupSettings.crossGroupDedupMinutes ?? 60,
+            aiSemanticEnabled: backupSettings.aiSemanticEnabled ?? true,
+            aiProvider: backupSettings.aiProvider || 'typesafe',
+            typesafeApiKey: backupSettings.typesafeApiKey || DEFAULT_TYPESAFE_API_KEY,
+            globalBlacklistedSenders: typeof backupSettings.globalBlacklistedSenders === 'string' ? backupSettings.globalBlacklistedSenders : JSON.stringify(backupSettings.globalBlacklistedSenders || []),
+          });
+          await this.settingsRepo.save(entity);
+        } else {
+          // Brand-new first boot: create default with enabled: true
+          const defaultEntity = this.settingsRepo.create({
+            id: 'default',
+            enabled: true,
+            minTextLength: 8,
+            ignoreMediaWithoutCaption: true,
+            groupFilterMode: 'ALL',
+            groupCategoryKeywords: 'quilicura,valle lo campino,valle grande',
+            groupCategoryTags: '[]',
+            whitelistedGroupIds: '[]',
+            activeScanningSessions: '[]',
+            dedupWindowSeconds: 30,
+            crossGroupDedupMinutes: 60,
+            aiSemanticEnabled: true,
+            aiProvider: 'typesafe',
+            typesafeApiKey: DEFAULT_TYPESAFE_API_KEY,
+            globalBlacklistedSenders: '[]',
+          });
+          await this.settingsRepo.save(defaultEntity);
+          this.logger.log('Default Radar settings initialized (enabled: true)');
+        }
+      } else if (backupSettings && typeof backupSettings === 'object') {
+        // DB row exists, but check if DB row had blank default values while backup has real config
+        let needsUpdate = false;
+
+        // Whitelisted groups check: if DB is empty but backup has groups, restore from backup
+        const currentWl = this.parseJsonArray(currentSetting.whitelistedGroupIds);
+        const backupWl = this.parseJsonArray(backupSettings.whitelistedGroupIds);
+        if (currentWl.length === 0 && backupWl.length > 0) {
+          currentSetting.whitelistedGroupIds = JSON.stringify(backupWl);
+          needsUpdate = true;
+        }
+
+        // Group category tags check: if DB is empty but backup has tags, restore from backup
+        const currentTags = this.parseJsonArray(currentSetting.groupCategoryTags);
+        const backupTags = this.parseJsonArray(backupSettings.groupCategoryTags);
+        if (currentTags.length === 0 && backupTags.length > 0) {
+          currentSetting.groupCategoryTags = JSON.stringify(backupTags);
+          needsUpdate = true;
+        }
+
+        // Group filter mode check: if DB has ALL but backup has CATEGORY or WHITELIST
+        if (currentSetting.groupFilterMode === 'ALL' && backupSettings.groupFilterMode && backupSettings.groupFilterMode !== 'ALL') {
+          currentSetting.groupFilterMode = backupSettings.groupFilterMode;
+          needsUpdate = true;
+        }
+
+        // Enabled state check: if backup explicitly had enabled: true but DB is false (e.g. fresh DB init reset)
+        if (!currentSetting.enabled && backupSettings.enabled === true) {
+          currentSetting.enabled = true;
+          needsUpdate = true;
+        }
+
+        // Active scanning sessions check
+        const currentSessions = this.parseJsonArray(currentSetting.activeScanningSessions);
+        const backupSessions = this.parseJsonArray(backupSettings.activeScanningSessions);
+        if (currentSessions.length === 0 && backupSessions.length > 0) {
+          currentSetting.activeScanningSessions = JSON.stringify(backupSessions);
+          needsUpdate = true;
+        }
+
+        if (needsUpdate) {
+          this.logger.log('Merging persistent radar settings from backup into database...');
+          await this.settingsRepo.save(currentSetting);
         }
       }
     } catch (err) {
@@ -318,14 +443,14 @@ export class RadarLeadService implements OnModuleInit {
   }
 
   /**
-   * Auto-creates SQLite tables if they do not exist and inserts default settings.
+   * Auto-creates SQLite tables if they do not exist and adds required columns.
    */
   private async ensureTables(): Promise<void> {
     try {
       await this.settingsRepo.query(`
         CREATE TABLE IF NOT EXISTS radar_settings (
           id VARCHAR(32) PRIMARY KEY,
-          enabled BOOLEAN NOT NULL DEFAULT 0,
+          enabled BOOLEAN NOT NULL DEFAULT 1,
           minTextLength INT NOT NULL DEFAULT 8,
           ignoreMediaWithoutCaption BOOLEAN NOT NULL DEFAULT 1,
           groupFilterMode VARCHAR(32) NOT NULL DEFAULT 'ALL',
@@ -414,27 +539,6 @@ export class RadarLeadService implements OnModuleInit {
         await this.clientsRepo.query(`ALTER TABLE radar_clients ADD COLUMN groupCategoryTags TEXT NOT NULL DEFAULT '[]'`).catch(() => {});
         await this.clientsRepo.query(`ALTER TABLE radar_clients ADD COLUMN whitelistedGroupIds TEXT NOT NULL DEFAULT '[]'`).catch(() => {});
       }
-
-      let defaultSetting = await this.settingsRepo.findOne({ where: { id: 'default' } });
-      if (!defaultSetting) {
-        defaultSetting = this.settingsRepo.create({
-          id: 'default',
-          enabled: false,
-          minTextLength: 8,
-          ignoreMediaWithoutCaption: true,
-          groupFilterMode: 'ALL',
-          groupCategoryKeywords: 'quilicura,valle lo campino,valle grande',
-          whitelistedGroupIds: '[]',
-          activeScanningSessions: '[]',
-          dedupWindowSeconds: 30,
-          crossGroupDedupMinutes: 60,
-          aiSemanticEnabled: true,
-          aiProvider: 'typesafe',
-          typesafeApiKey: DEFAULT_TYPESAFE_API_KEY,
-        });
-        await this.settingsRepo.save(defaultSetting);
-        this.logger.log('Default Radar settings initialized');
-      }
     } catch (err) {
       this.logger.warn('Failed to ensure radar tables', {
         error: err instanceof Error ? err.message : String(err),
@@ -449,7 +553,15 @@ export class RadarLeadService implements OnModuleInit {
     try {
       let settings = await this.settingsRepo.findOne({ where: { id: 'default' } });
       if (!settings) {
-        settings = this.settingsRepo.create({ id: 'default', enabled: false });
+        if (fs.existsSync(this.settingsBackupPath)) {
+          try {
+            const raw = fs.readFileSync(this.settingsBackupPath, 'utf8');
+            settings = JSON.parse(raw);
+          } catch {}
+        }
+        if (!settings) {
+          settings = this.settingsRepo.create({ id: 'default', enabled: true });
+        }
       }
       this.cachedSettings = settings;
       this.cachedActiveClients = await this.clientsRepo.find({ where: { active: true } });
@@ -1038,6 +1150,7 @@ export class RadarLeadService implements OnModuleInit {
     }
 
     const saved = await this.settingsRepo.save(settings);
+    this.cachedSettings = saved;
     await this.reloadCache();
     await this.syncBackup();
     return saved;

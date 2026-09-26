@@ -150,7 +150,7 @@ describe('RadarLeadService - Unit Tests', () => {
     });
 
     it('discards in 0ms when master switch enabled is false', async () => {
-      const disabledSettings: RadarSetting = {
+      const disabledSettings: any = {
         id: 'default',
         enabled: false,
         minTextLength: 8,
@@ -459,7 +459,7 @@ describe('RadarLeadService - Unit Tests', () => {
     });
 
     it('discards message in 0 ms when sender phone or phrase is in blacklist', async () => {
-      const mockClient: RadarClient = {
+      const mockClient: any = {
         id: 'c-pizza',
         name: 'Pizzería Mascada',
         rubroKey: 'pizza',
@@ -476,7 +476,7 @@ describe('RadarLeadService - Unit Tests', () => {
         updatedAt: new Date(),
       };
 
-      const mockSetting: RadarSetting = {
+      const mockSetting: any = {
         id: 'default',
         enabled: true,
         minTextLength: 8,
@@ -545,7 +545,7 @@ describe('RadarLeadService - Unit Tests', () => {
 
   describe('Client Targeting & Group Category Segmentation', () => {
     let service: RadarLeadService;
-    let mockSettings: RadarSetting;
+    let mockSettings: any;
 
     beforeEach(() => {
       service = new RadarLeadService({} as any, {} as any, {} as any, {} as any);
@@ -563,19 +563,18 @@ describe('RadarLeadService - Unit Tests', () => {
         aiSemanticEnabled: false,
         aiProvider: 'typesafe',
         typesafeApiKey: '',
-        lastToggledAt: new Date(),
         createdAt: new Date(),
         updatedAt: new Date(),
       };
     });
 
-    const mockGroupTags = [
+    const mockGroupTags: any = [
       { id: 'tag_quilicura', name: 'QUILICURA', groupIds: ['q-grp-1@g.us', 'q-grp-2@g.us'] },
       { id: 'tag_renca', name: 'RENCA', groupIds: ['r-grp-1@g.us'] },
     ];
 
     it('allows ALL groups when client.groupFilterMode is ALL (e.g. nationwide client)', () => {
-      const nationwideClient: RadarClient = {
+      const nationwideClient: any = {
         id: 'client-nationwide',
         name: 'Google AI Pro Chile',
         rubroKey: 'ia',
@@ -595,7 +594,7 @@ describe('RadarLeadService - Unit Tests', () => {
     });
 
     it('restricts to client whitelistedGroupIds when groupFilterMode is WHITELIST', () => {
-      const whitelistClient: RadarClient = {
+      const whitelistClient: any = {
         id: 'client-wl',
         name: 'Sushi Icura',
         rubroKey: 'sushi',
@@ -616,7 +615,7 @@ describe('RadarLeadService - Unit Tests', () => {
     });
 
     it('filters by category tags and keyword when groupFilterMode is CATEGORY', () => {
-      const categoryClient: RadarClient = {
+      const categoryClient: any = {
         id: 'client-cat',
         name: 'La Patroncita Miel',
         rubroKey: 'miel',
@@ -643,7 +642,7 @@ describe('RadarLeadService - Unit Tests', () => {
     });
 
     it('inherits global settings when groupFilterMode is GLOBAL', () => {
-      const globalClient: RadarClient = {
+      const globalClient: any = {
         id: 'client-global',
         name: 'Cliente Heredado',
         rubroKey: 'test',
@@ -675,7 +674,7 @@ describe('RadarLeadService - Unit Tests', () => {
     });
 
     it('discards duplicate messages broadcast across different groups in 0 ms', async () => {
-      const mockSetting: RadarSetting = {
+      const mockSetting: any = {
         id: 'default',
         enabled: true,
         minTextLength: 8,
@@ -693,7 +692,7 @@ describe('RadarLeadService - Unit Tests', () => {
         updatedAt: new Date(),
       };
 
-      const mockClient: RadarClient = {
+      const mockClient: any = {
         id: 'c-pizza-1',
         name: 'Pizzería Mascada',
         rubroKey: 'pizza',
@@ -773,6 +772,139 @@ describe('RadarLeadService - Unit Tests', () => {
       expect(secondLog).toBeDefined();
       expect(secondLog.status).toBe('DISCARDED_DUPLICATE');
       expect(secondLog.aiEvaluated).toBe(false);
+    });
+  });
+
+  describe('Settings & Client Persistence Across Container Restarts', () => {
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it('restores whitelisted groups, category tags and enabled state from backup file when database row is missing', async () => {
+      const fs = require('fs');
+      const backupData = {
+        id: 'default',
+        enabled: true,
+        groupFilterMode: 'WHITELIST',
+        whitelistedGroupIds: JSON.stringify(['group-abc@g.us', 'group-xyz@g.us']),
+        groupCategoryTags: JSON.stringify(['tag-1']),
+      };
+
+      const mockSettingsRepo: any = {
+        findOne: jest.fn().mockResolvedValue(null),
+        create: jest.fn(d => ({ ...d })),
+        save: jest.fn(d => Promise.resolve(d)),
+        query: jest.fn().mockResolvedValue([]),
+      };
+
+      const mockClientsRepo: any = {
+        find: jest.fn().mockResolvedValue([]),
+        count: jest.fn().mockResolvedValue(1),
+        findOne: jest.fn(),
+        create: jest.fn(),
+        save: jest.fn(),
+      };
+
+      const service = new RadarLeadService(mockSettingsRepo, mockClientsRepo);
+      jest.spyOn(fs, 'existsSync').mockImplementation((p: any) => {
+        if (typeof p === 'string' && p.endsWith('radar_settings.json')) return true;
+        return false;
+      });
+      jest.spyOn(fs, 'readFileSync').mockImplementation((p: any) => {
+        if (typeof p === 'string' && p.endsWith('radar_settings.json')) {
+          return JSON.stringify(backupData);
+        }
+        return '';
+      });
+
+      await service.restoreFromBackup();
+
+      expect(mockSettingsRepo.save).toHaveBeenCalled();
+      const saved = mockSettingsRepo.save.mock.calls[0][0];
+      expect(saved.enabled).toBe(true);
+      expect(saved.groupFilterMode).toBe('WHITELIST');
+      expect(saved.whitelistedGroupIds).toBe(JSON.stringify(['group-abc@g.us', 'group-xyz@g.us']));
+      expect(saved.groupCategoryTags).toBe(JSON.stringify(['tag-1']));
+    });
+
+    it('merges backup settings into database if database row has empty defaults after restart', async () => {
+      const fs = require('fs');
+      const backupData = {
+        id: 'default',
+        enabled: true,
+        groupFilterMode: 'WHITELIST',
+        whitelistedGroupIds: JSON.stringify(['group-1@g.us', 'group-2@g.us']),
+        groupCategoryTags: JSON.stringify(['tag-quilicura']),
+      };
+
+      const existingDbRow = {
+        id: 'default',
+        enabled: false,
+        groupFilterMode: 'ALL',
+        whitelistedGroupIds: '[]',
+        groupCategoryTags: '[]',
+        activeScanningSessions: '[]',
+      };
+
+      const mockSettingsRepo: any = {
+        findOne: jest.fn().mockResolvedValue(existingDbRow),
+        save: jest.fn(d => Promise.resolve(d)),
+      };
+
+      const mockClientsRepo: any = {
+        find: jest.fn().mockResolvedValue([]),
+        count: jest.fn().mockResolvedValue(1),
+      };
+
+      const service = new RadarLeadService(mockSettingsRepo, mockClientsRepo);
+      jest.spyOn(fs, 'existsSync').mockImplementation((p: any) => {
+        if (typeof p === 'string' && p.endsWith('radar_settings.json')) return true;
+        return false;
+      });
+      jest.spyOn(fs, 'readFileSync').mockImplementation((p: any) => {
+        if (typeof p === 'string' && p.endsWith('radar_settings.json')) {
+          return JSON.stringify(backupData);
+        }
+        return '';
+      });
+
+      await service.restoreFromBackup();
+
+      expect(mockSettingsRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          enabled: true,
+          groupFilterMode: 'WHITELIST',
+          whitelistedGroupIds: JSON.stringify(['group-1@g.us', 'group-2@g.us']),
+          groupCategoryTags: JSON.stringify(['tag-quilicura']),
+        }),
+      );
+    });
+
+    it('initializes default settings with enabled=true when neither database row nor backup file exists', async () => {
+      const fs = require('fs');
+      const mockSettingsRepo: any = {
+        findOne: jest.fn().mockResolvedValue(null),
+        create: jest.fn(d => ({ ...d })),
+        save: jest.fn(d => Promise.resolve(d)),
+      };
+
+      const mockClientsRepo: any = {
+        find: jest.fn().mockResolvedValue([]),
+        count: jest.fn().mockResolvedValue(0),
+      };
+
+      const service = new RadarLeadService(mockSettingsRepo, mockClientsRepo);
+      jest.spyOn(fs, 'existsSync').mockReturnValue(false);
+
+      await service.restoreFromBackup();
+
+      expect(mockSettingsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'default',
+          enabled: true,
+        }),
+      );
+      expect(mockSettingsRepo.save).toHaveBeenCalled();
     });
   });
 });
