@@ -12,6 +12,8 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, In, Not, IsNull, DataSource, FindManyOptions } from 'typeorm';
 import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
+import * as fs from 'fs';
+import * as path from 'path';
 import { Session, SessionStatus } from './entities/session.entity';
 import { CreateSessionDto, SessionConfigResponseDto, UpdateSessionConfigDto } from './dto';
 import { EngineRegistry } from '../../engine/engine-registry.service';
@@ -150,7 +152,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     if (!flags.autoStartSessions) return;
 
     // Load all non-deleted sessions across SQLite DB
-    const sessions = await this.sessionRepository.find({
+    let sessions = await this.sessionRepository.find({
       where: [
         { status: SessionStatus.READY },
         { status: SessionStatus.DISCONNECTED },
@@ -160,9 +162,24 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     });
 
     if (sessions.length === 0) {
+      await this.restoreSessionsFromBackup();
+      sessions = await this.sessionRepository.find({
+        where: [
+          { status: SessionStatus.READY },
+          { status: SessionStatus.DISCONNECTED },
+          { status: SessionStatus.INITIALIZING },
+          { status: SessionStatus.AUTHENTICATING },
+        ],
+      });
+    }
+
+    if (sessions.length === 0) {
       this.logger.log('[Bootstrap] No sessions found to auto-start');
       return;
     }
+
+    // Always keep backup updated
+    await this.syncSessionsBackup();
 
     this.logger.log(`Auto-starting ${sessions.length} session(s) asynchronously in background`, {
       action: 'auto_start',
@@ -735,6 +752,97 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     sessionIds: string[],
   ): Promise<{ stopped: string[]; notRunning: string[]; failed: string[] }> {
     return this.engineLifecycle.stopOrphanEngines(sessionIds);
+  }
+
+  private readonly sessionsBackupPath = path.join(process.cwd(), 'data', 'sessions_backup.json');
+
+  private async restoreSessionsFromBackup(): Promise<void> {
+    try {
+      if (fs.existsSync(this.sessionsBackupPath)) {
+        const raw = fs.readFileSync(this.sessionsBackupPath, 'utf8');
+        const backupSessions = JSON.parse(raw);
+        if (Array.isArray(backupSessions) && backupSessions.length > 0) {
+          this.logger.log(`[Bootstrap] Restoring ${backupSessions.length} session(s) from persistent backup...`);
+          for (const item of backupSessions) {
+            if (!item.id || !item.name) continue;
+            const exists = await this.sessionRepository.findOne({ where: { id: item.id } });
+            if (!exists) {
+              const parsedConfig = typeof item.config === 'object' && item.config !== null
+                ? (item.config as Record<string, unknown>)
+                : JSON.parse(item.config || '{}');
+              const entity = this.sessionRepository.create({
+                id: item.id,
+                name: item.name,
+                status: SessionStatus.DISCONNECTED,
+                phone: item.phone,
+                pushName: item.pushName,
+                config: parsedConfig,
+              });
+              await this.sessionRepository.save(entity);
+              this.logger.log(`[Bootstrap] Restored session ${item.name} (${item.phone}) into database`);
+            }
+          }
+        }
+      } else {
+        // Fallback for initial migration: seed the two active production sessions
+        const initialSessions = [
+          {
+            id: '9f89e2d6-b849-47cd-884c-a5efc22ff4ee',
+            name: 'ventas-online',
+            phone: '56986176136',
+            pushName: '🇨🇱Ventas online💰',
+            config: {} as Record<string, unknown>,
+          },
+          {
+            id: '037aef38-79f9-4965-940a-d1c2b55ea548',
+            name: 'pizzeria',
+            phone: '56951782341',
+            pushName: '🍕PIZZERIA DEL VALLE🍕',
+            config: {} as Record<string, unknown>,
+          },
+        ];
+        for (const item of initialSessions) {
+          const exists = await this.sessionRepository.findOne({ where: { id: item.id } });
+          if (!exists) {
+            const entity = this.sessionRepository.create({
+              id: item.id,
+              name: item.name,
+              status: SessionStatus.DISCONNECTED,
+              phone: item.phone,
+              pushName: item.pushName,
+              config: item.config,
+            });
+            await this.sessionRepository.save(entity);
+            this.logger.log(`[Bootstrap] Seeded production session ${item.name} (${item.phone}) into database`);
+          }
+        }
+        await this.syncSessionsBackup();
+      }
+    } catch (err: any) {
+      this.logger.warn('[Bootstrap] Failed restoring sessions from backup', { error: err?.message });
+    }
+  }
+
+  async syncSessionsBackup(): Promise<void> {
+    try {
+      const allSessions = await this.sessionRepository.find();
+      if (allSessions && allSessions.length > 0) {
+        const dataDir = path.join(process.cwd(), 'data');
+        if (!fs.existsSync(dataDir)) {
+          fs.mkdirSync(dataDir, { recursive: true });
+        }
+        const tmpPath = `${this.sessionsBackupPath}.tmp`;
+        fs.writeFileSync(tmpPath, JSON.stringify(allSessions, null, 2), 'utf8');
+        try {
+          fs.renameSync(tmpPath, this.sessionsBackupPath);
+        } catch {
+          fs.copyFileSync(tmpPath, this.sessionsBackupPath);
+          fs.unlinkSync(tmpPath);
+        }
+      }
+    } catch (err: any) {
+      this.logger.warn('Failed to sync sessions backup', { error: err?.message });
+    }
   }
 
   private delay(ms: number): Promise<void> {

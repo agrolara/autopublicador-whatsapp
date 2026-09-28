@@ -159,7 +159,7 @@ if (dashboardServingEnabled && dashboardBuildPresent) {
       name: 'data',
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => {
+      useFactory: async (configService: ConfigService) => {
         const dbType = configService.get<'sqlite' | 'postgres'>('dataDatabase.type', 'sqlite');
         const baseConfig = {
           entities: [
@@ -188,6 +188,38 @@ if (dashboardServingEnabled && dashboardBuildPresent) {
           // lands in the configured schema.
           const schema = configService.get<string>('dataDatabase.schema', 'public');
           const useCustomSearchPath = schema && schema !== 'public';
+          const host = configService.get<string>('dataDatabase.host');
+          const port = configService.get<number>('dataDatabase.port', 5432);
+          const username = configService.get<string>('dataDatabase.username');
+          const password = configService.get<string>('dataDatabase.password');
+          const database = configService.get<string>('dataDatabase.name', 'openwa');
+          const ssl = configService.get<boolean>('dataDatabase.ssl', false);
+
+          if (useCustomSearchPath && host && username) {
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              const { Client } = require('pg');
+              const client = new Client({
+                host,
+                port,
+                user: username,
+                password,
+                database,
+                ssl: ssl
+                  ? {
+                      rejectUnauthorized: configService.get<boolean>('dataDatabase.sslRejectUnauthorized', true),
+                    }
+                  : false,
+                connectionTimeoutMillis: 5000,
+              });
+              await client.connect();
+              await client.query(`CREATE SCHEMA IF NOT EXISTS "${schema}";`);
+              await client.end();
+            } catch (schemaErr: any) {
+              // eslint-disable-next-line no-console
+              console.warn(`[Bootstrap] Notice: schema pre-creation check for "${schema}": ${schemaErr?.message || schemaErr}`);
+            }
+          }
           return {
             ...baseConfig,
             name: 'data',

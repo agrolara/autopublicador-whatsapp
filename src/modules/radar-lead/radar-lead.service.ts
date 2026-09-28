@@ -447,75 +447,144 @@ export class RadarLeadService implements OnModuleInit {
    */
   private async ensureTables(): Promise<void> {
     try {
-      await this.settingsRepo.query(`
-        CREATE TABLE IF NOT EXISTS radar_settings (
-          id VARCHAR(32) PRIMARY KEY,
-          enabled BOOLEAN NOT NULL DEFAULT 1,
-          minTextLength INT NOT NULL DEFAULT 8,
-          ignoreMediaWithoutCaption BOOLEAN NOT NULL DEFAULT 1,
-          groupFilterMode VARCHAR(32) NOT NULL DEFAULT 'ALL',
-          groupCategoryKeywords TEXT NOT NULL DEFAULT 'quilicura,valle lo campino,valle grande',
-          groupCategoryTags TEXT NOT NULL DEFAULT '[]',
-          whitelistedGroupIds TEXT NOT NULL DEFAULT '[]',
-          activeScanningSessions TEXT NOT NULL DEFAULT '[]',
-          dedupWindowSeconds INT NOT NULL DEFAULT 30,
-          crossGroupDedupMinutes INT NOT NULL DEFAULT 60,
-          aiSemanticEnabled BOOLEAN NOT NULL DEFAULT 1,
-          aiProvider VARCHAR(32) NOT NULL DEFAULT 'typesafe',
-          typesafeApiKey TEXT NOT NULL DEFAULT '',
-          globalBlacklistedSenders TEXT NOT NULL DEFAULT '[]',
-          updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-      `).catch(() => {});
+      const isPostgres = this.settingsRepo.metadata.connection.options.type === 'postgres';
+      if (isPostgres) {
+        await this.settingsRepo.query(`
+          CREATE TABLE IF NOT EXISTS radar_settings (
+            id VARCHAR(32) PRIMARY KEY,
+            enabled BOOLEAN NOT NULL DEFAULT true,
+            "minTextLength" INT NOT NULL DEFAULT 8,
+            "ignoreMediaWithoutCaption" BOOLEAN NOT NULL DEFAULT true,
+            "groupFilterMode" VARCHAR(32) NOT NULL DEFAULT 'ALL',
+            "groupCategoryKeywords" TEXT NOT NULL DEFAULT 'quilicura,valle lo campino,valle grande',
+            "groupCategoryTags" TEXT NOT NULL DEFAULT '[]',
+            "whitelistedGroupIds" TEXT NOT NULL DEFAULT '[]',
+            "activeScanningSessions" TEXT NOT NULL DEFAULT '[]',
+            "dedupWindowSeconds" INT NOT NULL DEFAULT 30,
+            "crossGroupDedupMinutes" INT NOT NULL DEFAULT 60,
+            "aiSemanticEnabled" BOOLEAN NOT NULL DEFAULT true,
+            "aiProvider" VARCHAR(32) NOT NULL DEFAULT 'typesafe',
+            "typesafeApiKey" TEXT NOT NULL DEFAULT '',
+            "globalBlacklistedSenders" TEXT NOT NULL DEFAULT '[]',
+            "updatedAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          )
+        `).catch((err: any) => this.logger.warn('radar_settings table check', { error: err?.message }));
 
-      await this.clientsRepo.query(`
-        CREATE TABLE IF NOT EXISTS radar_clients (
-          id VARCHAR(36) PRIMARY KEY,
-          name VARCHAR(128) NOT NULL,
-          rubroKey VARCHAR(64) NOT NULL,
-          targetPhone VARCHAR(32) NOT NULL,
-          senderSessionId VARCHAR(64) NOT NULL DEFAULT '',
-          localKeywords TEXT NOT NULL DEFAULT '',
-          jevPromptCriteria TEXT NULL,
-          useAiFilter BOOLEAN NOT NULL DEFAULT 1,
-          alertTemplate TEXT NOT NULL,
-          active BOOLEAN NOT NULL DEFAULT 1,
-          blacklistedSenders TEXT NOT NULL DEFAULT '[]',
-          negativePhrases TEXT NOT NULL DEFAULT '[]',
-          groupFilterMode VARCHAR(32) NOT NULL DEFAULT 'GLOBAL',
-          groupCategoryKeywords TEXT NOT NULL DEFAULT '',
-          groupCategoryTags TEXT NOT NULL DEFAULT '[]',
-          whitelistedGroupIds TEXT NOT NULL DEFAULT '[]',
-          createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-          updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-      `).catch(() => {});
-
-      if (this.logsRepo) {
-        await this.logsRepo.query(`
-          CREATE TABLE IF NOT EXISTS radar_lead_logs (
+        await this.clientsRepo.query(`
+          CREATE TABLE IF NOT EXISTS radar_clients (
             id VARCHAR(36) PRIMARY KEY,
-            clientId VARCHAR(64),
-            clientName VARCHAR(128) NOT NULL,
-            rubroKey VARCHAR(64) NOT NULL DEFAULT '',
-            sessionId VARCHAR(64) NOT NULL DEFAULT '',
-            groupId VARCHAR(128) NOT NULL DEFAULT '',
-            groupName VARCHAR(255) NOT NULL DEFAULT '',
-            buyerPhone VARCHAR(32) NOT NULL DEFAULT '',
-            messageText TEXT NOT NULL,
-            matchedKeyword VARCHAR(128) NOT NULL DEFAULT '',
-            aiEvaluated BOOLEAN NOT NULL DEFAULT 0,
-            aiScore REAL,
-            status VARCHAR(32) NOT NULL,
-            createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+            name VARCHAR(128) NOT NULL,
+            "rubroKey" VARCHAR(64) NOT NULL,
+            "targetPhone" VARCHAR(32) NOT NULL,
+            "senderSessionId" VARCHAR(64) NOT NULL DEFAULT '',
+            "localKeywords" TEXT NOT NULL DEFAULT '',
+            "jevPromptCriteria" TEXT NULL,
+            "useAiFilter" BOOLEAN NOT NULL DEFAULT true,
+            "alertTemplate" TEXT NOT NULL,
+            active BOOLEAN NOT NULL DEFAULT true,
+            "blacklistedSenders" TEXT NOT NULL DEFAULT '[]',
+            "negativePhrases" TEXT NOT NULL DEFAULT '[]',
+            "groupFilterMode" VARCHAR(32) NOT NULL DEFAULT 'GLOBAL',
+            "groupCategoryKeywords" TEXT NOT NULL DEFAULT '',
+            "groupCategoryTags" TEXT NOT NULL DEFAULT '[]',
+            "whitelistedGroupIds" TEXT NOT NULL DEFAULT '[]',
+            "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            "updatedAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          )
+        `).catch((err: any) => this.logger.warn('radar_clients table check', { error: err?.message }));
+
+        if (this.logsRepo) {
+          await this.logsRepo.query(`
+            CREATE TABLE IF NOT EXISTS radar_lead_logs (
+              id VARCHAR(36) PRIMARY KEY,
+              "clientId" VARCHAR(64),
+              "clientName" VARCHAR(128) NOT NULL,
+              "rubroKey" VARCHAR(64) NOT NULL DEFAULT '',
+              "sessionId" VARCHAR(64) NOT NULL DEFAULT '',
+              "groupId" VARCHAR(128) NOT NULL DEFAULT '',
+              "groupName" VARCHAR(255) NOT NULL DEFAULT '',
+              "buyerPhone" VARCHAR(32) NOT NULL DEFAULT '',
+              "messageText" TEXT NOT NULL,
+              "matchedKeyword" VARCHAR(128) NOT NULL DEFAULT '',
+              "aiEvaluated" BOOLEAN NOT NULL DEFAULT false,
+              "aiScore" REAL,
+              status VARCHAR(32) NOT NULL,
+              "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+          `).catch((err: any) => this.logger.warn('radar_lead_logs table check', { error: err?.message }));
+          await this.logsRepo.query(`CREATE INDEX IF NOT EXISTS "idx_radar_logs_client" ON radar_lead_logs("clientId")`).catch(() => {});
+          await this.logsRepo.query(`CREATE INDEX IF NOT EXISTS "idx_radar_logs_created" ON radar_lead_logs("createdAt")`).catch(() => {});
+        }
+      } else {
+        await this.settingsRepo.query(`
+          CREATE TABLE IF NOT EXISTS radar_settings (
+            id VARCHAR(32) PRIMARY KEY,
+            enabled BOOLEAN NOT NULL DEFAULT 1,
+            minTextLength INT NOT NULL DEFAULT 8,
+            ignoreMediaWithoutCaption BOOLEAN NOT NULL DEFAULT 1,
+            groupFilterMode VARCHAR(32) NOT NULL DEFAULT 'ALL',
+            groupCategoryKeywords TEXT NOT NULL DEFAULT 'quilicura,valle lo campino,valle grande',
+            groupCategoryTags TEXT NOT NULL DEFAULT '[]',
+            whitelistedGroupIds TEXT NOT NULL DEFAULT '[]',
+            activeScanningSessions TEXT NOT NULL DEFAULT '[]',
+            dedupWindowSeconds INT NOT NULL DEFAULT 30,
+            crossGroupDedupMinutes INT NOT NULL DEFAULT 60,
+            aiSemanticEnabled BOOLEAN NOT NULL DEFAULT 1,
+            aiProvider VARCHAR(32) NOT NULL DEFAULT 'typesafe',
+            typesafeApiKey TEXT NOT NULL DEFAULT '',
+            globalBlacklistedSenders TEXT NOT NULL DEFAULT '[]',
+            updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
           )
         `).catch(() => {});
-        await this.logsRepo.query(`CREATE INDEX IF NOT EXISTS idx_radar_logs_client ON radar_lead_logs(clientId)`).catch(() => {});
-        await this.logsRepo.query(`CREATE INDEX IF NOT EXISTS idx_radar_logs_created ON radar_lead_logs(createdAt)`).catch(() => {});
+
+        await this.clientsRepo.query(`
+          CREATE TABLE IF NOT EXISTS radar_clients (
+            id VARCHAR(36) PRIMARY KEY,
+            name VARCHAR(128) NOT NULL,
+            rubroKey VARCHAR(64) NOT NULL,
+            targetPhone VARCHAR(32) NOT NULL,
+            senderSessionId VARCHAR(64) NOT NULL DEFAULT '',
+            localKeywords TEXT NOT NULL DEFAULT '',
+            jevPromptCriteria TEXT NULL,
+            useAiFilter BOOLEAN NOT NULL DEFAULT 1,
+            alertTemplate TEXT NOT NULL,
+            active BOOLEAN NOT NULL DEFAULT 1,
+            blacklistedSenders TEXT NOT NULL DEFAULT '[]',
+            negativePhrases TEXT NOT NULL DEFAULT '[]',
+            groupFilterMode VARCHAR(32) NOT NULL DEFAULT 'GLOBAL',
+            groupCategoryKeywords TEXT NOT NULL DEFAULT '',
+            groupCategoryTags TEXT NOT NULL DEFAULT '[]',
+            whitelistedGroupIds TEXT NOT NULL DEFAULT '[]',
+            createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+          )
+        `).catch(() => {});
+
+        if (this.logsRepo) {
+          await this.logsRepo.query(`
+            CREATE TABLE IF NOT EXISTS radar_lead_logs (
+              id VARCHAR(36) PRIMARY KEY,
+              clientId VARCHAR(64),
+              clientName VARCHAR(128) NOT NULL,
+              rubroKey VARCHAR(64) NOT NULL DEFAULT '',
+              sessionId VARCHAR(64) NOT NULL DEFAULT '',
+              groupId VARCHAR(128) NOT NULL DEFAULT '',
+              groupName VARCHAR(255) NOT NULL DEFAULT '',
+              buyerPhone VARCHAR(32) NOT NULL DEFAULT '',
+              messageText TEXT NOT NULL,
+              matchedKeyword VARCHAR(128) NOT NULL DEFAULT '',
+              aiEvaluated BOOLEAN NOT NULL DEFAULT 0,
+              aiScore REAL,
+              status VARCHAR(32) NOT NULL,
+              createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+          `).catch(() => {});
+          await this.logsRepo.query(`CREATE INDEX IF NOT EXISTS idx_radar_logs_client ON radar_lead_logs(clientId)`).catch(() => {});
+          await this.logsRepo.query(`CREATE INDEX IF NOT EXISTS idx_radar_logs_created ON radar_lead_logs(createdAt)`).catch(() => {});
+        }
       }
 
       // Backward compatibility migrations for existing databases (Postgres & SQLite)
-      const isPostgres = this.settingsRepo.metadata.connection.options.type === 'postgres';
       if (isPostgres) {
         await this.settingsRepo.query(`ALTER TABLE radar_settings ADD COLUMN IF NOT EXISTS "groupCategoryTags" TEXT DEFAULT '[]'`).catch(() => {});
         await this.settingsRepo.query(`ALTER TABLE radar_settings ADD COLUMN IF NOT EXISTS "crossGroupDedupMinutes" INT DEFAULT 60`).catch(() => {});
