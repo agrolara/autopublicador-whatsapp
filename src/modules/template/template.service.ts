@@ -25,10 +25,23 @@ export class TemplateService implements OnModuleInit {
 
   private async ensureColumns() {
     try {
-      await this.templateRepository.query(`ALTER TABLE templates ADD COLUMN mediaType varchar(20) DEFAULT 'text'`).catch(() => {});
-      await this.templateRepository.query(`ALTER TABLE templates ADD COLUMN mediaUrl text`).catch(() => {});
-      await this.templateRepository.query(`ALTER TABLE templates ADD COLUMN mediaFileName varchar(255)`).catch(() => {});
-      await this.templateRepository.query(`ALTER TABLE templates ADD COLUMN mediaUrls text`).catch(() => {});
+      const driver = this.templateRepository.manager.connection.options.type;
+      if (driver === 'postgres') {
+        const queries = [
+          `ALTER TABLE "templates" ADD COLUMN IF NOT EXISTS "mediaType" varchar(20) DEFAULT 'text'`,
+          `ALTER TABLE "templates" ADD COLUMN IF NOT EXISTS "mediaUrl" text`,
+          `ALTER TABLE "templates" ADD COLUMN IF NOT EXISTS "mediaFileName" varchar(255)`,
+          `ALTER TABLE "templates" ADD COLUMN IF NOT EXISTS "mediaUrls" text`,
+        ];
+        for (const q of queries) {
+          await this.templateRepository.query(q).catch(() => {});
+        }
+      } else {
+        await this.templateRepository.query(`ALTER TABLE templates ADD COLUMN mediaType varchar(20) DEFAULT 'text'`).catch(() => {});
+        await this.templateRepository.query(`ALTER TABLE templates ADD COLUMN mediaUrl text`).catch(() => {});
+        await this.templateRepository.query(`ALTER TABLE templates ADD COLUMN mediaFileName varchar(255)`).catch(() => {});
+        await this.templateRepository.query(`ALTER TABLE templates ADD COLUMN mediaUrls text`).catch(() => {});
+      }
     } catch (e: any) {
       this.logger.warn('Column auto-migration skipped or already present:', e?.message);
     }
@@ -76,8 +89,12 @@ export class TemplateService implements OnModuleInit {
       if (currentCount === 0) {
         this.logger.log(`Restoring ${backup.length} templates from backup file...`);
         for (const item of backup) {
-          const t = this.templateRepository.create(item);
-          await this.templateRepository.save(t).catch(() => {});
+          try {
+            const t = this.templateRepository.create(item);
+            await this.templateRepository.save(t);
+          } catch (err: any) {
+            this.logger.warn(`Failed to restore template '${item?.name}': ${err?.message}`);
+          }
         }
       }
     } catch (e: any) {
