@@ -793,7 +793,7 @@ export function Infrastructure() {
                     {restartFlow.dbSwitch && (
                       <button
                         className="btn-secondary btn-sm"
-                        onClick={dataBackup.exportBackup}
+                        onClick={() => void dataBackup.exportBackup()}
                         disabled={dataBackup.migrating}
                       >
                         {dataBackup.migrating ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}

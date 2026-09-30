@@ -1,5 +1,6 @@
 import { Controller, Post, Body, HttpCode, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiHeader } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { CurrentApiKey, Public } from './decorators/auth.decorators';
 import { ApiKey } from './entities/api-key.entity';
 import { AuthService } from './auth.service';
@@ -31,6 +32,10 @@ export class AuthValidateController {
   }
 
   @Public()
+  @Throttle({
+    short: { limit: 3, ttl: 1000 },
+    medium: { limit: 10, ttl: 60000 },
+  })
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Login with username/phone and password' })
@@ -39,6 +44,10 @@ export class AuthValidateController {
   }
 
   @Public()
+  @Throttle({
+    short: { limit: 1, ttl: 5000 },
+    medium: { limit: 5, ttl: 60000 },
+  })
   @Post('otp/request')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Request OTP verification code via WhatsApp' })
@@ -47,6 +56,10 @@ export class AuthValidateController {
   }
 
   @Public()
+  @Throttle({
+    short: { limit: 3, ttl: 1000 },
+    medium: { limit: 10, ttl: 60000 },
+  })
   @Post('otp/verify')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Verify OTP code and authenticate' })

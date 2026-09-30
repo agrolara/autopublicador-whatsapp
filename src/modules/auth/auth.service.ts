@@ -12,7 +12,7 @@ import {
 import { ModuleRef } from '@nestjs/core';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Equal, IsNull, MoreThan, Not, Repository } from 'typeorm';
-import { randomBytes, createHash } from 'crypto';
+import { randomBytes, createHash, randomInt, timingSafeEqual } from 'crypto';
 import { ipMatches } from '../../common/utils/ip';
 import { hashApiKey } from './api-key-hash';
 import { ApiKey, ApiKeyRole } from './entities/api-key.entity';
@@ -553,7 +553,11 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
 
   verifyPassword(password: string, storedHash?: string | null): boolean {
     if (!storedHash) return false;
-    return this.hashPassword(password) === storedHash;
+    const computed = this.hashPassword(password);
+    const computedBuf = Buffer.from(computed, 'utf8');
+    const storedBuf = Buffer.from(storedHash, 'utf8');
+    if (computedBuf.length !== storedBuf.length) return false;
+    return timingSafeEqual(computedBuf, storedBuf);
   }
 
   async createClientAccount(dto: CreateClientAccountDto): Promise<{ client: ApiKey; rawKey: string }> {
@@ -770,7 +774,7 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
       throw new ForbiddenException('CUENTA_SUSPENDIDA_PAGO_PENDIENTE: Tu suscripción está suspendida por pago pendiente. Contacta al administrador.');
     }
 
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const code = randomInt(100000, 1000000).toString();
     account.otpCode = code;
     account.otpExpiresAt = new Date(Date.now() + 5 * 60 * 1000);
     await this.apiKeyRepository.save(account);
@@ -821,7 +825,12 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
       throw new ForbiddenException('CUENTA_SUSPENDIDA_PAGO_PENDIENTE: Tu cuenta se encuentra suspendida por pago pendiente. Contacta al administrador.');
     }
 
-    if (!account.otpCode || account.otpCode !== cleanCode) {
+    const isMatch =
+      account.otpCode &&
+      account.otpCode.length === cleanCode.length &&
+      timingSafeEqual(Buffer.from(account.otpCode, 'utf8'), Buffer.from(cleanCode, 'utf8'));
+
+    if (!isMatch) {
       throw new UnauthorizedException('Código de verificación incorrecto.');
     }
 
