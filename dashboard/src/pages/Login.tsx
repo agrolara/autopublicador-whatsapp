@@ -186,7 +186,7 @@ export function Login({ onLogin }: LoginProps) {
         <div className="login-card-panel">
           <div className="login-card">
             <div className="login-logo">
-              <img src="/openwa_logo.webp" alt="OpenWA Logo" className="logo-icon" />
+              <img src="/botwa_icon.webp" alt="Danmax AI WA" className="logo-icon" />
               <span className="version-info">
                 {t('login.version', {
                   version: __APP_VERSION__,

@@ -8,11 +8,14 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: #0b1120;
+  background-color: #070d19;
   background-image: 
-    radial-gradient(circle at 15% 20%, rgba(37, 211, 102, 0.12) 0%, transparent 40%),
-    radial-gradient(circle at 85% 80%, rgba(14, 165, 233, 0.09) 0%, transparent 45%),
-    linear-gradient(180deg, #070d19 0%, #0b1120 100%);
+    linear-gradient(rgba(7, 13, 25, 0.65), rgba(11, 17, 32, 0.75)),
+    url('/landing_bg.jpg');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
   padding: 2rem;
   box-sizing: border-box;
   overflow-y: auto;
@@ -204,9 +207,11 @@
 }
 
 [data-theme='dark'] .login-card {
-  background: #111827;
-  border-color: #1f2937;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+  background: rgba(17, 24, 39, 0.90);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
 }
 
 .login-logo {
@@ -214,21 +219,24 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.4rem;
+  gap: 0.5rem;
   margin-bottom: 1.25rem;
 }
 
 .logo-icon {
-  width: 110px;
-  height: 110px;
-  object-fit: contain;
-  filter: drop-shadow(0 4px 12px rgba(37, 211, 102, 0.25));
+  width: 96px;
+  height: 96px;
+  border-radius: 20px;
+  object-fit: cover;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  box-shadow: 0 8px 24px -4px rgba(16, 185, 129, 0.35);
 }
 
 .version-info {
   font-size: 0.75rem;
   color: var(--text-muted, #64748b);
   font-weight: 500;
+  letter-spacing: 0.03em;
 }
 
 /* Selector de Idioma */

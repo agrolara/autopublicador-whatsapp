@@ -37,15 +37,18 @@
 }
 
 .sidebar-logo {
-  width: 28px;
-  height: 28px;
-  object-fit: contain;
+  width: 30px;
+  height: 30px;
+  object-fit: cover;
   flex-shrink: 0;
+  border-radius: 7px;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.25);
 }
 
 .mobile-brand .sidebar-logo {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
 }
 
 .sidebar-brand {
