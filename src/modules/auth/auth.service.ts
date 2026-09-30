@@ -674,22 +674,51 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
     return account;
   }
 
-  async loginWithPassword(usernameOrPhone: string, password: string): Promise<{ valid: boolean; token: string; role: string; name: string; username?: string | null; allowedSessions?: string[] | null; paymentStatus: string }> {
+  async loginWithPassword(usernameOrPhone?: string, password?: string): Promise<{ valid: boolean; token: string; role: string; name: string; username?: string | null; allowedSessions?: string[] | null; paymentStatus: string }> {
     const term = (usernameOrPhone || '').trim();
+    const pwd = (password || '').trim();
     const cleanDigits = term.replace(/[^0-9]/g, '');
 
-    // 1. Direct master admin key check
+    if (!term && !pwd) {
+      throw new UnauthorizedException('Por favor ingresa tu contraseña o credenciales.');
+    }
+
+    // 1. Direct master admin key check (timing safe)
     const masterKey = process.env.ADMIN_API_KEY || process.env.API_MASTER_KEY;
-    if (masterKey && (term === masterKey || password === masterKey)) {
-      return {
-        valid: true,
-        token: masterKey,
-        role: 'admin',
-        name: 'Super Admin Master',
-        username: 'admin',
-        allowedSessions: null,
-        paymentStatus: 'active',
-      };
+    if (masterKey) {
+      const isTermMaster = term.length === masterKey.length && timingSafeEqual(Buffer.from(term), Buffer.from(masterKey));
+      const isPwdMaster = pwd.length === masterKey.length && timingSafeEqual(Buffer.from(pwd), Buffer.from(masterKey));
+      if (isTermMaster || isPwdMaster) {
+        return {
+          valid: true,
+          token: masterKey,
+          role: 'admin',
+          name: 'Super Admin Master',
+          username: 'admin',
+          allowedSessions: null,
+          paymentStatus: 'active',
+        };
+      }
+    }
+
+    // If only password is provided or username is admin, check if password matches an API Key
+    if (!term || term.toLowerCase() === 'admin') {
+      const hash = this.hashKey(pwd);
+      const directKeyAccount = await this.apiKeyRepository.findOne({ where: [{ keyHash: hash }, { clientToken: pwd }] });
+      if (directKeyAccount) {
+        if (directKeyAccount.paymentStatus === 'suspended_unpaid' || !directKeyAccount.isActive) {
+          throw new ForbiddenException('CUENTA_SUSPENDIDA_PAGO_PENDIENTE: Tu cuenta se encuentra suspendida por pago pendiente. Contacta al administrador.');
+        }
+        return {
+          valid: true,
+          token: pwd,
+          role: directKeyAccount.role,
+          name: directKeyAccount.name,
+          username: directKeyAccount.username,
+          allowedSessions: directKeyAccount.allowedSessions,
+          paymentStatus: directKeyAccount.paymentStatus,
+        };
+      }
     }
 
     // 2. Find by username, phone or name
@@ -722,7 +751,7 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
       throw new UnauthorizedException('Credenciales inválidas. Verifica tu usuario, teléfono o contraseña.');
     }
 
-    if (!account.passwordHash || !this.verifyPassword(password, account.passwordHash)) {
+    if (!account.passwordHash || !this.verifyPassword(pwd, account.passwordHash)) {
       throw new UnauthorizedException('Contraseña incorrecta.');
     }
 

@@ -183,12 +183,13 @@ export class VerifyOtpDto {
 }
 
 export class LoginPasswordDto {
-  @ApiProperty({
-    description: 'Usuario o teléfono de WhatsApp registrado',
+  @ApiPropertyOptional({
+    description: 'Usuario o teléfono de WhatsApp registrado (opcional para administradores)',
     example: 'sushi_icura',
   })
+  @IsOptional()
   @IsString()
-  usernameOrPhone!: string;
+  usernameOrPhone?: string;
 
   @ApiProperty({
     description: 'Contraseña o clave de acceso',
