@@ -121,6 +121,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
       getSocketOrNull: () => this.sock,
       logger: this.logger,
       toNeutralJid: jid => this.sessionStore.toNeutralJid(jid),
+      toEngineJid: jid => this.sessionStore.toEngineJid(jid),
       normalizedSelfJid: () => this.normalizedSelfJid(),
       loadLib: () => this.loadLib(),
       get connectedAt() {
@@ -131,6 +132,8 @@ export class BaileysAdapter implements IWhatsAppEngine {
       recordMessage: msg => this.sessionStore.recordMessage(msg),
       recordMessageEdit: (chatId, messageId, text) => this.sessionStore.recordMessageEdit(chatId, messageId, text),
       putStoredMessage: msg => this.config.messageStore?.put(this.config.dbSessionId, msg),
+      getStoredMessage: messageId =>
+        this.config.messageStore?.getMessage(this.config.dbSessionId, messageId) ?? Promise.resolve(null),
       getOnMessage: () => this.callbacks.onMessage,
       getOnMessageCreate: () => this.callbacks.onMessageCreate,
       getOnMessageRevoked: () => this.callbacks.onMessageRevoked,
@@ -167,6 +170,8 @@ export class BaileysAdapter implements IWhatsAppEngine {
       recordLidMapping: (lid, pn) =>
         this.sessionStore.addLidMappings([{ lid: `${lid.split('@')[0].split(':')[0]}@lid`, pn }]),
       getOnMessageCreate: () => this.callbacks.onMessageCreate,
+      recordSentPoll: (pollMsgId, pollEncKey, options, pollCreatorJid) =>
+        this.events.recordSentPoll(pollMsgId, pollEncKey, options, pollCreatorJid),
       mapMessage: (msg, contentType, opts) => this.events.mapMessage(msg, contentType, opts),
     });
     this.contacts = new BaileysContacts({

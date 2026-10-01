@@ -19,13 +19,18 @@ import {
   Loader2,
   X,
   ExternalLink,
+  Folder,
+  Phone,
+  Layers,
 } from 'lucide-react';
 import {
   pollsApi,
   sessionApi,
+  groupTagsApi,
   type PollItem,
   type CreatePollPayload,
   type PollVoteItem,
+  type GroupTagItem,
 } from '../services/api';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { useSessionsQuery } from '../hooks/queries';
@@ -64,12 +69,22 @@ export function Polls() {
 
   // Create form state
   const [newSessionId, setNewSessionId] = useState('');
-  const [chatType, setChatType] = useState<'group' | 'manual'>('group');
+  const [chatType, setChatType] = useState<'group' | 'category' | 'personal'>('group');
   const [availableGroups, setAvailableGroups] = useState<GroupItem[]>([]);
   const [loadingGroups, setLoadingGroups] = useState(false);
   const [selectedGroupJid, setSelectedGroupJid] = useState('');
-  const [manualChatId, setManualChatId] = useState('');
   const [chatName, setChatName] = useState('');
+  const [groupSearchInModal, setGroupSearchInModal] = useState('');
+
+  // Category / Group Tags state
+  const [groupTags, setGroupTags] = useState<GroupTagItem[]>([]);
+  const [selectedTagId, setSelectedTagId] = useState('');
+  const [sendToAllInTag, setSendToAllInTag] = useState(true);
+
+  // Personal Phone state
+  const [personalPhone, setPersonalPhone] = useState('');
+  const [personalName, setPersonalName] = useState('');
+
   const [question, setQuestion] = useState('');
   const [options, setOptions] = useState<string[]>(['Opción 1', 'Opción 2', 'Otras']);
   const [allowMultiple, setAllowMultiple] = useState(false);
@@ -105,27 +120,35 @@ export function Polls() {
     fetchPolls();
   }, [fetchPolls]);
 
-  // Load groups when session changes in creation modal
+  // Load groups and categories when session changes in creation modal
   useEffect(() => {
     if (!newSessionId) {
       setAvailableGroups([]);
+      setGroupTags([]);
       return;
     }
     let active = true;
     setLoadingGroups(true);
-    sessionApi
-      .getGroups(newSessionId)
-      .then(groups => {
+    Promise.all([
+      sessionApi.getGroups(newSessionId).catch(() => []),
+      groupTagsApi.list(newSessionId).catch(() => []),
+    ])
+      .then(([groups, tags]) => {
         if (!active) return;
-        setAvailableGroups(groups);
-        if (groups.length > 0 && !selectedGroupJid) {
+        setAvailableGroups(groups || []);
+        setGroupTags(tags || []);
+        if (groups && groups.length > 0 && !selectedGroupJid) {
           setSelectedGroupJid(groups[0].id);
-          setChatName(groups[0].name);
+          setChatName(groups[0].name || groups[0].id);
+        }
+        if (tags && tags.length > 0 && !selectedTagId) {
+          setSelectedTagId(tags[0].id);
         }
       })
       .catch(() => {
         if (!active) return;
         setAvailableGroups([]);
+        setGroupTags([]);
       })
       .finally(() => {
         if (active) setLoadingGroups(false);
@@ -133,7 +156,7 @@ export function Polls() {
     return () => {
       active = false;
     };
-  }, [newSessionId, selectedGroupJid]);
+  }, [newSessionId]);
 
   // Default first session for create modal
   useEffect(() => {
@@ -259,18 +282,6 @@ export function Polls() {
       return;
     }
 
-    let targetChatId =
-      chatType === 'group' ? selectedGroupJid.trim() : manualChatId.trim();
-    if (!targetChatId) {
-      addToast({ type: 'warning', title: 'Indica el chat o grupo de destino' });
-      return;
-    }
-
-    if (!targetChatId.includes('@')) {
-      const cleanDigits = targetChatId.replace(/\D/g, '');
-      targetChatId = `${cleanDigits}@c.us`;
-    }
-
     if (!question.trim()) {
       addToast({ type: 'warning', title: 'Escribe la pregunta de la encuesta' });
       return;
@@ -282,34 +293,92 @@ export function Polls() {
       return;
     }
 
+    // Determine target destinations
+    interface DestTarget {
+      chatId: string;
+      chatName?: string;
+    }
+    const targets: DestTarget[] = [];
+
+    if (chatType === 'category') {
+      const tag = groupTags.find(t => t.id === selectedTagId);
+      if (!tag || tag.groupIds.length === 0) {
+        addToast({ type: 'warning', title: 'La categoría seleccionada no tiene grupos asociados' });
+        return;
+      }
+      if (sendToAllInTag) {
+        for (const gid of tag.groupIds) {
+          const gInfo = availableGroups.find(g => g.id === gid);
+          targets.push({ chatId: gid, chatName: gInfo?.name || tag.name });
+        }
+      } else {
+        if (!selectedGroupJid) {
+          addToast({ type: 'warning', title: 'Selecciona un grupo de la categoría' });
+          return;
+        }
+        const gInfo = availableGroups.find(g => g.id === selectedGroupJid);
+        targets.push({ chatId: selectedGroupJid, chatName: gInfo?.name || chatName });
+      }
+    } else if (chatType === 'group') {
+      if (!selectedGroupJid.trim()) {
+        addToast({ type: 'warning', title: 'Selecciona un grupo de destino' });
+        return;
+      }
+      const gInfo = availableGroups.find(g => g.id === selectedGroupJid);
+      targets.push({ chatId: selectedGroupJid.trim(), chatName: gInfo?.name || chatName });
+    } else if (chatType === 'personal') {
+      const cleanDigits = personalPhone.replace(/\D/g, '');
+      if (!cleanDigits || cleanDigits.length < 8) {
+        addToast({ type: 'warning', title: 'Ingresa un número personal válido con código de país (ej: 569...)' });
+        return;
+      }
+      targets.push({
+        chatId: `${cleanDigits}@c.us`,
+        chatName: personalName.trim() || undefined,
+      });
+    }
+
+    if (targets.length === 0) {
+      addToast({ type: 'warning', title: 'Indica al menos un destino para la encuesta' });
+      return;
+    }
+
     try {
       setSubmittingPoll(true);
-      const payload: CreatePollPayload = {
-        sessionId: newSessionId,
-        chatId: targetChatId,
-        chatName: chatName.trim() || undefined,
-        question: question.trim(),
-        options: cleanOptions,
-        allowMultipleAnswers: allowMultiple,
-        otherOptionKeyword: otherKeyword.trim() || 'otras',
-        citationEnabled,
-        baseTime: citationEnabled ? baseTime : undefined,
-        citationTimes: citationEnabled ? citationTimes : undefined,
-        endDate: citationEnabled && endDate ? new Date(endDate).toISOString() : undefined,
-        reminderMessage: citationEnabled && reminderMessage.trim() ? reminderMessage.trim() : undefined,
-      };
+      let successCount = 0;
+      for (const tgt of targets) {
+        const payload: CreatePollPayload = {
+          sessionId: newSessionId,
+          chatId: tgt.chatId,
+          chatName: tgt.chatName,
+          question: question.trim(),
+          options: cleanOptions,
+          allowMultipleAnswers: allowMultiple,
+          otherOptionKeyword: otherKeyword.trim() || 'otras',
+          citationEnabled,
+          baseTime: citationEnabled ? baseTime : undefined,
+          citationTimes: citationEnabled ? citationTimes : undefined,
+          endDate: citationEnabled && endDate ? new Date(endDate).toISOString() : undefined,
+          reminderMessage: citationEnabled && reminderMessage.trim() ? reminderMessage.trim() : undefined,
+        };
+        await pollsApi.create(payload);
+        successCount++;
+      }
 
-      await pollsApi.create(payload);
       addToast({
         type: 'success',
-        title: '¡Encuesta creada y enviada a WhatsApp!',
-        message: 'La encuesta nativa ya está visible en el chat seleccionado.',
+        title: targets.length > 1 ? `¡${successCount} encuestas publicadas!` : '¡Encuesta creada y publicada!',
+        message: targets.length > 1
+          ? `Se crearon ${successCount} encuestas para los grupos de la categoría seleccionada.`
+          : `La encuesta nativa ya está visible en ${targets[0].chatName || targets[0].chatId}.`,
       });
       setCreateModalOpen(false);
       // Reset form
       setQuestion('');
       setOptions(['Opción 1', 'Opción 2', 'Otras']);
       setCitationTimes([]);
+      setPersonalPhone('');
+      setPersonalName('');
       fetchPolls();
     } catch (err: any) {
       addToast({
@@ -836,72 +905,217 @@ export function Polls() {
             </select>
           </div>
 
-          {/* Destination Chat */}
+          {/* Destination Selector */}
           <div className="poll-form-group">
             <label className="poll-form-label">Destino de la Encuesta *</label>
-            <div style={{ display: 'flex', gap: '1rem', marginBottom: '0.5rem' }}>
-              <label style={{ fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                <input
-                  type="radio"
-                  name="chatType"
-                  checked={chatType === 'group'}
-                  onChange={() => setChatType('group')}
-                />
-                Seleccionar Grupo
-              </label>
-              <label style={{ fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                <input
-                  type="radio"
-                  name="chatType"
-                  checked={chatType === 'manual'}
-                  onChange={() => setChatType('manual')}
-                />
-                Ingresar JID o Número manual
-              </label>
+
+            {/* Segmented Controller */}
+            <div className="dest-segmented-control">
+              <button
+                type="button"
+                className={`dest-segment-btn ${chatType === 'group' ? 'active' : ''}`}
+                onClick={() => setChatType('group')}
+              >
+                <Users size={15} />
+                Grupo Individual
+              </button>
+              <button
+                type="button"
+                className={`dest-segment-btn ${chatType === 'category' ? 'active' : ''}`}
+                onClick={() => setChatType('category')}
+              >
+                <Folder size={15} />
+                Categoría de Grupos {groupTags.length > 0 && `(${groupTags.length})`}
+              </button>
+              <button
+                type="button"
+                className={`dest-segment-btn ${chatType === 'personal' ? 'active' : ''}`}
+                onClick={() => setChatType('personal')}
+              >
+                <Phone size={15} />
+                Número Personal
+              </button>
             </div>
 
-            {chatType === 'group' ? (
-              loadingGroups ? (
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                  <Loader2 size={14} className="spin" /> Cargando grupos de la sesión...
-                </div>
-              ) : availableGroups.length > 0 ? (
-                <select
-                  className="poll-form-select"
-                  value={selectedGroupJid}
-                  onChange={e => {
-                    setSelectedGroupJid(e.target.value);
-                    const grp = availableGroups.find(g => g.id === e.target.value);
-                    if (grp) setChatName(grp.name);
-                  }}
-                >
-                  {availableGroups.map(g => (
-                    <option key={g.id} value={g.id}>
-                      {g.name} ({g.id})
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                  No se detectaron grupos en esta sesión. Usa la opción de JID manual.
-                </div>
-              )
-            ) : (
+            {/* Content for Group Individual */}
+            {chatType === 'group' && (
+              <div>
+                {loadingGroups ? (
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                    <Loader2 size={14} className="spin" /> Cargando grupos de WhatsApp...
+                  </div>
+                ) : availableGroups.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    <input
+                      type="text"
+                      className="poll-form-input"
+                      placeholder="Filtrar grupos por nombre..."
+                      value={groupSearchInModal}
+                      onChange={e => setGroupSearchInModal(e.target.value)}
+                    />
+                    <select
+                      className="poll-form-select"
+                      value={selectedGroupJid}
+                      onChange={e => {
+                        setSelectedGroupJid(e.target.value);
+                        const grp = availableGroups.find(g => g.id === e.target.value);
+                        if (grp) setChatName(grp.name);
+                      }}
+                    >
+                      {availableGroups
+                        .filter(
+                          g =>
+                            !groupSearchInModal.trim() ||
+                            g.name?.toLowerCase().includes(groupSearchInModal.toLowerCase()),
+                        )
+                        .map(g => (
+                          <option key={g.id} value={g.id}>
+                            {g.name} ({g.id})
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                    No se detectaron grupos en esta sesión activa.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Content for Group Category */}
+            {chatType === 'category' && (
+              <div>
+                {groupTags.length === 0 ? (
+                  <div
+                    style={{
+                      padding: '0.75rem',
+                      background: 'rgba(245, 158, 11, 0.08)',
+                      borderRadius: '8px',
+                      border: '1px solid rgba(245, 158, 11, 0.25)',
+                      fontSize: '0.85rem',
+                      color: '#b45309',
+                    }}
+                  >
+                    ℹ️ Aún no has configurado categorías de grupos para esta sesión. Puedes crear categorías (ej: "Ventas Santiago", "Inmobiliarias") desde el menú de <strong>Grupos</strong> o el <strong>Probador de Mensajes</strong>.
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ fontSize: '0.825rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                      Selecciona la categoría a difundir:
+                    </div>
+                    <div className="category-pills-wrap">
+                      {groupTags.map(tag => {
+                        const isSelected = selectedTagId === tag.id;
+                        return (
+                          <button
+                            key={tag.id}
+                            type="button"
+                            className={`category-pill-item ${isSelected ? 'active' : ''}`}
+                            onClick={() => setSelectedTagId(tag.id)}
+                          >
+                            <span className="category-dot" style={{ backgroundColor: tag.color || '#3b82f6' }} />
+                            <span>{tag.name}</span>
+                            <span className="category-count-badge">
+                              {tag.groupIds?.length || 0} {tag.groupIds?.length === 1 ? 'grupo' : 'grupos'}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {selectedTagId && (
+                      <div
+                        style={{
+                          marginTop: '0.75rem',
+                          padding: '0.75rem',
+                          background: 'var(--bg-surface-secondary, #f8fafc)',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border-color, #e2e8f0)',
+                        }}
+                      >
+                        <label
+                          style={{
+                            fontSize: '0.85rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            cursor: 'pointer',
+                            fontWeight: 500,
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={sendToAllInTag}
+                            onChange={e => setSendToAllInTag(e.target.checked)}
+                          />
+                          <span>
+                            Publicar la encuesta en <strong>todos los grupos</strong> de esta categoría (
+                            {groupTags.find(t => t.id === selectedTagId)?.groupIds?.length || 0} grupos)
+                          </span>
+                        </label>
+
+                        {!sendToAllInTag && (
+                          <div style={{ marginTop: '0.5rem' }}>
+                            <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                              Elegir grupo específico dentro de la categoría:
+                            </label>
+                            <select
+                              className="poll-form-select"
+                              style={{ marginTop: '0.25rem' }}
+                              value={selectedGroupJid}
+                              onChange={e => {
+                                setSelectedGroupJid(e.target.value);
+                                const grp = availableGroups.find(g => g.id === e.target.value);
+                                if (grp) setChatName(grp.name);
+                              }}
+                            >
+                              {availableGroups
+                                .filter(g =>
+                                  groupTags.find(t => t.id === selectedTagId)?.groupIds?.includes(g.id),
+                                )
+                                .map(g => (
+                                  <option key={g.id} value={g.id}>
+                                    {g.name} ({g.id})
+                                  </option>
+                                ))}
+                            </select>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Content for Personal Phone */}
+            {chatType === 'personal' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <div>
+                  <input
+                    type="text"
+                    className="poll-form-input"
+                    placeholder="Número de teléfono personal (Ej: 56993005959 o +56 9 9300 5959)"
+                    value={personalPhone}
+                    onChange={e => setPersonalPhone(e.target.value)}
+                    required
+                  />
+                  {personalPhone.trim() && (
+                    <div className="poll-phone-preview">
+                      <CheckCircle size={14} />
+                      <span>
+                        Destino normalizado WhatsApp: <strong>{personalPhone.replace(/\D/g, '')}@c.us</strong>
+                      </span>
+                    </div>
+                  )}
+                </div>
                 <input
                   type="text"
                   className="poll-form-input"
-                  placeholder="Ej: 120363xxx@g.us o 56912345678@c.us"
-                  value={manualChatId}
-                  onChange={e => setManualChatId(e.target.value)}
-                  required
-                />
-                <input
-                  type="text"
-                  className="poll-form-input"
-                  placeholder="Nombre de referencia para el grupo o contacto"
-                  value={chatName}
-                  onChange={e => setChatName(e.target.value)}
+                  placeholder="Nombre del contacto (opcional para identificar en las estadísticas)"
+                  value={personalName}
+                  onChange={e => setPersonalName(e.target.value)}
                 />
               </div>
             )}

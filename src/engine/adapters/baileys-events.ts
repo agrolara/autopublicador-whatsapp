@@ -81,6 +81,7 @@ export interface BaileysEventsHost {
   getSocketOrNull(): WASocket | null;
   readonly logger: ReturnType<typeof createLogger>;
   toNeutralJid(jid: string): string;
+  toEngineJid?(jid: string): string;
   normalizedSelfJid(): string;
   /** Lazily loaded @whiskeysockets/baileys module (ESM-only; loaded on first connect, not at boot). */
   loadLib(): Promise<typeof BaileysLib>;
@@ -96,6 +97,8 @@ export interface BaileysEventsHost {
   recordMessageEdit(chatId: string, messageId: string, text: string): void;
   /** Persist an inbound message to the store; undefined when no store is configured. */
   putStoredMessage(msg: WAMessage): Promise<void> | undefined;
+  /** Retrieve a message from the store for poll vote decryption or replies. */
+  getStoredMessage?(messageId: string): Promise<WAMessage | null>;
   /** The currently-registered onMessage callback, if any (assigned at initialize()). */
   getOnMessage(): EngineEventCallbacks['onMessage'];
   /** The currently-registered onMessageCreate callback, if any (assigned at initialize()). */
@@ -132,6 +135,21 @@ export class BaileysEvents {
     string,
     { callFrom: string; expiresAt: number; from: string; isVideo: boolean; isGroup: boolean }
   >();
+
+  /** In-memory cache of outbound poll decryption secrets and option definitions, keyed by poll message id */
+  readonly pollSecrets = new Map<
+    string,
+    { pollEncKey: Uint8Array; options: string[]; pollCreatorJid: string }
+  >();
+
+  recordSentPoll(pollMsgId: string, pollEncKey: Uint8Array, options: string[], pollCreatorJid: string): void {
+    if (!pollMsgId || !pollEncKey) return;
+    this.pollSecrets.set(pollMsgId, { pollEncKey, options, pollCreatorJid });
+    if (this.pollSecrets.size > 1000) {
+      const oldestKey = this.pollSecrets.keys().next().value;
+      if (oldestKey) this.pollSecrets.delete(oldestKey);
+    }
+  }
 
   constructor(private readonly host: BaileysEventsHost) {}
 
@@ -303,6 +321,17 @@ export class BaileysEvents {
         return;
       }
 
+      // --- pollUpdateMessage: decrypt vote & emit onPollVote ---
+      const pum =
+        (normalizedRoot as any)?.pollUpdateMessage ||
+        msg.message?.pollUpdateMessage;
+      if (contentType === 'pollUpdateMessage' || pum) {
+        if (pum?.pollCreationMessageKey && pum?.vote) {
+          await this.handleInboundPollUpdate(msg, pum);
+          return;
+        }
+      }
+
       // --- Normal message: enrich + emit ---
       const incoming = await this.mapMessage(msg, contentType, { skipMediaDownload: opts?.skipMedia });
       if (msg.key.fromMe === true) {
@@ -321,6 +350,102 @@ export class BaileysEvents {
         `Unhandled error processing inbound message (id=${msg.key?.id ?? 'unknown'}); dropping`,
         err instanceof Error ? err.message : String(err),
       );
+    }
+  }
+
+  /**
+   * Decrypts an inbound WhatsApp poll vote using the poll's encryption secret and maps
+   * the selected option SHA-256 hashes back to their human-readable option strings.
+   */
+  private async handleInboundPollUpdate(msg: WAMessage, pum: any): Promise<void> {
+    try {
+      const b = await this.host.loadLib();
+      const creationKey = pum.pollCreationMessageKey;
+      if (!creationKey?.id) return;
+
+      const pollMsgId = creationKey.id;
+      const remoteJid = msg.key.remoteJid!;
+      const meId = b.jidNormalizedUser(this.host.normalizedSelfJid());
+      const pollCreatorJid = b.getKeyAuthor(creationKey, meId);
+      const voterJid = b.getKeyAuthor(msg.key, meId);
+
+      let pollEncKey: Uint8Array | null = null;
+      let optionNames: string[] = [];
+
+      // 1. Look up in memory cache
+      const cached = this.pollSecrets.get(pollMsgId);
+      if (cached) {
+        pollEncKey = cached.pollEncKey;
+        optionNames = cached.options;
+      }
+
+      // 2. Fall back to message store
+      if (!pollEncKey && this.host.getStoredMessage) {
+        const stored = await this.host.getStoredMessage(pollMsgId);
+        if (stored) {
+          pollEncKey =
+            ((stored as any).messageSecret as Uint8Array) ||
+            ((stored as any).message?.messageContextInfo?.messageSecret as Uint8Array) ||
+            null;
+          const pollCreation =
+            stored.message?.pollCreationMessage ||
+            stored.message?.pollCreationMessageV2 ||
+            stored.message?.pollCreationMessageV3;
+          if (pollCreation?.options) {
+            optionNames = pollCreation.options.map((o: any) => o.optionName || '');
+          }
+        }
+      }
+
+      if (!pollEncKey) {
+        this.host.logger.warn(`Could not decrypt poll vote for ${pollMsgId}: pollEncKey missing from cache & store`);
+        return;
+      }
+
+      // Decrypt using Baileys decryptPollVote
+      const normCreator = b.jidNormalizedUser(pollCreatorJid);
+      const normVoter = b.jidNormalizedUser(voterJid);
+
+      const decrypted = b.decryptPollVote(pum.vote, {
+        pollEncKey,
+        pollCreatorJid: normCreator,
+        pollMsgId,
+        voterJid: normVoter,
+      });
+
+      // Map selected SHA-256 hashes back to option string names
+      const crypto = await import('crypto');
+      const selectedOptions: string[] = [];
+      const optionMap = new Map<string, string>();
+      for (const name of optionNames) {
+        const hashHex = crypto.createHash('sha256').update(Buffer.from(name)).digest('hex');
+        optionMap.set(hashHex, name);
+      }
+
+      for (const optHash of decrypted.selectedOptions || []) {
+        const optHex = Buffer.from(optHash).toString('hex');
+        const matched = optionMap.get(optHex);
+        if (matched) {
+          selectedOptions.push(matched);
+        } else {
+          selectedOptions.push(optHex);
+        }
+      }
+
+      this.host.logger.log(
+        `Decrypted poll vote for poll ${pollMsgId} by ${voterJid}: [${selectedOptions.join(', ')}]`,
+      );
+
+      // Emit onPollVote
+      this.host.getOnPollVote?.()?.({
+        pollMessageId: pollMsgId,
+        chatId: this.host.toNeutralJid(remoteJid),
+        voterJid: this.host.toNeutralJid(voterJid),
+        selectedOptions,
+        timestamp: toUnixSeconds(msg.messageTimestamp),
+      });
+    } catch (err: any) {
+      this.host.logger.error(`Failed to decrypt inbound poll vote for ${msg.key?.id}: ${err?.message}`, err?.stack);
     }
   }
 

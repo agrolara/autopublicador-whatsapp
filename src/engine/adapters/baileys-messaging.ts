@@ -55,6 +55,8 @@ export interface BaileysMessagingHost {
   recordLidMapping(lid: string, pn: string): void;
   /** The currently-registered onMessageCreate callback, if any (assigned at initialize()). */
   getOnMessageCreate(): EngineEventCallbacks['onMessageCreate'];
+  /** Cache sent poll secret and options for instant decryption on vote events */
+  recordSentPoll?(pollMsgId: string, pollEncKey: Uint8Array, options: string[], pollCreatorJid: string): void;
   /** Map a WAMessage to its neutral shape (the adapter's inbound mapper). */
   mapMessage(
     msg: WAMessage,
@@ -552,6 +554,18 @@ export class BaileysMessaging {
           error: err instanceof Error ? err.message : String(err),
         }),
       );
+      const sentSecret =
+        ((sent as any).messageSecret as Uint8Array) ||
+        ((sent as any).message?.messageContextInfo?.messageSecret as Uint8Array);
+      if (sent.key?.id && sentSecret && 'poll' in content) {
+        const pollContent = (content as any).poll;
+        this.host.recordSentPoll?.(
+          sent.key.id,
+          sentSecret,
+          pollContent.values || [],
+          this.host.normalizedSelfJid(),
+        );
+      }
       // wwjs fires `message_create` for its own API sends, which SessionService turns into `message.sent`.
       // Baileys' own socket-sends echo back only as a `type:'append'` upsert (skipped as history sync), so
       // that event never fired for API sends. Emit the outbound "created" callback here for parity —
