@@ -363,15 +363,10 @@ export class BaileysEvents {
     if (Buffer.isBuffer(val)) return new Uint8Array(val);
     if (val.type === 'Buffer' && Array.isArray(val.data)) return new Uint8Array(val.data);
     if (typeof val === 'string') {
-      try {
-        return new Uint8Array(Buffer.from(val, 'hex'));
-      } catch {
-        try {
-          return new Uint8Array(Buffer.from(val, 'base64'));
-        } catch {
-          return null;
-        }
-      }
+      const b64 = Buffer.from(val, 'base64');
+      if (b64.length === 32) return new Uint8Array(b64);
+      if (/^[0-9a-fA-F]{64}$/.test(val)) return new Uint8Array(Buffer.from(val, 'hex'));
+      return new Uint8Array(b64);
     }
     if (typeof val === 'object') {
       const keys = Object.keys(val).filter(k => /^\d+$/.test(k));

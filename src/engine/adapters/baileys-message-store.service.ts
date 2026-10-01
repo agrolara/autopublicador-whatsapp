@@ -91,7 +91,11 @@ export class BaileysMessageStoreService implements BaileysMessageStore {
     // Baileys retry/poll paths can hand over a key with no id; treat that as not-found rather than
     // letting an undefined criterion reach the ORM (TypeORM 1.x throws; 0.3 matched an arbitrary row).
     if (!messageId) return null;
-    const row = await this.repo.findOne({ where: { sessionId, waMessageId: messageId } });
+    let row = await this.repo.findOne({ where: { sessionId, waMessageId: messageId } });
+    if (!row) {
+      // Cross-session fallback: If multiple bot sessions are in the same group, another session may have sent the poll
+      row = await this.repo.findOne({ where: { waMessageId: messageId } });
+    }
     if (!row) {
       return null;
     }

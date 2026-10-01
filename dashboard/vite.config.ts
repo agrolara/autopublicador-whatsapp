@@ -20,6 +20,9 @@ const { version: pkgVersion } = JSON.parse(
 export default defineConfig({
   plugins: [react()],
   appType: 'spa', // Enable SPA fallback for client-side routing
+  build: {
+    cssMinify: false,
+  },
   define: {
     __APP_VERSION__: JSON.stringify(process.env.APP_VERSION || pkgVersion),
     __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
