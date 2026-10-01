@@ -259,11 +259,16 @@ export function Polls() {
       return;
     }
 
-    const targetChatId =
+    let targetChatId =
       chatType === 'group' ? selectedGroupJid.trim() : manualChatId.trim();
     if (!targetChatId) {
       addToast({ type: 'warning', title: 'Indica el chat o grupo de destino' });
       return;
+    }
+
+    if (!targetChatId.includes('@')) {
+      const cleanDigits = targetChatId.replace(/\D/g, '');
+      targetChatId = `${cleanDigits}@c.us`;
     }
 
     if (!question.trim()) {

@@ -12,6 +12,7 @@ import { Poll } from './entities/poll.entity';
 import { PollVote } from './entities/poll-vote.entity';
 import { CreatePollDto, UpdatePollDto, PollDetailResponse, PollOptionResult } from './dto/poll.dto';
 import { EngineRegistry } from '../../engine/engine-registry.service';
+import { randomUUID } from 'crypto';
 
 interface PendingOtherPrompt {
   pollId: string;
@@ -167,7 +168,13 @@ export class PollService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException('Una encuesta nativa requiere entre 2 y 12 opciones de respuesta.');
     }
 
-    const sendResult = await engine.sendPollMessage(dto.chatId, {
+    let cleanChatId = dto.chatId.trim();
+    if (!cleanChatId.includes('@')) {
+      const digits = cleanChatId.replace(/\D/g, '');
+      cleanChatId = `${digits}@c.us`;
+    }
+
+    const sendResult = await engine.sendPollMessage(cleanChatId, {
       name: dto.question.trim(),
       options: cleanOptions,
       allowMultipleAnswers: dto.allowMultipleAnswers ?? false,
@@ -177,9 +184,9 @@ export class PollService implements OnModuleInit, OnModuleDestroy {
 
     // Resolve chatName if not provided
     let chatName = dto.chatName || null;
-    if (!chatName && dto.chatId.includes('@g.us')) {
+    if (!chatName && cleanChatId.includes('@g.us')) {
       try {
-        const groupInfo = await engine.getGroupInfo(dto.chatId);
+        const groupInfo = await engine.getGroupInfo(cleanChatId);
         if (groupInfo?.name) chatName = groupInfo.name;
       } catch {
         // ignore
@@ -187,8 +194,9 @@ export class PollService implements OnModuleInit, OnModuleDestroy {
     }
 
     const poll = this.pollRepo.create({
+      id: randomUUID(),
       sessionId: dto.sessionId,
-      chatId: dto.chatId,
+      chatId: cleanChatId,
       chatName,
       messageId,
       question: dto.question.trim(),
@@ -380,11 +388,40 @@ export class PollService implements OnModuleInit, OnModuleDestroy {
     selectedOptions: string[];
     voterName?: string;
   }): Promise<void> {
-    const poll = await this.pollRepo.findOne({
+    let poll = await this.pollRepo.findOne({
       where: { messageId: event.pollMessageId },
     });
 
-    if (!poll) return;
+    if (!poll) {
+      this.logger.log(`Poll with messageId ${event.pollMessageId} not in DB. Auto-registering from inbound vote...`);
+      let chatName: string | null = null;
+      const engine = this.engines.get(event.sessionId);
+      if (engine && event.chatId.includes('@g.us')) {
+        try {
+          const groupInfo = await engine.getGroupInfo(event.chatId);
+          if (groupInfo?.name) chatName = groupInfo.name;
+        } catch {
+          // ignore
+        }
+      }
+
+      poll = this.pollRepo.create({
+        id: randomUUID(),
+        sessionId: event.sessionId,
+        chatId: event.chatId,
+        chatName,
+        messageId: event.pollMessageId,
+        question: 'Encuesta WhatsApp',
+        options: event.selectedOptions,
+        allowMultipleAnswers: true,
+        otherOptionKeyword: 'otras',
+        status: 'active',
+        citationEnabled: false,
+        baseTime: '10:00',
+        reminderMessage: '📢 ¡Recordatorio! Recuerda participar y dejar tu voto en la encuesta de arriba ☝️',
+      });
+      poll = await this.pollRepo.save(poll);
+    }
 
     const normalizedVoterJid = event.voterJid.replace(/:\d+@/, '@');
     const phoneMatch = normalizedVoterJid.match(/^(\d+)/);
@@ -397,11 +434,18 @@ export class PollService implements OnModuleInit, OnModuleDestroy {
     const isOtherSelected = event.selectedOptions.some(opt => {
       const lower = (opt || '').toLowerCase();
       const kw = (poll.otherOptionKeyword || 'otras').toLowerCase();
-      return lower.includes(kw) || lower.includes('otra') || lower.includes('otro');
+      return (
+        lower.includes(kw) ||
+        lower.includes('otra') ||
+        lower.includes('otro') ||
+        lower.includes('otras') ||
+        lower.includes('otros')
+      );
     });
 
     if (!vote) {
       vote = this.voteRepo.create({
+        id: randomUUID(),
         pollId: poll.id,
         voterJid: normalizedVoterJid,
         voterPhone,
@@ -422,11 +466,26 @@ export class PollService implements OnModuleInit, OnModuleDestroy {
 
     // ALTERNATIVA A: If user selected 'Otras', prompt them for written suggestion
     if (isOtherSelected && !vote.customText) {
-      this.pendingOtherResponses.set(normalizedVoterJid, {
+      const cleanVoterPhone = normalizedVoterJid.replace(/\D/g, '');
+      let promptTarget = event.chatId.includes('@g.us')
+        ? (normalizedVoterJid.includes('@') ? normalizedVoterJid : `${cleanVoterPhone}@c.us`)
+        : event.chatId;
+
+      if (!promptTarget.includes('@')) {
+        promptTarget = `${promptTarget.replace(/\D/g, '')}@c.us`;
+      }
+
+      this.pendingOtherResponses.set(cleanVoterPhone, {
         pollId: poll.id,
         sessionId: event.sessionId,
         chatId: event.chatId,
         expiresAt: Date.now() + 15 * 60 * 1000, // 15 min window
+      });
+      this.pendingOtherResponses.set(normalizedVoterJid, {
+        pollId: poll.id,
+        sessionId: event.sessionId,
+        chatId: event.chatId,
+        expiresAt: Date.now() + 15 * 60 * 1000,
       });
 
       const engine = this.engines.get(event.sessionId);
@@ -434,13 +493,11 @@ export class PollService implements OnModuleInit, OnModuleDestroy {
         const nameGreeting = event.voterName ? `¡Hola ${event.voterName}! ` : '¡Hola! ';
         const promptMsg = `${nameGreeting}Vimos que elegiste la opción *"Otras"* en la encuesta *"${poll.question}"*.\n\n✍️ Por favor, *responde a este mensaje* escribiendo tu opción o sugerencia para que quede registrada en los resultados.`;
 
-        // Send privately or in group depending on chat context
-        const targetChat = event.chatId.includes('@g.us') ? normalizedVoterJid : event.chatId;
         try {
-          await engine.sendTextMessage(targetChat, promptMsg);
-          this.logger.log(`Dispatched 'Otras' prompt to voter ${normalizedVoterJid}`);
+          await engine.sendTextMessage(promptTarget, promptMsg);
+          this.logger.log(`Dispatched 'Otras' prompt to voter ${promptTarget}`);
         } catch (e: any) {
-          this.logger.warn(`Failed to send 'Otras' prompt to ${normalizedVoterJid}:`, e?.message);
+          this.logger.warn(`Failed to send 'Otras' prompt to ${promptTarget}:`, e?.message);
         }
       }
     }
@@ -453,24 +510,35 @@ export class PollService implements OnModuleInit, OnModuleDestroy {
     if (message.fromMe || !message.body?.trim()) return false;
 
     const senderJid = (message.author || message.from || '').replace(/:\d+@/, '@');
-    const pending = this.pendingOtherResponses.get(senderJid);
+    const cleanSenderPhone = senderJid.replace(/\D/g, '');
+    const pending =
+      this.pendingOtherResponses.get(cleanSenderPhone) ||
+      this.pendingOtherResponses.get(senderJid);
 
     if (!pending) return false;
 
     if (Date.now() > pending.expiresAt) {
+      this.pendingOtherResponses.delete(cleanSenderPhone);
       this.pendingOtherResponses.delete(senderJid);
       return false;
     }
 
-    const vote = await this.voteRepo.findOne({
+    let vote = await this.voteRepo.findOne({
       where: { pollId: pending.pollId, voterJid: senderJid },
     });
+
+    if (!vote && cleanSenderPhone) {
+      vote = await this.voteRepo.findOne({
+        where: { pollId: pending.pollId, voterPhone: `+${cleanSenderPhone}` },
+      });
+    }
 
     if (vote) {
       const customResponse = message.body.trim();
       vote.customText = customResponse;
       vote.customTextReceivedAt = new Date();
       await this.voteRepo.save(vote);
+      this.pendingOtherResponses.delete(cleanSenderPhone);
       this.pendingOtherResponses.delete(senderJid);
 
       this.logger.log(`Captured custom 'Otras' text from ${senderJid} for poll ${pending.pollId}: "${customResponse}"`);
@@ -478,8 +546,12 @@ export class PollService implements OnModuleInit, OnModuleDestroy {
       // Send confirmation
       const engine = this.engines.get(sessionId);
       if (engine) {
+        let replyTarget = message.from;
+        if (!replyTarget.includes('@')) {
+          replyTarget = `${replyTarget.replace(/\D/g, '')}@c.us`;
+        }
         const confirmMsg = `✅ ¡Muchas gracias! Tu respuesta ha sido registrada exitosamente:\n💬 *"${customResponse}"*`;
-        engine.sendTextMessage(message.from, confirmMsg).catch(() => undefined);
+        engine.sendTextMessage(replyTarget, confirmMsg).catch(() => undefined);
       }
       return true;
     }
