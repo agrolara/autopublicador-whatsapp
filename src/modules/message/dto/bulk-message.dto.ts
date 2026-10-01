@@ -84,6 +84,15 @@ class BulkMessageContentDto {
   @IsString()
   @MaxLength(1024)
   caption?: string;
+
+  @ApiPropertyOptional({ description: 'Poll configuration for native WhatsApp poll messages' })
+  @IsOptional()
+  @IsObject()
+  poll?: {
+    name: string;
+    options: string[];
+    allowMultipleAnswers?: boolean;
+  };
 }
 
 class BulkMessageItemDto {
@@ -91,9 +100,9 @@ class BulkMessageItemDto {
   @IsString()
   chatId!: string;
 
-  @ApiProperty({ description: 'Message type', enum: ['text', 'image', 'video', 'audio', 'document'] })
-  @IsIn(['text', 'image', 'video', 'audio', 'document'])
-  type!: 'text' | 'image' | 'video' | 'audio' | 'document';
+  @ApiProperty({ description: 'Message type', enum: ['text', 'image', 'video', 'audio', 'document', 'poll'] })
+  @IsIn(['text', 'image', 'video', 'audio', 'document', 'poll'])
+  type!: 'text' | 'image' | 'video' | 'audio' | 'document' | 'poll';
 
   @ApiProperty({ description: 'Message content based on type' })
   @ValidateNested()

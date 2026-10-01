@@ -284,6 +284,18 @@ export function MessageTester() {
   };
 
   const applyLoadedTemplate = (tpl: MessageTemplate) => {
+    if (tpl.mediaType === 'poll') {
+      setMessageType('poll');
+      setPollQuestion(tpl.body || '');
+      const opts = Array.isArray(tpl.mediaUrls) && tpl.mediaUrls.length > 0 ? tpl.mediaUrls : ['', ''];
+      setPollOptions(opts);
+      setAllowMultipleAnswers(tpl.footer === 'multiple');
+      setSelectedGalleryImages([]);
+      clearMediaFile();
+      setMediaUrl('');
+      return;
+    }
+
     const fullText = [tpl.header, tpl.body, tpl.footer].filter(Boolean).join('\n\n');
     setContent(fullText);
 

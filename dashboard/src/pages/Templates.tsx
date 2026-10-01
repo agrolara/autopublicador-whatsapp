@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, Check, Copy, FileText, Loader2, Plus, Search, Trash2, X, Image as ImageIcon, Video, Music, FileUp, Globe, Link as LinkIcon } from 'lucide-react';
+import { AlertTriangle, Check, Copy, FileText, Loader2, Plus, Search, Trash2, X, Image as ImageIcon, Video, Music, FileUp, Globe, Link as LinkIcon, BarChart2 } from 'lucide-react';
 import { type MessageTemplate, type TemplatePayload } from '../services/api';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { useRole } from '../hooks/useRole';
@@ -22,7 +22,7 @@ type TemplateForm = {
   header: string;
   body: string;
   footer: string;
-  mediaType: 'text' | 'image' | 'video' | 'audio' | 'document';
+  mediaType: 'text' | 'image' | 'video' | 'audio' | 'document' | 'poll';
   mediaUrl: string;
   mediaFileName: string;
   mediaUrls: string[];
@@ -48,11 +48,25 @@ const emptyForm: TemplateForm = {
 };
 
 function extractPlaceholders(template: TemplateForm | MessageTemplate) {
-  const source = [template.header, template.body, template.footer].filter(Boolean).join('\n');
+  const optionsText = Array.isArray(template.mediaUrls) ? template.mediaUrls.join('\n') : '';
+  const source = [template.header, template.body, template.footer, optionsText].filter(Boolean).join('\n');
   return Array.from(new Set(Array.from(source.matchAll(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g), match => match[1]))).sort();
 }
 
 function toPayload(form: TemplateForm): TemplatePayload {
+  if (form.mediaType === 'poll') {
+    const cleanOptions = (form.mediaUrls || []).map(o => o.trim()).filter(Boolean);
+    return {
+      name: form.name.trim(),
+      header: form.header.trim() || null,
+      body: form.body.trim(),
+      footer: form.footer?.trim() === 'multiple' ? 'multiple' : 'single',
+      mediaType: 'poll',
+      mediaUrl: null,
+      mediaUrls: cleanOptions,
+      mediaFileName: null,
+    };
+  }
   const cleanUrls = (form.mediaUrls || []).filter(Boolean);
   const primaryUrl = cleanUrls[0] || form.mediaUrl.trim() || null;
   return {
@@ -161,13 +175,16 @@ export function Templates() {
     } else if (template.mediaUrl) {
       initialUrls = [template.mediaUrl];
     }
+    if (template.mediaType === 'poll' && initialUrls.length < 2) {
+      initialUrls = ['', ''];
+    }
 
     setForm({
       name: template.name,
       header: template.header || '',
       body: template.body,
-      footer: template.footer || '',
-      mediaType: template.mediaType || 'text',
+      footer: template.footer || (template.mediaType === 'poll' ? 'single' : ''),
+      mediaType: (template.mediaType as any) || 'text',
       mediaUrl: template.mediaUrl || '',
       mediaUrls: initialUrls,
       mediaFileName: template.mediaFileName || '',
@@ -302,6 +319,18 @@ export function Templates() {
 
   const handleSave = async () => {
     if (!selectedSessionId || !form.name.trim() || !form.body.trim()) return;
+
+    if (form.mediaType === 'poll') {
+      const validOptions = (form.mediaUrls || []).map(o => o.trim()).filter(Boolean);
+      if (validOptions.length < 2) {
+        setToast({ type: 'error', message: 'Una encuesta nativa requiere al menos 2 opciones de respuesta.' });
+        return;
+      }
+      if (validOptions.length > 12) {
+        setToast({ type: 'error', message: 'WhatsApp permite un máximo de 12 opciones por encuesta.' });
+        return;
+      }
+    }
 
     try {
       if (editingTemplate) {
@@ -459,8 +488,8 @@ export function Templates() {
                           padding: '2px 8px',
                           borderRadius: '12px',
                           whiteSpace: 'nowrap',
-                          background: mType === 'image' ? '#dbeafe' : mType === 'video' ? '#fce7f3' : mType === 'document' ? '#fef3c7' : mType === 'audio' ? '#e0e7ff' : '#f1f5f9',
-                          color: mType === 'image' ? '#1e40af' : mType === 'video' ? '#9d174d' : mType === 'document' ? '#92400e' : mType === 'audio' ? '#3730a3' : '#475569'
+                          background: mType === 'image' ? '#dbeafe' : mType === 'video' ? '#fce7f3' : mType === 'document' ? '#fef3c7' : mType === 'audio' ? '#e0e7ff' : mType === 'poll' ? '#dcfce7' : '#f1f5f9',
+                          color: mType === 'image' ? '#1e40af' : mType === 'video' ? '#9d174d' : mType === 'document' ? '#92400e' : mType === 'audio' ? '#3730a3' : mType === 'poll' ? '#166534' : '#475569'
                         }}>
                           {mType === 'image'
                             ? (Array.isArray(template.mediaUrls) && template.mediaUrls.length > 1
@@ -469,6 +498,7 @@ export function Templates() {
                             : mType === 'video' ? '🎥 Video'
                             : mType === 'document' ? '📄 Documento'
                             : mType === 'audio' ? '🎵 Audio'
+                            : mType === 'poll' ? `📊 Encuesta (${Array.isArray(template.mediaUrls) ? template.mediaUrls.length : 0} opc)`
                             : '📝 Texto'}
                         </span>
                       </div>
@@ -538,11 +568,23 @@ export function Templates() {
                     { type: 'video', label: '🎥 Video' },
                     { type: 'audio', label: '🎵 Audio' },
                     { type: 'document', label: '📄 Documento' },
+                    { type: 'poll', label: '📊 Encuesta Nativa' },
                   ].map(item => (
                     <button
                       key={item.type}
                       type="button"
-                      onClick={() => setForm({ ...form, mediaType: item.type as any })}
+                      onClick={() => {
+                        if (item.type === 'poll') {
+                          setForm({
+                            ...form,
+                            mediaType: 'poll',
+                            mediaUrls: form.mediaUrls && form.mediaUrls.length >= 2 ? form.mediaUrls : ['', ''],
+                            footer: form.footer === 'multiple' ? 'multiple' : 'single',
+                          });
+                        } else {
+                          setForm({ ...form, mediaType: item.type as any });
+                        }
+                      }}
                       style={{
                         padding: '6px 12px',
                         borderRadius: '6px',
@@ -561,7 +603,7 @@ export function Templates() {
               </div>
 
               {/* Opciones de Archivo Multimedia */}
-              {form.mediaType !== 'text' && (
+              {form.mediaType !== 'text' && form.mediaType !== 'poll' && (
                 <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '16px' }}>
                   {form.mediaType === 'image' ? (
                     <>
@@ -854,6 +896,130 @@ export function Templates() {
                 </div>
               )}
 
+              {/* Constructor de Encuesta Nativa */}
+              {form.mediaType === 'poll' && (
+                <div style={{ background: '#f0fdf4', padding: '16px', borderRadius: '8px', border: '1px solid #bbf7d0', marginBottom: '16px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 700, fontSize: '0.88rem', color: '#166534', margin: 0 }}>
+                      <BarChart2 size={16} /> Opciones de la Encuesta ({form.mediaUrls.length}/12 máx)
+                    </label>
+                    <span style={{ fontSize: '0.75rem', color: '#15803d', fontWeight: 500 }}>
+                      Mínimo 2 opciones
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
+                    {form.mediaUrls.map((opt, idx) => (
+                      <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{
+                          minWidth: '24px',
+                          height: '24px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          borderRadius: '50%',
+                          background: '#dcfce7',
+                          color: '#166534',
+                          fontSize: '0.78rem',
+                          fontWeight: 700,
+                        }}>
+                          {idx + 1}
+                        </span>
+                        <input
+                          type="text"
+                          value={opt}
+                          onChange={(e) => {
+                            const updated = [...form.mediaUrls];
+                            updated[idx] = e.target.value;
+                            setForm({ ...form, mediaUrls: updated });
+                          }}
+                          placeholder={`Opción ${idx + 1}...`}
+                          disabled={!canWrite}
+                          style={{
+                            flex: 1,
+                            padding: '8px 12px',
+                            borderRadius: '6px',
+                            border: '1px solid #cbd5e1',
+                            fontSize: '0.85rem',
+                            background: '#ffffff',
+                          }}
+                        />
+                        {form.mediaUrls.length > 2 && canWrite && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = form.mediaUrls.filter((_, i) => i !== idx);
+                              setForm({ ...form, mediaUrls: updated });
+                            }}
+                            title="Eliminar opción"
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: '#ef4444',
+                              cursor: 'pointer',
+                              padding: '4px',
+                              display: 'flex',
+                              alignItems: 'center',
+                            }}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {form.mediaUrls.length < 12 && canWrite && (
+                    <button
+                      type="button"
+                      onClick={() => setForm({ ...form, mediaUrls: [...form.mediaUrls, ''] })}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '6px 14px',
+                        borderRadius: '6px',
+                        border: '1px dashed #16a34a',
+                        background: '#ffffff',
+                        color: '#16a34a',
+                        fontSize: '0.82rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        marginBottom: '12px',
+                      }}
+                    >
+                      <Plus size={14} /> Agregar otra opción
+                    </button>
+                  )}
+
+                  {/* Configuración de selección única o múltiple */}
+                  <div style={{
+                    marginTop: '10px',
+                    paddingTop: '10px',
+                    borderTop: '1px dashed #bbf7d0',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '6px',
+                  }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600, color: '#166534' }}>
+                      <input
+                        type="checkbox"
+                        checked={form.footer === 'multiple'}
+                        onChange={(e) => setForm({ ...form, footer: e.target.checked ? 'multiple' : 'single' })}
+                        disabled={!canWrite}
+                        style={{ accentColor: '#16a34a', width: '16px', height: '16px', cursor: 'pointer' }}
+                      />
+                      Permitir respuestas múltiples (los participantes pueden votar más de una opción)
+                    </label>
+                    <span style={{ fontSize: '0.75rem', color: '#4b5563', marginLeft: '24px' }}>
+                      {form.footer === 'multiple'
+                        ? '✅ Múltiple elección activada: cada usuario podrá marcar varias casillas.'
+                        : '🔘 Opción única: cada usuario solo podrá elegir una única alternativa.'}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               <div className="template-message-fields">
                 <div className="form-group">
                   <label>{t('templates.header')}</label>
@@ -867,45 +1033,51 @@ export function Templates() {
 
                 <div className="form-group body-field">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                    <label style={{ margin: 0 }}>{t('templates.body')}</label>
-                    <button
-                      type="button"
-                      onClick={() => setShowWaLink(true)}
-                      style={{
-                        fontSize: '0.75rem',
-                        padding: '3px 8px',
-                        borderRadius: '6px',
-                        border: '1px solid #86efac',
-                        background: '#f0fdf4',
-                        color: '#166534',
-                        cursor: 'pointer',
-                        fontWeight: 600,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                      }}
-                    >
-                      <LinkIcon size={12} /> Link wa.me
-                    </button>
+                    <label style={{ margin: 0 }}>
+                      {form.mediaType === 'poll' ? '❓ Pregunta de la Encuesta' : t('templates.body')}
+                    </label>
+                    {form.mediaType !== 'poll' && (
+                      <button
+                        type="button"
+                        onClick={() => setShowWaLink(true)}
+                        style={{
+                          fontSize: '0.75rem',
+                          padding: '3px 8px',
+                          borderRadius: '6px',
+                          border: '1px solid #86efac',
+                          background: '#f0fdf4',
+                          color: '#166534',
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                        }}
+                      >
+                        <LinkIcon size={12} /> Link wa.me
+                      </button>
+                    )}
                   </div>
                   <textarea
                     value={form.body}
                     onChange={event => setForm({ ...form, body: event.target.value })}
-                    placeholder={t('templates.bodyPlaceholder')}
-                    rows={10}
+                    placeholder={form.mediaType === 'poll' ? 'Escribe aquí la pregunta de la encuesta... Ej: ¿Cuál es el horario más conveniente para tu sesión?' : t('templates.bodyPlaceholder')}
+                    rows={form.mediaType === 'poll' ? 4 : 10}
                     disabled={!canWrite}
                   />
                 </div>
 
-                <div className="form-group">
-                  <label>{t('templates.footer')}</label>
-                  <input
-                    value={form.footer}
-                    onChange={event => setForm({ ...form, footer: event.target.value })}
-                    placeholder={t('templates.footerPlaceholder')}
-                    disabled={!canWrite}
-                  />
-                </div>
+                {form.mediaType !== 'poll' && (
+                  <div className="form-group">
+                    <label>{t('templates.footer')}</label>
+                    <input
+                      value={form.footer}
+                      onChange={event => setForm({ ...form, footer: event.target.value })}
+                      placeholder={t('templates.footerPlaceholder')}
+                      disabled={!canWrite}
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="template-editor-actions">
@@ -933,35 +1105,110 @@ export function Templates() {
               <span>{placeholders.length}</span>
             </div>
             <div className="template-preview-message">
-              {form.mediaType === 'image' && form.mediaUrls && form.mediaUrls.length > 0 && (
-                <div style={{ marginBottom: '12px' }}>
-                  <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: form.mediaUrls.length === 1 ? '1fr' : 'repeat(auto-fill, minmax(80px, 1fr))',
-                    gap: '6px',
-                    borderRadius: '8px',
-                    overflow: 'hidden',
-                  }}>
-                    {form.mediaUrls.map((url, idx) => (
-                      <div key={idx} style={{ position: 'relative', aspectRatio: '1/1', background: '#f1f5f9', borderRadius: '6px', overflow: 'hidden', border: '1px solid #e2e8f0' }}>
-                        <img src={url} alt={`Preview ${idx + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                        <span style={{ position: 'absolute', bottom: '2px', right: '2px', background: 'rgba(0,0,0,0.7)', color: '#fff', fontSize: '0.68rem', padding: '1px 5px', borderRadius: '4px', fontWeight: 600 }}>
-                          #{idx + 1}
-                        </span>
+              {form.mediaType === 'poll' ? (
+                <div style={{
+                  background: '#ffffff',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '10px',
+                  padding: '14px',
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.06)',
+                }}>
+                  {form.header && (
+                    <div style={{ fontSize: '0.78rem', fontWeight: 600, color: '#64748b', marginBottom: '6px', textTransform: 'uppercase' }}>
+                      {form.header.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (_match, k) => previewValues[k] || `{{${k}}}`)}
+                    </div>
+                  )}
+                  <div style={{ fontSize: '0.98rem', fontWeight: 700, color: '#1e293b', marginBottom: '8px', lineHeight: 1.35 }}>
+                    {form.body
+                      ? form.body.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (_match, k) => previewValues[k] || `{{${k}}}`)
+                      : '¿Pregunta de la encuesta?'}
+                  </div>
+                  <div style={{ fontSize: '0.73rem', color: '#64748b', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <span>📊 Encuesta</span> • <span>{form.footer === 'multiple' ? 'Selecciona una o más opciones' : 'Selecciona una opción'}</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {form.mediaUrls && form.mediaUrls.length > 0 ? (
+                      form.mediaUrls.map((opt, i) => (
+                        <div
+                          key={i}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '10px',
+                            padding: '8px 12px',
+                            borderRadius: '8px',
+                            border: '1px solid #e2e8f0',
+                            background: '#f8fafc',
+                            fontSize: '0.85rem',
+                            color: opt ? '#1e293b' : '#94a3b8',
+                          }}
+                        >
+                          <div style={{
+                            width: '16px',
+                            height: '16px',
+                            borderRadius: form.footer === 'multiple' ? '4px' : '50%',
+                            border: '2px solid #94a3b8',
+                            flexShrink: 0,
+                          }} />
+                          <span style={{ flex: 1, fontWeight: 500 }}>
+                            {opt
+                              ? opt.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (_match, k) => previewValues[k] || `{{${k}}}`)
+                              : `Opción ${i + 1}`}
+                          </span>
+                        </div>
+                      ))
+                    ) : (
+                      <div style={{ fontSize: '0.8rem', color: '#94a3b8', fontStyle: 'italic' }}>
+                        Agrega opciones en el editor de la izquierda
                       </div>
-                    ))}
+                    )}
                   </div>
-                  <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '4px', textAlign: 'center', fontWeight: 500 }}>
-                    🖼️ {form.mediaUrls.length} foto{form.mediaUrls.length > 1 ? 's' : ''} adjunta{form.mediaUrls.length > 1 ? 's' : ''}
+                  <div style={{
+                    marginTop: '12px',
+                    textAlign: 'center',
+                    padding: '8px',
+                    fontSize: '0.78rem',
+                    color: '#2563eb',
+                    fontWeight: 600,
+                    borderTop: '1px solid #f1f5f9',
+                    cursor: 'default',
+                  }}>
+                    Ver votos
                   </div>
                 </div>
+              ) : (
+                <>
+                  {form.mediaType === 'image' && form.mediaUrls && form.mediaUrls.length > 0 && (
+                    <div style={{ marginBottom: '12px' }}>
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: form.mediaUrls.length === 1 ? '1fr' : 'repeat(auto-fill, minmax(80px, 1fr))',
+                        gap: '6px',
+                        borderRadius: '8px',
+                        overflow: 'hidden',
+                      }}>
+                        {form.mediaUrls.map((url, idx) => (
+                          <div key={idx} style={{ position: 'relative', aspectRatio: '1/1', background: '#f1f5f9', borderRadius: '6px', overflow: 'hidden', border: '1px solid #e2e8f0' }}>
+                            <img src={url} alt={`Preview ${idx + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            <span style={{ position: 'absolute', bottom: '2px', right: '2px', background: 'rgba(0,0,0,0.7)', color: '#fff', fontSize: '0.68rem', padding: '1px 5px', borderRadius: '4px', fontWeight: 600 }}>
+                              #{idx + 1}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '4px', textAlign: 'center', fontWeight: 500 }}>
+                        🖼️ {form.mediaUrls.length} foto{form.mediaUrls.length > 1 ? 's' : ''} adjunta{form.mediaUrls.length > 1 ? 's' : ''}
+                      </div>
+                    </div>
+                  )}
+                  {form.mediaType !== 'image' && form.mediaType !== 'text' && form.mediaUrl && (
+                    <div style={{ marginBottom: '10px', padding: '6px 10px', background: '#f1f5f9', borderRadius: '6px', fontSize: '0.78rem', color: '#475569' }}>
+                      📎 Archivo adjunto ({form.mediaType})
+                    </div>
+                  )}
+                  <pre>{preview || t('templates.previewEmpty')}</pre>
+                </>
               )}
-              {form.mediaType !== 'image' && form.mediaType !== 'text' && form.mediaUrl && (
-                <div style={{ marginBottom: '10px', padding: '6px 10px', background: '#f1f5f9', borderRadius: '6px', fontSize: '0.78rem', color: '#475569' }}>
-                  📎 Archivo adjunto ({form.mediaType})
-                </div>
-              )}
-              <pre>{preview || t('templates.previewEmpty')}</pre>
             </div>
             <div className="template-variable-panel">
               {placeholders.length > 0 ? (

@@ -42,6 +42,7 @@ interface BulkMessageContent {
   video?: { url?: string; base64?: string; mimetype?: string; filename?: string };
   audio?: { url?: string; base64?: string; mimetype?: string; filename?: string; ptt?: boolean };
   document?: { url?: string; base64?: string; mimetype?: string; filename?: string };
+  poll?: { name: string; options: string[]; allowMultipleAnswers?: boolean };
 }
 
 /**
@@ -764,6 +765,12 @@ export class BulkMessageService implements OnApplicationBootstrap {
           data: resolveData(content.document?.base64, content.document?.url),
           filename: content.document?.filename,
           caption: content.caption,
+        });
+      case 'poll':
+        return engine.sendPollMessage(targetChatId, {
+          name: content.poll?.name || content.text || 'Encuesta',
+          options: content.poll?.options || ['Opción 1', 'Opción 2'],
+          allowMultipleAnswers: content.poll?.allowMultipleAnswers || false,
         });
       default:
         return Promise.reject(new Error(`Unsupported message type: ${type}`));

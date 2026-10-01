@@ -234,6 +234,39 @@ export class MessageService {
     });
 
     const vars = dto.vars ?? {};
+
+    // Native Poll support for templates
+    if (template.mediaType === 'poll') {
+      let options: string[] = [];
+      if (Array.isArray(template.mediaUrls)) {
+        options = template.mediaUrls;
+      } else if (typeof template.mediaUrls === 'string') {
+        try {
+          const parsed = JSON.parse(template.mediaUrls);
+          if (Array.isArray(parsed)) options = parsed;
+        } catch {
+          options = [template.mediaUrls];
+        }
+      } else if (template.mediaUrl) {
+        options = [template.mediaUrl];
+      }
+
+      const pollQuestion = renderTemplate(template.body, vars);
+      const pollOptions = options
+        .map(opt => renderTemplate(opt, vars))
+        .map(opt => opt.trim())
+        .filter(opt => opt.length > 0);
+
+      const allowMultipleAnswers = template.footer === 'multiple' || template.header === 'multiple';
+
+      return this.sendPoll(sessionId, {
+        chatId: dto.chatId,
+        name: pollQuestion,
+        options: pollOptions.length >= 2 ? pollOptions : ['Sí', 'No'],
+        allowMultipleAnswers,
+      });
+    }
+
     const segments = [template.header, template.body, template.footer]
       .filter((segment): segment is string => segment != null && segment.length > 0)
       .map(segment => renderTemplate(segment, vars));

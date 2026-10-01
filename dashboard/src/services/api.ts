@@ -148,7 +148,7 @@ export interface MessageTemplate {
   body: string;
   header?: string | null;
   footer?: string | null;
-  mediaType?: 'text' | 'image' | 'video' | 'audio' | 'document' | null;
+  mediaType?: 'text' | 'image' | 'video' | 'audio' | 'document' | 'poll' | null;
   mediaUrl?: string | null;
   mediaUrls?: string[] | null;
   mediaFileName?: string | null;
@@ -161,7 +161,7 @@ export interface TemplatePayload {
   body: string;
   header?: string | null;
   footer?: string | null;
-  mediaType?: 'text' | 'image' | 'video' | 'audio' | 'document' | null;
+  mediaType?: 'text' | 'image' | 'video' | 'audio' | 'document' | 'poll' | null;
   mediaUrl?: string | null;
   mediaUrls?: string[] | null;
   mediaFileName?: string | null;
