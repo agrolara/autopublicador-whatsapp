@@ -34,7 +34,9 @@ export class PollService implements OnModuleInit, OnModuleDestroy {
     private readonly engines: EngineRegistry,
   ) {}
 
-  onModuleInit() {
+  async onModuleInit() {
+    await this.ensureTables();
+
     // Check every 30 seconds for scheduled poll citations (America/Santiago)
     this.citationInterval = setInterval(() => {
       this.processScheduledCitations().catch(err => {
@@ -42,6 +44,94 @@ export class PollService implements OnModuleInit, OnModuleDestroy {
       });
     }, 30000);
     this.logger.log('PollService initialized with automatic Chile citation scheduler active (30s interval)');
+  }
+
+  private async ensureTables(): Promise<void> {
+    try {
+      const isPostgres = this.pollRepo.metadata.connection.options.type === 'postgres';
+      if (isPostgres) {
+        await this.pollRepo.query(`
+          CREATE TABLE IF NOT EXISTS polls (
+            id VARCHAR(36) PRIMARY KEY,
+            "sessionId" VARCHAR(100) NOT NULL,
+            "chatId" VARCHAR(150) NOT NULL,
+            "chatName" VARCHAR(255),
+            "messageId" VARCHAR(255) NOT NULL,
+            question TEXT NOT NULL,
+            options TEXT NOT NULL,
+            "allowMultipleAnswers" BOOLEAN NOT NULL DEFAULT false,
+            "otherOptionKeyword" VARCHAR(50) NOT NULL DEFAULT 'otras',
+            status VARCHAR(20) NOT NULL DEFAULT 'active',
+            "citationEnabled" BOOLEAN NOT NULL DEFAULT false,
+            "baseTime" VARCHAR(10) NOT NULL DEFAULT '10:00',
+            "citationTimes" TEXT,
+            "endDate" TIMESTAMP,
+            "reminderMessage" TEXT,
+            "lastCitedAt" TIMESTAMP,
+            "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            "updatedAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+        `).catch((err: any) => this.logger.warn('polls table check error', { error: err?.message }));
+
+        await this.voteRepo.query(`
+          CREATE TABLE IF NOT EXISTS poll_votes (
+            id VARCHAR(36) PRIMARY KEY,
+            "pollId" VARCHAR(36) NOT NULL,
+            "voterJid" VARCHAR(150) NOT NULL,
+            "voterPhone" VARCHAR(50),
+            "voterName" VARCHAR(255),
+            "selectedOptions" TEXT NOT NULL,
+            "hasOther" BOOLEAN NOT NULL DEFAULT false,
+            "customText" TEXT,
+            "customTextReceivedAt" TIMESTAMP,
+            "votedAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            "updatedAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+          ALTER TABLE poll_votes ADD COLUMN IF NOT EXISTS "updatedAt" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+        `).catch((err: any) => this.logger.warn('poll_votes table check error', { error: err?.message }));
+      } else {
+        await this.pollRepo.query(`
+          CREATE TABLE IF NOT EXISTS polls (
+            id TEXT PRIMARY KEY,
+            sessionId TEXT NOT NULL,
+            chatId TEXT NOT NULL,
+            chatName TEXT,
+            messageId TEXT NOT NULL,
+            question TEXT NOT NULL,
+            options TEXT NOT NULL,
+            allowMultipleAnswers INTEGER NOT NULL DEFAULT 0,
+            otherOptionKeyword TEXT NOT NULL DEFAULT 'otras',
+            status TEXT NOT NULL DEFAULT 'active',
+            citationEnabled INTEGER NOT NULL DEFAULT 0,
+            baseTime TEXT NOT NULL DEFAULT '10:00',
+            citationTimes TEXT,
+            endDate DATETIME,
+            reminderMessage TEXT,
+            lastCitedAt DATETIME,
+            createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+          );
+        `).catch((err: any) => this.logger.warn('polls sqlite table check', { error: err?.message }));
+
+        await this.voteRepo.query(`
+          CREATE TABLE IF NOT EXISTS poll_votes (
+            id TEXT PRIMARY KEY,
+            pollId TEXT NOT NULL,
+            voterJid TEXT NOT NULL,
+            voterPhone TEXT,
+            voterName TEXT,
+            selectedOptions TEXT NOT NULL,
+            hasOther INTEGER NOT NULL DEFAULT 0,
+            customText TEXT,
+            customTextReceivedAt DATETIME,
+            votedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+          );
+        `).catch((err: any) => this.logger.warn('poll_votes sqlite table check', { error: err?.message }));
+      }
+      this.logger.log('Poll tables verified / created successfully.');
+    } catch (err: any) {
+      this.logger.warn(`Could not verify poll tables: ${err?.message}`);
+    }
   }
 
   onModuleDestroy() {
