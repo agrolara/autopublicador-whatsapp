@@ -22,6 +22,8 @@ import {
   Folder,
   Phone,
   Layers,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import {
   pollsApi,
@@ -44,6 +46,33 @@ interface GroupItem {
   name: string;
 }
 
+interface ConsolidatedGroupInfo {
+  pollId: string;
+  chatId: string;
+  chatName: string;
+  votesCount: number;
+  status: string;
+  lastCitedAt?: string | null;
+}
+
+interface ConsolidatedCampaign {
+  question: string;
+  sessionId: string;
+  options: string[];
+  totalVotes: number;
+  otherResponsesCount: number;
+  groupCount: number;
+  groups: ConsolidatedGroupInfo[];
+  optionResults: { option: string; votes: number; percentage: number }[];
+  citationEnabled: boolean;
+  baseTime: string;
+  citationTimes: string[];
+  endDate?: string | null;
+  latestCreatedAt: string;
+  pollIds: string[];
+  allVotes: PollVoteItem[];
+}
+
 export function Polls() {
   useDocumentTitle('Encuestas WhatsApp | OpenWA');
   const { addToast } = useToast();
@@ -54,6 +83,10 @@ export function Polls() {
   const [selectedSessionFilter, setSelectedSessionFilter] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'closed'>('all');
+  const [viewMode, setViewMode] = useState<'consolidated' | 'individual'>('consolidated');
+  const [expandedCampaigns, setExpandedCampaigns] = useState<Record<string, boolean>>({});
+  const [citingCampaignKey, setCitingCampaignKey] = useState<string | null>(null);
+  const [deletingCampaignKey, setDeletingCampaignKey] = useState<string | null>(null);
 
   // Modal states
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -188,6 +221,151 @@ export function Polls() {
       return true;
     });
   }, [polls, statusFilter, searchQuery]);
+
+  // Consolidated Campaigns Memo
+  const consolidatedCampaigns = useMemo(() => {
+    const map = new Map<string, ConsolidatedCampaign>();
+
+    for (const poll of filteredPolls) {
+      const qKey = poll.question.trim().toLowerCase();
+      let camp = map.get(qKey);
+      if (!camp) {
+        camp = {
+          question: poll.question.trim(),
+          sessionId: poll.sessionId,
+          options: [...poll.options],
+          totalVotes: 0,
+          otherResponsesCount: 0,
+          groupCount: 0,
+          groups: [],
+          optionResults: poll.options.map(opt => ({ option: opt, votes: 0, percentage: 0 })),
+          citationEnabled: poll.citationEnabled,
+          baseTime: poll.baseTime,
+          citationTimes: poll.citationTimes || [],
+          endDate: poll.endDate,
+          latestCreatedAt: poll.createdAt,
+          pollIds: [],
+          allVotes: [],
+        };
+        map.set(qKey, camp);
+      }
+
+      camp.groupCount++;
+      camp.pollIds.push(poll.id);
+      camp.totalVotes += poll.totalVotes || 0;
+      camp.otherResponsesCount += poll.otherResponsesCount || 0;
+      if (poll.citationEnabled) camp.citationEnabled = true;
+
+      camp.groups.push({
+        pollId: poll.id,
+        chatId: poll.chatId,
+        chatName: poll.chatName || poll.chatId.replace('@g.us', ''),
+        votesCount: poll.totalVotes || 0,
+        status: poll.status,
+        lastCitedAt: poll.lastCitedAt,
+      });
+
+      // Aggregate option results
+      for (const optRes of poll.optionResults || []) {
+        const found = camp.optionResults.find(
+          o => o.option.toLowerCase() === optRes.option.toLowerCase(),
+        );
+        if (found) {
+          found.votes += optRes.votes;
+        }
+      }
+
+      if (poll.votes && poll.votes.length > 0) {
+        camp.allVotes.push(...poll.votes);
+      }
+    }
+
+    // Recalculate consolidated percentages
+    for (const camp of map.values()) {
+      for (const opt of camp.optionResults) {
+        opt.percentage = camp.totalVotes > 0 ? Math.round((opt.votes / camp.totalVotes) * 100) : 0;
+      }
+    }
+
+    return Array.from(map.values());
+  }, [filteredPolls]);
+
+  const toggleCampaignExpand = (qKey: string) => {
+    setExpandedCampaigns(prev => ({ ...prev, [qKey]: !prev[qKey] }));
+  };
+
+  const handleCiteCampaign = async (camp: ConsolidatedCampaign) => {
+    try {
+      setCitingCampaignKey(camp.question);
+      let count = 0;
+      for (const pId of camp.pollIds) {
+        await pollsApi.cite(pId).catch(() => undefined);
+        count++;
+        if (camp.pollIds.length > 1) {
+          await new Promise(r => setTimeout(r, 400));
+        }
+      }
+      addToast({
+        type: 'success',
+        title: 'Citas masivas enviadas',
+        message: `Se enviaron recordatorios a los ${count} grupos de la campaña.`,
+      });
+      fetchPolls();
+    } catch (err: any) {
+      addToast({ type: 'error', title: 'Error al citar campaña', message: err?.message });
+    } finally {
+      setCitingCampaignKey(null);
+    }
+  };
+
+  const handleDeleteCampaign = async (camp: ConsolidatedCampaign) => {
+    if (!window.confirm(`¿Estás seguro de eliminar la encuesta consolidada en los ${camp.groupCount} grupos?`)) return;
+    try {
+      setDeletingCampaignKey(camp.question);
+      for (const pId of camp.pollIds) {
+        await pollsApi.delete(pId).catch(() => undefined);
+      }
+      addToast({
+        type: 'success',
+        title: 'Campaña eliminada',
+        message: `Se eliminaron las encuestas de los ${camp.groupCount} grupos.`,
+      });
+      fetchPolls();
+    } catch (err: any) {
+      addToast({ type: 'error', title: 'Error al eliminar campaña', message: err?.message });
+    } finally {
+      setDeletingCampaignKey(null);
+    }
+  };
+
+  const handleOpenCampaignDetail = (camp: ConsolidatedCampaign) => {
+    const syntheticDetail: PollItem = {
+      id: camp.pollIds[0] || 'consolidated',
+      sessionId: camp.sessionId,
+      chatId: 'consolidated',
+      chatName: `Campaña Consolidada (${camp.groupCount} grupos)`,
+      messageId: 'consolidated',
+      question: camp.question,
+      options: camp.options,
+      allowMultipleAnswers: false,
+      status: 'active',
+      citationEnabled: camp.citationEnabled,
+      baseTime: camp.baseTime,
+      citationTimes: camp.citationTimes,
+      endDate: camp.endDate || null,
+      reminderMessage: '',
+      lastCitedAt: null,
+      totalVotes: camp.totalVotes,
+      optionResults: camp.optionResults,
+      otherResponsesCount: camp.otherResponsesCount,
+      votes: camp.allVotes,
+      createdAt: camp.latestCreatedAt,
+      updatedAt: camp.latestCreatedAt,
+    };
+    setSelectedPoll(syntheticDetail);
+    setDetailTab(camp.otherResponsesCount > 0 ? 'suggestions' : 'voters');
+    setDetailModalOpen(true);
+  };
 
   // Handle immediate citation
   const handleCiteNow = async (pollId: string) => {
@@ -582,6 +760,26 @@ export function Polls() {
             <option value="closed">Cerradas</option>
           </select>
         </div>
+
+        {/* View Mode Switcher */}
+        <div className="polls-view-switcher">
+          <button
+            type="button"
+            className={`view-switcher-btn ${viewMode === 'consolidated' ? 'active' : ''}`}
+            onClick={() => setViewMode('consolidated')}
+            title="Ver resultados consolidados por campaña/pregunta"
+          >
+            <Layers size={14} /> Consolidado ({consolidatedCampaigns.length})
+          </button>
+          <button
+            type="button"
+            className={`view-switcher-btn ${viewMode === 'individual' ? 'active' : ''}`}
+            onClick={() => setViewMode('individual')}
+            title="Ver tarjetas individuales por cada grupo"
+          >
+            <BarChart2 size={14} /> Por Grupos ({filteredPolls.length})
+          </button>
+        </div>
       </div>
 
       {/* Polls Grid */}
@@ -603,6 +801,159 @@ export function Polls() {
           >
             <Plus size={16} /> Crear Primera Encuesta
           </button>
+        </div>
+      ) : viewMode === 'consolidated' ? (
+        <div className="polls-grid">
+          {consolidatedCampaigns.map(camp => (
+            <div key={camp.question} className="poll-card poll-campaign-card">
+              <div className="poll-card-header">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span className="poll-campaign-badge">
+                      <Layers size={13} /> Campaña Consolidada
+                    </span>
+                    <span className="poll-groups-badge">
+                      👥 {camp.groupCount} {camp.groupCount === 1 ? 'grupo' : 'grupos'}
+                    </span>
+                  </div>
+                  <h4 className="poll-card-question" style={{ marginTop: '6px' }}>{camp.question}</h4>
+                </div>
+                <span className="poll-status-pill active">Activa</span>
+              </div>
+
+              <div className="poll-meta-row">
+                <span className="poll-meta-item">
+                  🗳️ <strong>{camp.totalVotes}</strong> {camp.totalVotes === 1 ? 'voto total' : 'votos totales'}
+                </span>
+                <span>•</span>
+                <span className="poll-meta-item">
+                  💬 <strong>{camp.otherResponsesCount}</strong> sugerencias
+                </span>
+                <span>•</span>
+                <span className="poll-meta-item">
+                  🏷️ {camp.groupCount} {camp.groupCount === 1 ? 'destino' : 'destinos'}
+                </span>
+              </div>
+
+              {/* Citation Schedule Banner */}
+              {camp.citationEnabled ? (
+                <div className="poll-citation-banner">
+                  <div className="poll-citation-title">
+                    <Clock size={14} />
+                    <span>Citas programadas:</span>
+                    <span className="poll-citation-hours">
+                      {camp.baseTime}
+                      {camp.citationTimes && camp.citationTimes.length > 0
+                        ? `, ${camp.citationTimes.join(', ')}`
+                        : ''}
+                    </span>
+                  </div>
+                  {camp.endDate ? (
+                    <span style={{ fontSize: '0.75rem' }}>
+                      📅 Hasta: {new Date(camp.endDate).toLocaleDateString()}
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: '0.75rem' }}>📅 Sin fecha de caducidad</span>
+                  )}
+                </div>
+              ) : (
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+                  ⏸️ Citas automáticas desactivadas
+                </div>
+              )}
+
+              {/* Consolidated Options Progress Bars */}
+              <div className="poll-options-preview">
+                {camp.optionResults.map(opt => {
+                  const isOther = opt.option.toLowerCase().includes('otra');
+                  return (
+                    <div key={opt.option} className="poll-option-row">
+                      <div className="poll-option-header">
+                        <span className="poll-option-text">
+                          {opt.option}
+                          {isOther && <span className="badge-other">Alternativa A</span>}
+                        </span>
+                        <span className="poll-option-pct">
+                          {opt.votes} ({opt.percentage}%)
+                        </span>
+                      </div>
+                      <div className="poll-progress-bg">
+                        <div
+                          className={`poll-progress-fill ${isOther ? 'other' : ''}`}
+                          style={{ width: `${opt.percentage}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Collapsible Groups List */}
+              <div>
+                <button
+                  type="button"
+                  className="campaign-groups-toggle"
+                  onClick={() => toggleCampaignExpand(camp.question)}
+                >
+                  {expandedCampaigns[camp.question] ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  <span>
+                    {expandedCampaigns[camp.question]
+                      ? 'Ocultar lista de grupos'
+                      : `Ver desglose de los ${camp.groupCount} grupos`}
+                  </span>
+                </button>
+
+                {expandedCampaigns[camp.question] && (
+                  <div className="campaign-groups-grid">
+                    {camp.groups.map(g => (
+                      <div key={g.pollId} className="campaign-group-chip">
+                        <span className="campaign-group-chip-name" title={g.chatName}>
+                          👥 {g.chatName}
+                        </span>
+                        <span className="campaign-group-chip-votes">
+                          {g.votesCount} {g.votesCount === 1 ? 'voto' : 'votos'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div className="poll-actions-bar" style={{ marginTop: '1.25rem' }}>
+                <button
+                  className="poll-action-btn secondary"
+                  onClick={() => handleOpenCampaignDetail(camp)}
+                >
+                  <Users size={14} /> Ver Votantes ({camp.totalVotes})
+                </button>
+                <button
+                  className="poll-action-btn primary"
+                  disabled={citingCampaignKey === camp.question}
+                  onClick={() => handleCiteCampaign(camp)}
+                  title="Citar encuesta ahora en todos los grupos de la campaña"
+                >
+                  {citingCampaignKey === camp.question ? (
+                    <>
+                      <Loader2 size={14} className="spin" /> Citando {camp.groupCount} grupos...
+                    </>
+                  ) : (
+                    <>
+                      <Bell size={14} /> Citar en todos ({camp.groupCount})
+                    </>
+                  )}
+                </button>
+                <button
+                  className="poll-action-btn danger"
+                  disabled={deletingCampaignKey === camp.question}
+                  onClick={() => handleDeleteCampaign(camp)}
+                  title="Eliminar encuesta de todos los grupos"
+                >
+                  <Trash2 size={14} /> Eliminar Campaña
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       ) : (
         <div className="polls-grid">

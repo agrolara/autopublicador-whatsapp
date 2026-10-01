@@ -357,6 +357,33 @@ export class BaileysEvents {
    * Decrypts an inbound WhatsApp poll vote using the poll's encryption secret and maps
    * the selected option SHA-256 hashes back to their human-readable option strings.
    */
+  private normalizeKeyBuffer(val: any): Uint8Array | null {
+    if (!val) return null;
+    if (val instanceof Uint8Array) return val;
+    if (Buffer.isBuffer(val)) return new Uint8Array(val);
+    if (val.type === 'Buffer' && Array.isArray(val.data)) return new Uint8Array(val.data);
+    if (typeof val === 'string') {
+      try {
+        return new Uint8Array(Buffer.from(val, 'hex'));
+      } catch {
+        try {
+          return new Uint8Array(Buffer.from(val, 'base64'));
+        } catch {
+          return null;
+        }
+      }
+    }
+    if (typeof val === 'object') {
+      const keys = Object.keys(val).filter(k => /^\d+$/.test(k));
+      if (keys.length > 0) {
+        const arr = new Uint8Array(keys.length);
+        for (const k of keys) arr[Number(k)] = val[k];
+        return arr;
+      }
+    }
+    return null;
+  }
+
   private async handleInboundPollUpdate(msg: WAMessage, pum: any): Promise<void> {
     try {
       const b = await this.host.loadLib();
@@ -365,27 +392,28 @@ export class BaileysEvents {
 
       const pollMsgId = creationKey.id;
       const remoteJid = msg.key.remoteJid!;
-      const meId = b.jidNormalizedUser(this.host.normalizedSelfJid());
-      const pollCreatorJid = b.getKeyAuthor(creationKey, meId);
-      const voterJid = b.getKeyAuthor(msg.key, meId);
+      const selfNormalized = this.host.normalizedSelfJid();
+      const meId = b.jidNormalizedUser(selfNormalized);
 
-      let pollEncKey: Uint8Array | null = null;
+      let rawPollEncKey: any = null;
       let optionNames: string[] = [];
+      let cachedCreatorJid: string | null = null;
 
       // 1. Look up in memory cache
       const cached = this.pollSecrets.get(pollMsgId);
       if (cached) {
-        pollEncKey = cached.pollEncKey;
+        rawPollEncKey = cached.pollEncKey;
         optionNames = cached.options;
+        cachedCreatorJid = cached.pollCreatorJid || null;
       }
 
       // 2. Fall back to message store
-      if (!pollEncKey && this.host.getStoredMessage) {
+      if (!rawPollEncKey && this.host.getStoredMessage) {
         const stored = await this.host.getStoredMessage(pollMsgId);
         if (stored) {
-          pollEncKey =
-            ((stored as any).messageSecret as Uint8Array) ||
-            ((stored as any).message?.messageContextInfo?.messageSecret as Uint8Array) ||
+          rawPollEncKey =
+            (stored as any).messageSecret ||
+            (stored as any).message?.messageContextInfo?.messageSecret ||
             null;
           const pollCreation =
             stored.message?.pollCreationMessage ||
@@ -397,21 +425,76 @@ export class BaileysEvents {
         }
       }
 
+      const pollEncKey = this.normalizeKeyBuffer(rawPollEncKey);
+
       if (!pollEncKey) {
         this.host.logger.warn(`Could not decrypt poll vote for ${pollMsgId}: pollEncKey missing from cache & store`);
         return;
       }
 
-      // Decrypt using Baileys decryptPollVote
-      const normCreator = b.jidNormalizedUser(pollCreatorJid);
-      const normVoter = b.jidNormalizedUser(voterJid);
+      // Candidate creators (NEVER a group JID ending in @g.us)
+      const socketUser = this.host.getSocketOrNull?.()?.user;
+      const candidateCreators = Array.from(
+        new Set(
+          [
+            cachedCreatorJid ? b.jidNormalizedUser(cachedCreatorJid) : null,
+            meId ? b.jidNormalizedUser(meId) : null,
+            socketUser?.id ? b.jidNormalizedUser(socketUser.id) : null,
+            socketUser?.lid ? b.jidNormalizedUser(socketUser.lid) : null,
+            creationKey.participant ? b.jidNormalizedUser(creationKey.participant) : null,
+            creationKey.fromMe ? meId : null,
+          ]
+            .filter(Boolean)
+            .filter((j: any) => typeof j === 'string' && !j.endsWith('@g.us')),
+        ),
+      ) as string[];
 
-      const decrypted = b.decryptPollVote(pum.vote, {
-        pollEncKey,
-        pollCreatorJid: normCreator,
-        pollMsgId,
-        voterJid: normVoter,
-      });
+      // Candidate voters (NEVER a group JID ending in @g.us)
+      const candidateVoters = Array.from(
+        new Set(
+          [
+            msg.key.participant ? b.jidNormalizedUser(msg.key.participant) : null,
+            msg.key.participantAlt ? b.jidNormalizedUser(msg.key.participantAlt) : null,
+            b.getKeyAuthor(msg.key, meId) ? b.jidNormalizedUser(b.getKeyAuthor(msg.key, meId)) : null,
+            msg.key.remoteJidAlt ? b.jidNormalizedUser(msg.key.remoteJidAlt) : null,
+            msg.key.remoteJid && !msg.key.remoteJid.endsWith('@g.us') ? b.jidNormalizedUser(msg.key.remoteJid) : null,
+          ]
+            .filter(Boolean)
+            .filter((j: any) => typeof j === 'string' && !j.endsWith('@g.us')),
+        ),
+      ) as string[];
+
+      let decrypted: any = null;
+      let usedCreator = '';
+      let usedVoter = '';
+
+      for (const creator of candidateCreators) {
+        for (const voter of candidateVoters) {
+          try {
+            decrypted = b.decryptPollVote(pum.vote, {
+              pollEncKey,
+              pollCreatorJid: creator,
+              pollMsgId,
+              voterJid: voter,
+            });
+            if (decrypted) {
+              usedCreator = creator;
+              usedVoter = voter;
+              break;
+            }
+          } catch {
+            // try next combination
+          }
+        }
+        if (decrypted) break;
+      }
+
+      if (!decrypted) {
+        this.host.logger.warn(
+          `Failed to decrypt poll vote for ${pollMsgId}: tried creators [${candidateCreators.join(', ')}] with voters [${candidateVoters.join(', ')}]`,
+        );
+        return;
+      }
 
       // Map selected SHA-256 hashes back to option string names
       const crypto = await import('crypto');
@@ -433,14 +516,14 @@ export class BaileysEvents {
       }
 
       this.host.logger.log(
-        `Decrypted poll vote for poll ${pollMsgId} by ${voterJid}: [${selectedOptions.join(', ')}]`,
+        `Decrypted poll vote for poll ${pollMsgId} by ${usedVoter}: [${selectedOptions.join(', ')}]`,
       );
 
       // Emit onPollVote
       this.host.getOnPollVote?.()?.({
         pollMessageId: pollMsgId,
         chatId: this.host.toNeutralJid(remoteJid),
-        voterJid: this.host.toNeutralJid(voterJid),
+        voterJid: this.host.toNeutralJid(usedVoter || msg.key.participant || remoteJid),
         selectedOptions,
         timestamp: toUnixSeconds(msg.messageTimestamp),
       });
