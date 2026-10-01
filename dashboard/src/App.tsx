@@ -29,6 +29,7 @@ const Plugins = lazy(() => import('./pages/Plugins'));
 const AiAgent = lazy(() => import('./pages/AiAgent').then(m => ({ default: m.AiAgent })));
 const RadarLeads = lazy(() => import('./pages/RadarLeads').then(m => ({ default: m.RadarLeads })));
 const ClientsManager = lazy(() => import('./pages/ClientsManager').then(m => ({ default: m.ClientsManager })));
+const Polls = lazy(() => import('./pages/Polls').then(m => ({ default: m.Polls })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -130,6 +131,7 @@ function AppContent() {
               <Route path="calendar" element={<CalendarPage />} />
               <Route path="webhooks" element={<Webhooks />} />
               <Route path="templates" element={<Templates />} />
+              <Route path="polls" element={<Polls />} />
               <Route path="ai-agent" element={<AiAgent />} />
               <Route path="radar-leads" element={<RadarLeads />} />
               {role === 'admin' && <Route path="clients" element={<ClientsManager />} />}

@@ -544,6 +544,14 @@ export interface ReactionEvent {
   senderId: string;
 }
 
+export interface PollVoteEvent {
+  pollMessageId: string;
+  chatId: string;
+  voterJid: string;
+  selectedOptions: string[];
+  timestamp: number;
+}
+
 /**
  * A group membership or metadata change, mapped at the adapter boundary to this neutral
  * shape so consumers never see engine-specific payloads:
@@ -698,6 +706,7 @@ export interface EngineEventCallbacks {
   onMessageRevoked?: (message: RevokedMessage) => void;
   onMessageReaction?: (event: ReactionEvent) => void;
   onMessageEdited?: (message: EditedMessage) => void;
+  onPollVote?: (event: PollVoteEvent) => void;
   /**
    * Fired on group membership changes (join/leave), group metadata updates
    * (subject/description/announce/locked), and pending join requests. The `kind` selects the

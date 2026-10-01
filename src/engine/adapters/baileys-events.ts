@@ -108,6 +108,8 @@ export interface BaileysEventsHost {
   getOnMessageReaction(): EngineEventCallbacks['onMessageReaction'];
   /** The currently-registered onMessageAck callback, if any (assigned at initialize()). */
   getOnMessageAck(): EngineEventCallbacks['onMessageAck'];
+  /** The currently-registered onPollVote callback, if any (assigned at initialize()). */
+  getOnPollVote?(): EngineEventCallbacks['onPollVote'];
   /** The currently-registered onGroupEvent callback, if any (assigned at initialize()). */
   getOnGroupEvent(): EngineEventCallbacks['onGroupEvent'];
   /** The currently-registered onCall callback, if any (assigned at initialize()). */
@@ -322,11 +324,28 @@ export class BaileysEvents {
     }
   }
 
-  handleMessagesUpdate(updates: Array<{ key?: { id?: string | null }; update?: { status?: number | null } }>): void {
+  handleMessagesUpdate(updates: Array<{ key?: { id?: string | null; remoteJid?: string | null }; update?: any }>): void {
     for (const u of updates) {
       const status = mapBaileysStatus(u.update?.status);
       if (status && u.key?.id) {
         this.host.getOnMessageAck()?.(u.key.id, status);
+      }
+
+      const pollUpdates = u.update?.pollUpdates;
+      if (Array.isArray(pollUpdates) && u.key?.id && u.key?.remoteJid) {
+        for (const pu of pollUpdates) {
+          const voterJid = pu.pollUpdateMessageKey?.participant || pu.pollUpdateMessageKey?.remoteJid;
+          const selectedOptions = pu.vote?.selectedOptions || [];
+          if (voterJid && Array.isArray(selectedOptions)) {
+            this.host.getOnPollVote?.()?.({
+              pollMessageId: u.key.id,
+              chatId: this.host.toNeutralJid(u.key.remoteJid),
+              voterJid: this.host.toNeutralJid(voterJid),
+              selectedOptions,
+              timestamp: Math.floor(Date.now() / 1000),
+            });
+          }
+        }
       }
     }
   }

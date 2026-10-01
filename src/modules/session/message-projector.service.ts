@@ -18,6 +18,7 @@ import { ChatMediaArchiveService } from '../chat-media/chat-media-archive.servic
 import { AutomationRulesService } from '../automation/automation-rules.service';
 import { AiAgentService } from '../ai-agent/ai-agent.service';
 import { RadarLeadService } from '../radar-lead/radar-lead.service';
+import { PollService } from '../poll/poll.service';
 import { buildIncomingStatus } from '../status-store/incoming-status';
 import type { StatusUpdate } from '../status-store/entities/status-update.entity';
 import {
@@ -27,6 +28,7 @@ import {
   ReactionEvent,
   EditedMessage,
   RevokedMessage,
+  PollVoteEvent,
 } from '../../engine/interfaces/whatsapp-engine.interface';
 import { createLogger } from '../../common/services/logger.service';
 import { EventsGateway } from '../events/events.gateway';
@@ -117,6 +119,9 @@ export class MessageProjector {
     // Optional Radar Lead service: scans WhatsApp groups in 0ms and dispatches alerts to clients
     @Optional()
     private readonly radarLeadService?: RadarLeadService,
+    // Optional Poll service: captures custom 'Otras' responses and handles poll interaction
+    @Optional()
+    private readonly pollService?: PollService,
   ) {
     this.mutationProjector = new MessageMutationProjector(
       this.messageRepository,
@@ -348,6 +353,8 @@ export class MessageProjector {
     void this.aiAgentService?.handleInboundMessage(id, finalMessage).catch(() => undefined);
     // Radar de Leads for WhatsApp groups (fail-open, never blocks message ingestion)
     void this.radarLeadService?.evaluateInbound(id, finalMessage).catch(() => undefined);
+    // Polls: captures custom 'Otras' responses from voters
+    void this.pollService?.handleInboundMessage(id, finalMessage).catch(() => undefined);
     // Trigger native auto-forwarding to personal WhatsApp if configured
     void this.handleNativeAutoForwarding(id, finalMessage).catch(() => undefined);
     // Emit real-time event to WebSocket clients
@@ -641,6 +648,28 @@ export class MessageProjector {
     const revokedPayload = message as unknown as Record<string, unknown>;
     void this.webhookService.dispatch(id, 'message.revoked', revokedPayload);
     this.eventsGateway.emitMessageRevoked(id, revokedPayload);
+  }
+
+  /** Engine callback body for poll updates/votes: delegates to PollService */
+  handlePollVote(id: string, engine: IWhatsAppEngine, event: PollVoteEvent): void {
+    if (!this.engines.isLive(id, engine)) return;
+    this.logger.debug(`Poll vote received: ${event.pollMessageId} from ${event.voterJid}`, {
+      sessionId: id,
+      pollMessageId: event.pollMessageId,
+      voterJid: event.voterJid,
+      selectedOptions: event.selectedOptions,
+    });
+    void this.pollService
+      ?.handlePollVote({
+        sessionId: id,
+        pollMessageId: event.pollMessageId,
+        chatId: event.chatId,
+        voterJid: event.voterJid,
+        selectedOptions: event.selectedOptions,
+      })
+      .catch(err => {
+        this.logger.error(`Failed to handle poll vote for session ${id}`, String(err));
+      });
   }
 
   /** History backfill persist, extracted to message-history-projector.ts (stateless function). */

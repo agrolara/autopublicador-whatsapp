@@ -27,6 +27,7 @@ import {
   Bot,
   Radio,
   UserCheck,
+  BarChart2,
 } from 'lucide-react';
 import { useTheme } from '../hooks/useTheme';
 import { type UserRole } from '../hooks/useRole';
@@ -48,6 +49,7 @@ const allNavItems = [
   { to: '/calendar', icon: Calendar, key: 'calendar' as const, adminOnly: false },
   { to: '/webhooks', icon: Webhook, key: 'webhooks' as const, adminOnly: false },
   { to: '/templates', icon: ClipboardList, key: 'templates' as const, adminOnly: false },
+  { to: '/polls', icon: BarChart2, key: 'polls' as const, adminOnly: false },
   { to: '/ai-agent', icon: Bot, key: 'aiAgent' as const, adminOnly: false },
   { to: '/radar-leads', icon: Radio, key: 'radarLeads' as const, adminOnly: false },
   { to: '/clients', icon: UserCheck, key: 'clients' as const, adminOnly: true },

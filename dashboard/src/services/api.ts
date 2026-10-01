@@ -2140,5 +2140,101 @@ export const clientAccountApi = {
     }),
 };
 
+// =============================================================================
+// Polls (Encuestas Nativas con Citas Automáticas y Alternativa A)
+// =============================================================================
+
+export interface PollOptionResult {
+  option: string;
+  votes: number;
+  percentage: number;
+}
+
+export interface PollVoteItem {
+  id: string;
+  voterJid: string;
+  voterPhone: string | null;
+  voterName: string | null;
+  selectedOptions: string[];
+  hasOther: boolean;
+  customText: string | null;
+  customTextReceivedAt: string | null;
+  votedAt: string;
+}
+
+export interface PollItem {
+  id: string;
+  sessionId: string;
+  chatId: string;
+  chatName: string | null;
+  messageId: string;
+  question: string;
+  options: string[];
+  allowMultipleAnswers: boolean;
+  status: 'active' | 'closed';
+  citationEnabled: boolean;
+  baseTime: string;
+  citationTimes: string[];
+  endDate: string | null;
+  reminderMessage: string;
+  lastCitedAt: string | null;
+  totalVotes: number;
+  optionResults: PollOptionResult[];
+  otherResponsesCount: number;
+  votes?: PollVoteItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreatePollPayload {
+  sessionId: string;
+  chatId: string;
+  chatName?: string;
+  question: string;
+  options: string[];
+  allowMultipleAnswers?: boolean;
+  otherOptionKeyword?: string;
+  citationEnabled?: boolean;
+  baseTime?: string;
+  citationTimes?: string[];
+  endDate?: string;
+  reminderMessage?: string;
+}
+
+export interface UpdatePollPayload {
+  status?: 'active' | 'closed';
+  citationEnabled?: boolean;
+  baseTime?: string;
+  citationTimes?: string[];
+  endDate?: string;
+  reminderMessage?: string;
+}
+
+export const pollsApi = {
+  list: (sessionId?: string) =>
+    request<PollItem[]>(`/polls${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''}`),
+  getById: (id: string) => request<PollItem>(`/polls/${id}`),
+  create: (data: CreatePollPayload) =>
+    request<PollItem>('/polls', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  update: (id: string, data: UpdatePollPayload) =>
+    request<PollItem>(`/polls/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  delete: (id: string) =>
+    request<{ success: boolean }>(`/polls/${id}`, {
+      method: 'DELETE',
+    }),
+  cite: (id: string) =>
+    request<{ success: boolean; message: string; citedAt: string }>(`/polls/${id}/cite`, {
+      method: 'POST',
+    }),
+  exportCsvUrl: (id: string) => `${API_BASE_URL}/polls/${id}/export`,
+};
+
+
 
 
