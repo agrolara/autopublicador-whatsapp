@@ -174,11 +174,30 @@ export class PollService implements OnModuleInit, OnModuleDestroy {
       cleanChatId = `${digits}@c.us`;
     }
 
-    const sendResult = await engine.sendPollMessage(cleanChatId, {
-      name: dto.question.trim(),
-      options: cleanOptions,
-      allowMultipleAnswers: dto.allowMultipleAnswers ?? false,
-    });
+    let sendResult: any;
+    try {
+      sendResult = await engine.sendPollMessage(cleanChatId, {
+        name: dto.question.trim(),
+        options: cleanOptions,
+        allowMultipleAnswers: dto.allowMultipleAnswers ?? false,
+      });
+    } catch (err: any) {
+      const errMsg = err?.message || String(err);
+      const isForbidden = errMsg.includes('forbidden') || err?.data === 403 || err?.output?.statusCode === 403;
+      const isRateLimit = errMsg.includes('rate-overlimit');
+      this.logger.warn(`Failed to send poll message to ${cleanChatId}: ${errMsg}`);
+      if (isForbidden) {
+        throw new BadRequestException(
+          `No se pudo enviar la encuesta a ${dto.chatName || cleanChatId}: la sesión no tiene permisos para escribir o ya no es miembro del grupo.`
+        );
+      }
+      if (isRateLimit) {
+        throw new BadRequestException(
+          `WhatsApp limitó temporalmente el envío por velocidad (rate limit). Espera unos momentos antes de reintentar.`
+        );
+      }
+      throw new BadRequestException(`Error al enviar encuesta a WhatsApp: ${errMsg}`);
+    }
 
     const messageId = sendResult.id || (sendResult as any)?.messageId || `poll-${Date.now()}`;
 
@@ -323,11 +342,16 @@ export class PollService implements OnModuleInit, OnModuleDestroy {
       // Fallback: If quoting fails because the original message is purged from engine memory,
       // send a prominent reminder message referencing the poll title
       this.logger.warn(`Quoting poll ${poll.messageId} failed (${err?.message}). Sending context reminder.`);
-      const fallbackText = `${reminderText}\n\n📊 *Encuesta:* ${poll.question}`;
-      await engine.sendTextMessage(poll.chatId, fallbackText);
-      poll.lastCitedAt = new Date();
-      await this.pollRepo.save(poll);
-      return { success: true, message: 'Recordatorio de encuesta enviado al chat.' };
+      try {
+        const fallbackText = `${reminderText}\n\n📊 *Encuesta:* ${poll.question}`;
+        await engine.sendTextMessage(poll.chatId, fallbackText);
+        poll.lastCitedAt = new Date();
+        await this.pollRepo.save(poll);
+        return { success: true, message: 'Recordatorio de encuesta enviado al chat.' };
+      } catch (fallbackErr: any) {
+        this.logger.warn(`Fallback citation failed for poll ${poll.id} in ${poll.chatId}: ${fallbackErr?.message}`);
+        return { success: false, message: fallbackErr?.message || 'Error al enviar recordatorio' };
+      }
     }
   }
 
@@ -372,7 +396,14 @@ export class PollService implements OnModuleInit, OnModuleDestroy {
         }
 
         this.logger.log(`Executing scheduled citation for poll "${poll.question}" at ${timeHHmm} (Chile time)`);
-        await this.sendCitationMessage(poll, engine);
+        try {
+          await this.sendCitationMessage(poll, engine);
+        } catch (citeErr: any) {
+          this.logger.warn(`Error dispatching citation for poll ${poll.id} in ${poll.chatId}: ${citeErr?.message}`);
+        }
+
+        // Polite delay of 1.5 seconds between consecutive group citations to prevent WhatsApp rate limits
+        await new Promise(r => setTimeout(r, 1500));
       }
     }
   }

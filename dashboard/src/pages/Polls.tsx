@@ -346,7 +346,10 @@ export function Polls() {
     try {
       setSubmittingPoll(true);
       let successCount = 0;
-      for (const tgt of targets) {
+      const failedTargets: { name: string; error: string }[] = [];
+
+      for (let i = 0; i < targets.length; i++) {
+        const tgt = targets[i];
         const payload: CreatePollPayload = {
           sessionId: newSessionId,
           chatId: tgt.chatId,
@@ -361,25 +364,55 @@ export function Polls() {
           endDate: citationEnabled && endDate ? new Date(endDate).toISOString() : undefined,
           reminderMessage: citationEnabled && reminderMessage.trim() ? reminderMessage.trim() : undefined,
         };
-        await pollsApi.create(payload);
-        successCount++;
+
+        try {
+          await pollsApi.create(payload);
+          successCount++;
+        } catch (err: any) {
+          failedTargets.push({
+            name: tgt.chatName || tgt.chatId,
+            error: err?.message || 'Error al publicar',
+          });
+        }
+
+        // Polite delay of 600ms between multiple group broadcasts to protect WhatsApp session
+        if (targets.length > 1 && i < targets.length - 1) {
+          await new Promise(r => setTimeout(r, 600));
+        }
       }
 
-      addToast({
-        type: 'success',
-        title: targets.length > 1 ? `¡${successCount} encuestas publicadas!` : '¡Encuesta creada y publicada!',
-        message: targets.length > 1
-          ? `Se crearon ${successCount} encuestas para los grupos de la categoría seleccionada.`
-          : `La encuesta nativa ya está visible en ${targets[0].chatName || targets[0].chatId}.`,
-      });
-      setCreateModalOpen(false);
-      // Reset form
-      setQuestion('');
-      setOptions(['Opción 1', 'Opción 2', 'Otras']);
-      setCitationTimes([]);
-      setPersonalPhone('');
-      setPersonalName('');
-      fetchPolls();
+      if (successCount > 0) {
+        if (failedTargets.length === 0) {
+          addToast({
+            type: 'success',
+            title: targets.length > 1 ? `¡${successCount} encuestas publicadas!` : '¡Encuesta creada y publicada!',
+            message: targets.length > 1
+              ? `Se crearon ${successCount} encuestas para los grupos de la categoría seleccionada.`
+              : `La encuesta nativa ya está visible en ${targets[0].chatName || targets[0].chatId}.`,
+          });
+        } else {
+          addToast({
+            type: 'warning',
+            title: `Publicación parcial: ${successCount} de ${targets.length}`,
+            message: `Se publicaron ${successCount} encuestas con éxito. En ${failedTargets.length} grupo(s) no se pudo publicar (el bot no pertenece al grupo o no tiene permisos de envío).`,
+          });
+        }
+        setCreateModalOpen(false);
+        // Reset form
+        setQuestion('');
+        setOptions(['Opción 1', 'Opción 2', 'Otras']);
+        setCitationTimes([]);
+        setPersonalPhone('');
+        setPersonalName('');
+        fetchPolls();
+      } else {
+        const firstErr = failedTargets[0]?.error || 'No se pudo publicar la encuesta en el destino seleccionado';
+        addToast({
+          type: 'error',
+          title: 'Error al crear encuesta',
+          message: firstErr,
+        });
+      }
     } catch (err: any) {
       addToast({
         type: 'error',
