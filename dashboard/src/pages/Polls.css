@@ -820,3 +820,334 @@
   border-radius: 4px;
   font-size: 0.7rem;
 }
+
+/* ==========================================================================
+   Anti-Ban Protection & Staggered Dispatch Controls
+   ========================================================================== */
+.poll-antiban-box {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.05) 0%, rgba(5, 150, 105, 0.02) 100%);
+  border: 1.5px solid #10b981;
+  border-radius: 12px;
+  padding: 1rem 1.15rem;
+  margin-bottom: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.poll-antiban-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.poll-antiban-icon {
+  color: #059669;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.poll-antiban-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #065f46;
+}
+
+.poll-antiban-subtitle {
+  font-size: 0.775rem;
+  color: #047857;
+  display: block;
+  margin-top: 2px;
+}
+
+.poll-antiban-safety-tag {
+  font-size: 0.725rem;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 20px;
+  border-width: 1px;
+  border-style: solid;
+  white-space: nowrap;
+}
+
+.poll-antiban-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  background: #ffffff;
+  padding: 0.85rem;
+  border-radius: 8px;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.poll-antiban-slider-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.poll-antiban-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.825rem;
+}
+
+.poll-antiban-label {
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.poll-antiban-current-val {
+  color: #059669;
+  font-size: 0.85rem;
+}
+
+.poll-antiban-slider {
+  flex: 1;
+  accent-color: #059669;
+  cursor: pointer;
+  height: 6px;
+}
+
+.poll-antiban-number-input {
+  width: 58px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  font-size: 0.85rem;
+  text-align: center;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.poll-antiban-jitter-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: #334155;
+  line-height: 1.4;
+}
+
+.poll-antiban-jitter-toggle input {
+  margin-top: 2px;
+  cursor: pointer;
+  accent-color: #059669;
+}
+
+.poll-antiban-estimate-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: #166534;
+}
+
+/* ==========================================================================
+   Live Bulk Progress Card
+   ========================================================================== */
+.poll-bulk-progress-card {
+  background: #eff6ff;
+  border: 1.5px solid #3b82f6;
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+  margin-bottom: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.poll-bulk-progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.875rem;
+  color: #1e3a8a;
+}
+
+.poll-bulk-progress-bar-wrap {
+  width: 100%;
+  height: 8px;
+  background: #bfdbfe;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.poll-bulk-progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #2563eb, #3b82f6);
+  transition: width 0.3s ease;
+}
+
+.poll-bulk-progress-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.8rem;
+  color: #1e293b;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.poll-bulk-waiting-badge {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 0.725rem;
+}
+
+.poll-bulk-stats-row {
+  display: flex;
+  gap: 1.25rem;
+  border-top: 1px solid #dbeafe;
+  padding-top: 0.4rem;
+  font-size: 0.775rem;
+}
+
+/* ==========================================================================
+   Delivery Report Modal Styles
+   ========================================================================== */
+.poll-report-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 1.15rem;
+}
+
+.poll-report-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 0.75rem;
+}
+
+.poll-report-metric-card {
+  padding: 0.85rem;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  border: 1px solid transparent;
+}
+
+.poll-report-metric-card.success {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #065f46;
+}
+
+.poll-report-metric-card.warning {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #92400e;
+}
+
+.poll-report-metric-card.danger {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #991b1b;
+}
+
+.poll-report-metric-val {
+  font-size: 1.5rem;
+  font-weight: 800;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.poll-report-metric-lbl {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.poll-report-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+}
+
+.poll-report-alert-icon {
+  color: #d97706;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.poll-report-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.poll-report-section-title {
+  font-size: 0.825rem;
+  font-weight: 700;
+  color: #334155;
+}
+
+.poll-report-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 6px;
+  max-height: 190px;
+  overflow-y: auto;
+  padding: 6px;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.poll-report-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 0.75rem;
+}
+
+.poll-report-list-item.forbidden {
+  border-left: 3px solid #f59e0b;
+}
+
+.poll-report-list-item.success {
+  border-left: 3px solid #10b981;
+}
+
+.poll-report-item-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 165px;
+  font-weight: 500;
+  color: #1e293b;
+}
+
+.poll-report-item-badge {
+  font-size: 0.675rem;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.poll-report-item-badge.success {
+  background: #dcfce7;
+  color: #15803d;
+}
+

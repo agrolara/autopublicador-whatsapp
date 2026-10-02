@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   BarChart2,
   Plus,
@@ -24,6 +24,10 @@ import {
   Layers,
   ChevronDown,
   ChevronUp,
+  ShieldCheck,
+  ShieldAlert,
+  AlertTriangle,
+  StopCircle,
 } from 'lucide-react';
 import {
   pollsApi,
@@ -132,6 +136,94 @@ export function Polls() {
   const [reminderMessage, setReminderMessage] = useState(
     '📢 ¡Recordatorio! Recuerda participar y dejar tu voto en la encuesta de arriba ☝️'
   );
+
+  // Anti-ban interval and rate limit protection
+  const [broadcastIntervalSeconds, setBroadcastIntervalSeconds] = useState(10);
+  const [useRandomJitter, setUseRandomJitter] = useState(true);
+  const cancelBroadcastRef = useRef(false);
+
+  // Bulk dispatch live progress state
+  const [bulkProgress, setBulkProgress] = useState<{
+    total: number;
+    current: number;
+    currentName: string;
+    successCount: number;
+    failedCount: number;
+    waitingSeconds: number;
+    aborted: boolean;
+  } | null>(null);
+
+  // Post-broadcast delivery report modal
+  const [reportModalOpen, setReportModalOpen] = useState(false);
+  const [deliveryReport, setDeliveryReport] = useState<{
+    total: number;
+    successList: { name: string; id: string }[];
+    forbiddenList: { name: string; id: string; error: string }[];
+    otherErrorList: { name: string; id: string; error: string }[];
+  } | null>(null);
+
+  // Target destinations calculation for real-time safety and duration display
+  const calculatedTargetsCount = useMemo(() => {
+    if (chatType === 'category') {
+      const tag = groupTags.find(t => t.id === selectedTagId);
+      if (!tag) return 0;
+      return sendToAllInTag ? (tag.groupIds?.length || 0) : (selectedGroupJid ? 1 : 0);
+    }
+    if (chatType === 'group') return selectedGroupJid ? 1 : 0;
+    if (chatType === 'personal') return personalPhone.trim() ? 1 : 0;
+    return 0;
+  }, [chatType, selectedTagId, groupTags, sendToAllInTag, selectedGroupJid, personalPhone]);
+
+  const estimatedDurationText = useMemo(() => {
+    if (calculatedTargetsCount <= 1) return 'Inmediato (< 2 seg)';
+    const totalSeconds = (calculatedTargetsCount - 1) * broadcastIntervalSeconds;
+    if (totalSeconds < 60) return `~${totalSeconds} segundos`;
+    const minutes = Math.floor(totalSeconds / 60);
+    const remainingSecs = totalSeconds % 60;
+    return remainingSecs > 0 ? `~${minutes} min ${remainingSecs} s` : `~${minutes} minutos`;
+  }, [calculatedTargetsCount, broadcastIntervalSeconds]);
+
+  const getSafetyBadge = (seconds: number) => {
+    if (seconds < 6) {
+      return {
+        label: '⚡ Rápido (Alto riesgo de baneo en envíos masivos)',
+        color: '#dc2626',
+        bg: '#fef2f2',
+        border: '#fca5a5',
+      };
+    }
+    if (seconds < 10) {
+      return {
+        label: '⚠️ Moderado (Aceptable para pocos grupos, riesgo medio)',
+        color: '#d97706',
+        bg: '#fffbeb',
+        border: '#fcd34d',
+      };
+    }
+    if (seconds <= 20) {
+      return {
+        label: '🛡️ Seguro Anti-Spam Recomendado (Óptimo para 50+ grupos)',
+        color: '#059669',
+        bg: '#ecfdf5',
+        border: '#6ee7b7',
+      };
+    }
+    return {
+      label: '🔒 Ultra Seguro (Máxima protección y cadencia humana)',
+      color: '#2563eb',
+      bg: '#eff6ff',
+      border: '#93c5fd',
+    };
+  };
+
+  const handleAbortBroadcast = () => {
+    cancelBroadcastRef.current = true;
+    addToast({
+      type: 'warning',
+      title: 'Deteniendo envío masivo...',
+      message: 'El envío se pausará tras completar el grupo actual para proteger la sesión.',
+    });
+  };
 
   const handleToggleQuilicuraTemplate = () => {
     if (!isQuilicuraMode) {
@@ -574,11 +666,31 @@ export function Polls() {
 
     try {
       setSubmittingPoll(true);
+      cancelBroadcastRef.current = false;
       let successCount = 0;
       const failedTargets: { name: string; error: string }[] = [];
+      const successList: { name: string; id: string }[] = [];
+      const forbiddenList: { name: string; id: string; error: string }[] = [];
+      const otherErrorList: { name: string; id: string; error: string }[] = [];
 
       for (let i = 0; i < targets.length; i++) {
+        if (cancelBroadcastRef.current) break;
+
         const tgt = targets[i];
+        const displayName = tgt.chatName || tgt.chatId;
+
+        if (targets.length > 1) {
+          setBulkProgress({
+            total: targets.length,
+            current: i + 1,
+            currentName: displayName,
+            successCount,
+            failedCount: failedTargets.length,
+            waitingSeconds: 0,
+            aborted: false,
+          });
+        }
+
         const payload: CreatePollPayload = {
           sessionId: newSessionId,
           chatId: tgt.chatId,
@@ -597,33 +709,75 @@ export function Polls() {
         try {
           await pollsApi.create(payload);
           successCount++;
+          successList.push({ name: displayName, id: tgt.chatId });
         } catch (err: any) {
+          const errMsg = err?.message || 'Error al publicar';
           failedTargets.push({
-            name: tgt.chatName || tgt.chatId,
-            error: err?.message || 'Error al publicar',
+            name: displayName,
+            error: errMsg,
           });
+
+          const isForbidden =
+            errMsg.toLowerCase().includes('permisos') ||
+            errMsg.toLowerCase().includes('forbidden') ||
+            errMsg.includes('403');
+
+          if (isForbidden) {
+            forbiddenList.push({ name: displayName, id: tgt.chatId, error: errMsg });
+          } else {
+            otherErrorList.push({ name: displayName, id: tgt.chatId, error: errMsg });
+          }
         }
 
-        // Polite delay of 600ms between multiple group broadcasts to protect WhatsApp session
-        if (targets.length > 1 && i < targets.length - 1) {
-          await new Promise(r => setTimeout(r, 600));
+        // Staggered Anti-Ban Delay with jitter between group broadcasts
+        if (targets.length > 1 && i < targets.length - 1 && !cancelBroadcastRef.current) {
+          let delaySec = broadcastIntervalSeconds;
+          if (useRandomJitter) {
+            // Random variance between -2 and +3 seconds to look human, min 3s
+            const jitter = Math.floor(Math.random() * 6) - 2;
+            delaySec = Math.max(3, delaySec + jitter);
+          }
+
+          for (let s = delaySec; s > 0; s--) {
+            if (cancelBroadcastRef.current) break;
+            setBulkProgress(prev => (prev ? { ...prev, waitingSeconds: s } : null));
+            await new Promise(r => setTimeout(r, 1000));
+          }
         }
       }
 
-      if (successCount > 0) {
+      const wasAborted = cancelBroadcastRef.current;
+
+      if (targets.length > 1) {
+        setDeliveryReport({
+          total: targets.length,
+          successList,
+          forbiddenList,
+          otherErrorList,
+        });
+        setReportModalOpen(true);
+      }
+
+      if (wasAborted) {
+        addToast({
+          type: 'warning',
+          title: 'Envío masivo detenido por el usuario',
+          message: `Se enviaron ${successCount} encuestas antes de detener. La sesión WhatsApp está protegida.`,
+        });
+      } else if (successCount > 0) {
         if (failedTargets.length === 0) {
           addToast({
             type: 'success',
-            title: targets.length > 1 ? `¡${successCount} encuestas publicadas!` : '¡Encuesta creada y publicada!',
+            title: targets.length > 1 ? `¡${successCount} encuestas publicadas con éxito!` : '¡Encuesta creada y publicada!',
             message: targets.length > 1
-              ? `Se crearon ${successCount} encuestas para los grupos de la categoría seleccionada.`
+              ? `Se completó el envío a los ${successCount} grupos con el ritmo seguro configurado.`
               : `La encuesta nativa ya está visible en ${targets[0].chatName || targets[0].chatId}.`,
           });
         } else {
           addToast({
             type: 'warning',
-            title: `Publicación parcial: ${successCount} de ${targets.length}`,
-            message: `Se publicaron ${successCount} encuestas con éxito. En ${failedTargets.length} grupo(s) no se pudo publicar (el bot no pertenece al grupo o no tiene permisos de envío).`,
+            title: `Publicación finalizada: ${successCount} de ${targets.length}`,
+            message: `${successCount} enviadas con éxito. ${forbiddenList.length} grupo(s) omitidos por ser "Solo administradores".`,
           });
         }
         setCreateModalOpen(false);
@@ -650,6 +804,7 @@ export function Polls() {
       });
     } finally {
       setSubmittingPoll(false);
+      setBulkProgress(null);
     }
   };
 
@@ -1294,35 +1449,101 @@ export function Polls() {
         onClose={() => setCreateModalOpen(false)}
         title="Crear Nueva Encuesta Nativa en WhatsApp"
         footer={
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-            <button
-              type="button"
-              className="poll-btn"
-              onClick={() => setCreateModalOpen(false)}
-              disabled={submittingPoll}
-            >
-              Cancelar
-            </button>
-            <button
-              type="button"
-              className="poll-btn poll-btn-primary"
-              onClick={handleCreateSubmit}
-              disabled={submittingPoll}
-            >
-              {submittingPoll ? (
-                <>
-                  <Loader2 size={16} className="spin" /> Enviando a WhatsApp...
-                </>
-              ) : (
-                <>
-                  <Sparkles size={16} /> Crear y Publicar Encuesta
-                </>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+            <div>
+              {submittingPoll && bulkProgress && (
+                <button
+                  type="button"
+                  className="poll-btn poll-btn-danger"
+                  onClick={handleAbortBroadcast}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+                >
+                  <StopCircle size={15} /> Detener Envío Restante
+                </button>
               )}
-            </button>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+              <button
+                type="button"
+                className="poll-btn"
+                onClick={() => setCreateModalOpen(false)}
+                disabled={submittingPoll}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="poll-btn poll-btn-primary"
+                onClick={handleCreateSubmit}
+                disabled={submittingPoll}
+              >
+                {submittingPoll ? (
+                  <>
+                    <Loader2 size={16} className="spin" />{' '}
+                    {bulkProgress
+                      ? `Enviando (${bulkProgress.current}/${bulkProgress.total})...`
+                      : 'Enviando a WhatsApp...'}
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={16} /> Crear y Publicar Encuesta
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         }
       >
         <form onSubmit={handleCreateSubmit}>
+          {/* Live Progress Card when submitting bulk polls */}
+          {bulkProgress && (
+            <div className="poll-bulk-progress-card">
+              <div className="poll-bulk-progress-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Loader2 size={18} className="spin text-primary" />
+                  <strong>
+                    Publicando en grupos ({bulkProgress.current} de {bulkProgress.total})
+                  </strong>
+                </div>
+                <button
+                  type="button"
+                  className="poll-btn poll-btn-danger"
+                  style={{ padding: '4px 8px', fontSize: '0.75rem' }}
+                  onClick={handleAbortBroadcast}
+                >
+                  <StopCircle size={13} /> Detener
+                </button>
+              </div>
+
+              <div className="poll-bulk-progress-bar-wrap">
+                <div
+                  className="poll-bulk-progress-bar-fill"
+                  style={{ width: `${Math.round((bulkProgress.current / bulkProgress.total) * 100)}%` }}
+                />
+              </div>
+
+              <div className="poll-bulk-progress-info">
+                <span>
+                  Destino actual: <strong>{bulkProgress.currentName}</strong>
+                </span>
+                {bulkProgress.waitingSeconds > 0 && (
+                  <span className="poll-bulk-waiting-badge">
+                    ⏳ Próximo envío en {bulkProgress.waitingSeconds}s (Protección Anti-Baneo activa)
+                  </span>
+                )}
+              </div>
+
+              <div className="poll-bulk-stats-row">
+                <span style={{ color: '#059669', fontWeight: 600, fontSize: '0.8rem' }}>
+                  ✅ Exitosos: {bulkProgress.successCount}
+                </span>
+                <span style={{ color: '#d97706', fontWeight: 600, fontSize: '0.8rem' }}>
+                  🔒 Omitidos (Sin permisos): {bulkProgress.failedCount}
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* Plantilla Rápida Quilicura */}
           <div
             style={{
@@ -1640,6 +1861,88 @@ export function Polls() {
             )}
           </div>
 
+          {/* Protección Anti-Baneo y Ritmo de Envío */}
+          {((chatType === 'category' && sendToAllInTag) || calculatedTargetsCount > 1) && (
+            <div className="poll-antiban-box">
+              <div className="poll-antiban-header">
+                <ShieldCheck size={22} className="poll-antiban-icon" />
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    <span className="poll-antiban-title">Protección Anti-Baneo y Ritmo de Envío</span>
+                    <span
+                      className="poll-antiban-safety-tag"
+                      style={{
+                        color: getSafetyBadge(broadcastIntervalSeconds).color,
+                        background: getSafetyBadge(broadcastIntervalSeconds).bg,
+                        borderColor: getSafetyBadge(broadcastIntervalSeconds).border,
+                      }}
+                    >
+                      {getSafetyBadge(broadcastIntervalSeconds).label}
+                    </span>
+                  </div>
+                  <span className="poll-antiban-subtitle">
+                    Evita que WhatsApp suspenda o bloquee tu número por envíos en ráfaga simultáneos a múltiples grupos.
+                  </span>
+                </div>
+              </div>
+
+              <div className="poll-antiban-controls">
+                <div className="poll-antiban-slider-group">
+                  <div className="poll-antiban-label-row">
+                    <label className="poll-antiban-label">
+                      Delay / Intervalo de espera entre cada grupo:
+                    </label>
+                    <span className="poll-antiban-current-val">
+                      <strong>{broadcastIntervalSeconds}</strong> segundos
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                    <input
+                      type="range"
+                      min={3}
+                      max={60}
+                      step={1}
+                      value={broadcastIntervalSeconds}
+                      onChange={e => setBroadcastIntervalSeconds(Number(e.target.value))}
+                      className="poll-antiban-slider"
+                    />
+                    <input
+                      type="number"
+                      min={3}
+                      max={60}
+                      value={broadcastIntervalSeconds}
+                      onChange={e =>
+                        setBroadcastIntervalSeconds(Math.max(3, Math.min(60, Number(e.target.value) || 10)))
+                      }
+                      className="poll-antiban-number-input"
+                    />
+                  </div>
+                </div>
+
+                <label className="poll-antiban-jitter-toggle">
+                  <input
+                    type="checkbox"
+                    checked={useRandomJitter}
+                    onChange={e => setUseRandomJitter(e.target.checked)}
+                  />
+                  <span>
+                    <strong>Variación humana aleatoria (Jitter):</strong> Añade entre ±1 y 3 segundos de variación
+                    aleatoria a cada envío para simular una conducta humana natural y burlar filtros de bots.
+                  </span>
+                </label>
+
+                {/* Estimation banner */}
+                <div className="poll-antiban-estimate-banner">
+                  <Clock size={15} />
+                  <span>
+                    Tiempo total estimado para los <strong>{calculatedTargetsCount} grupos seleccionados</strong>:{' '}
+                    <strong>{estimatedDurationText}</strong>.
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Question Title */}
           <div className="poll-form-group">
             <label className="poll-form-label">Pregunta de la Encuesta *</label>
@@ -1819,6 +2122,100 @@ export function Polls() {
             )}
           </div>
         </form>
+      </Modal>
+
+      {/* DELIVERY REPORT MODAL */}
+      <Modal
+        open={reportModalOpen}
+        onClose={() => setReportModalOpen(false)}
+        title="📊 Resumen de Despliegue de la Encuesta"
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button
+              type="button"
+              className="poll-btn poll-btn-primary"
+              onClick={() => setReportModalOpen(false)}
+            >
+              Entendido, Cerrar
+            </button>
+          </div>
+        }
+      >
+        <div className="poll-report-wrap">
+          {/* Summary metrics */}
+          <div className="poll-report-metrics">
+            <div className="poll-report-metric-card success">
+              <span className="poll-report-metric-val">{deliveryReport?.successList.length || 0}</span>
+              <span className="poll-report-metric-lbl">✅ Publicados con Éxito</span>
+            </div>
+            <div className="poll-report-metric-card warning">
+              <span className="poll-report-metric-val">{deliveryReport?.forbiddenList.length || 0}</span>
+              <span className="poll-report-metric-lbl">🔒 Solo Administradores</span>
+            </div>
+            {Boolean(deliveryReport?.otherErrorList?.length) && (
+              <div className="poll-report-metric-card danger">
+                <span className="poll-report-metric-val">{deliveryReport?.otherErrorList.length}</span>
+                <span className="poll-report-metric-lbl">⚠️ Otros Errores</span>
+              </div>
+            )}
+          </div>
+
+          {/* Explanation Alert for Forbidden groups */}
+          {deliveryReport && deliveryReport.forbiddenList.length > 0 && (
+            <div className="poll-report-alert">
+              <AlertTriangle size={22} className="poll-report-alert-icon" />
+              <div>
+                <strong style={{ display: 'block', marginBottom: '4px' }}>
+                  ¿Por qué se omitieron {deliveryReport.forbiddenList.length} grupos?
+                </strong>
+                <p style={{ margin: 0, fontSize: '0.85rem', lineHeight: '1.45', color: '#78350f' }}>
+                  WhatsApp rechazó el envío devolviendo el código <code>forbidden</code> (HTTP 403). Esto ocurre porque el
+                  grupo tiene activada la regla comunitaria <strong>"Solo administradores pueden enviar mensajes"</strong> y
+                  tu cuenta de WhatsApp es participante regular sin permisos de administración, o bien la cuenta fue removida
+                  del grupo.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* List of Forbidden Groups */}
+          {deliveryReport && deliveryReport.forbiddenList.length > 0 && (
+            <div className="poll-report-section">
+              <span className="poll-report-section-title">
+                Grupos con permisos restringidos ({deliveryReport.forbiddenList.length}):
+              </span>
+              <div className="poll-report-list forbidden-list">
+                {deliveryReport.forbiddenList.map((item, idx) => (
+                  <div key={idx} className="poll-report-list-item forbidden">
+                    <span className="poll-report-item-name" title={item.id}>
+                      🔒 {item.name}
+                    </span>
+                    <span className="poll-report-item-badge">Solo Admins</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* List of Success Groups */}
+          {deliveryReport && deliveryReport.successList.length > 0 && (
+            <div className="poll-report-section">
+              <span className="poll-report-section-title">
+                Grupos donde la encuesta está activa ({deliveryReport.successList.length}):
+              </span>
+              <div className="poll-report-list success-list">
+                {deliveryReport.successList.map((item, idx) => (
+                  <div key={idx} className="poll-report-list-item success">
+                    <span className="poll-report-item-name" title={item.id}>
+                      ✅ {item.name}
+                    </span>
+                    <span className="poll-report-item-badge success">Enviada</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </Modal>
     </div>
   );
