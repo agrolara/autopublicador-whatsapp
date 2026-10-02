@@ -50,34 +50,53 @@ export class GroupTagsService {
     return this.tags;
   }
 
-  saveTag(sessionId: string, dto: { name: string; color?: string; groupIds: string[]; id?: string }): GroupTag {
+  saveTag(
+    sessionId: string,
+    dto: {
+      name: string;
+      color?: string;
+      groupIds: string[];
+      id?: string;
+      groupMetadata?: Record<string, string>;
+    },
+  ): GroupTag {
     let existing = dto.id ? this.tags.find(t => t.id === dto.id) : null;
 
     if (!existing) {
       existing = this.tags.find(t => t.name.toLowerCase() === dto.name.toLowerCase());
     }
 
+    let savedTag: GroupTag;
+
     if (existing) {
       existing.name = dto.name;
       if (dto.color) existing.color = dto.color;
       existing.groupIds = Array.from(new Set([...dto.groupIds]));
       this.saveToFile();
-      return existing;
+      savedTag = existing;
+    } else {
+      const newTag: GroupTag = {
+        id: `tag_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        sessionId: 'global',
+        name: dto.name,
+        color: dto.color || '#10b981',
+        groupIds: Array.from(new Set([...dto.groupIds])),
+        createdAt: new Date().toISOString(),
+      };
+
+      this.tags.push(newTag);
+      this.saveToFile();
+      this.logger.log(`Created global group tag "${newTag.name}" with ${newTag.groupIds.length} groups`);
+      savedTag = newTag;
     }
 
-    const newTag: GroupTag = {
-      id: `tag_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      sessionId: 'global',
-      name: dto.name,
-      color: dto.color || '#10b981',
-      groupIds: Array.from(new Set([...dto.groupIds])),
-      createdAt: new Date().toISOString(),
-    };
+    // Sincronización automática si la categoría es "alcaldia" o "alcaldía"
+    const isAlcaldia = /^(alcaldia|alcald[ií]a)$/i.test(dto.name.trim());
+    if (isAlcaldia) {
+      void this.notifyAlcaldiaSync(savedTag.groupIds, dto.groupMetadata);
+    }
 
-    this.tags.push(newTag);
-    this.saveToFile();
-    this.logger.log(`Created global group tag "${newTag.name}" with ${newTag.groupIds.length} groups`);
-    return newTag;
+    return savedTag;
   }
 
   deleteTag(sessionId: string, id: string): boolean {
@@ -86,8 +105,79 @@ export class GroupTagsService {
       const deleted = this.tags.splice(idx, 1)[0];
       this.saveToFile();
       this.logger.log(`Deleted group tag ${id} (${deleted.name})`);
+
+      const wasAlcaldia = /^(alcaldia|alcald[ií]a)$/i.test(deleted.name.trim());
+      if (wasAlcaldia) {
+        const remainingAlcaldia = this.tags.find(t =>
+          /^(alcaldia|alcald[ií]a)$/i.test(t.name.trim()),
+        );
+        void this.notifyAlcaldiaSync(
+          remainingAlcaldia ? remainingAlcaldia.groupIds : [],
+        );
+      }
       return true;
     }
     return false;
+  }
+
+  /**
+   * Sincroniza dinámicamente con el Termómetro Comunal de Quilicura
+   * cada vez que se crea, agrega o remueve grupos de la categoría "alcaldia"
+   */
+  async notifyAlcaldiaSync(
+    groupIds: string[],
+    groupMetadata?: Record<string, string>,
+  ): Promise<void> {
+    try {
+      const termometroUrl = (
+        process.env.QUILICURA_API_URL ||
+        process.env.TERMOMETRO_URL ||
+        'http://localhost:3000'
+      ).replace(/\/$/, '');
+
+      let catalog: Array<{ id: string; name: string }> = [];
+      try {
+        const catalogPath = path.join(process.cwd(), 'data', 'group-catalog.json');
+        if (fs.existsSync(catalogPath)) {
+          catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
+        }
+      } catch {}
+      const catalogMap = new Map(catalog.map(c => [c.id, c.name]));
+
+      const grupos = groupIds.map(gid => ({
+        id: gid,
+        name:
+          groupMetadata?.[gid] ||
+          catalogMap.get(gid) ||
+          'Canal Vecinal Quilicura',
+      }));
+
+      this.logger.log(
+        `[Alcaldía Sync] Sincronizando ${grupos.length} grupos de categoría "alcaldia" con Termómetro Comunal (${termometroUrl})...`,
+      );
+
+      const res = await fetch(`${termometroUrl}/api/openwa/delegar-grupos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          categoria: 'alcaldia',
+          grupos,
+        }),
+        signal: AbortSignal.timeout(3500),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        this.logger.log(
+          `[Alcaldía Sync] Éxito: ${data.mensaje || `Sincronizados ${grupos.length} grupos`}`,
+        );
+      } else {
+        this.logger.warn(`[Alcaldía Sync] Servidor respondió HTTP ${res.status}`);
+      }
+    } catch (e: any) {
+      this.logger.log(
+        `[Alcaldía Sync] Termómetro Comunal offline de momento (${e?.message}) - sincronización persistida localmente`,
+      );
+    }
   }
 }

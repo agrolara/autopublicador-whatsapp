@@ -47,16 +47,26 @@ export const GroupTagModal: React.FC<GroupTagModalProps> = ({
       alert('Selecciona al menos 1 grupo para agregar a esta categoría.');
       return;
     }
+    const groupMetadata: Record<string, string> = {};
+    for (const g of groups) {
+      if (selectedGroupIdsForTag.has(g.id)) {
+        groupMetadata[g.id] = g.name || g.id;
+      }
+    }
+
     const tagPayload = {
       ...(editingTagId ? { id: editingTagId } : {}),
       name: newTagName.trim(),
       color: newTagColor,
       groupIds: Array.from(selectedGroupIdsForTag),
+      groupMetadata,
     };
     await groupTagsApi.save(session, tagPayload);
     onSaved(newTagName.trim(), selectedGroupIdsForTag.size);
     onClose();
   };
+
+  const isAlcaldia = /^(alcaldia|alcald[ií]a)$/i.test(newTagName.trim());
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -64,9 +74,52 @@ export const GroupTagModal: React.FC<GroupTagModalProps> = ({
         <h3 style={{ margin: '0 0 12px 0', fontSize: '1.1rem', color: 'var(--text-main, #0f172a)' }}>
           🏷️ {editingTagId ? 'Editar Categoría de Grupos' : 'Crear Nueva Categoría de Grupos'}
         </h3>
-        <p style={{ fontSize: '0.83rem', color: '#64748b', margin: '0 0 16px 0' }}>
+        <p style={{ fontSize: '0.83rem', color: '#64748b', margin: '0 0 12px 0' }}>
           Selecciona los grupos de tu WhatsApp que pertenecerán a esta categoría ({selectedGroupIdsForTag.size} seleccionados).
         </p>
+
+        {/* Quick button to set "alcaldia" */}
+        <div style={{ marginBottom: '12px' }}>
+          <button
+            type="button"
+            onClick={() => {
+              setNewTagName('alcaldia');
+              setNewTagColor('#0284c7');
+            }}
+            style={{
+              fontSize: '0.78rem',
+              padding: '5px 12px',
+              borderRadius: '6px',
+              background: isAlcaldia ? '#0284c7' : 'rgba(2, 132, 199, 0.1)',
+              border: '1px solid #0284c7',
+              color: isAlcaldia ? '#ffffff' : '#0284c7',
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            🏛️ Asignar Categoría "alcaldia" (Quilicura)
+          </button>
+        </div>
+
+        {isAlcaldia && (
+          <div
+            style={{
+              padding: '10px 12px',
+              borderRadius: '8px',
+              background: 'rgba(2, 132, 199, 0.08)',
+              border: '1px solid rgba(2, 132, 199, 0.3)',
+              marginBottom: '14px',
+              fontSize: '0.8rem',
+              color: '#0369a1',
+              lineHeight: 1.4,
+            }}
+          >
+            🛡️ <strong>Delegación Quilicura Activada:</strong> Los grupos seleccionados se sincronizarán dinámicamente con el radar de la Alcaldía de Quilicura (<code style={{ fontSize: '0.75rem', background: 'rgba(2,132,199,0.15)', padding: '1px 4px', borderRadius: '3px' }}>/api/openwa/delegar-grupos</code>). Todos tus demás grupos personales y comerciales permanecerán 100% invisibles y protegidos.
+          </div>
+        )}
 
         <div style={{ marginBottom: '12px' }}>
           <label style={{ display: 'block', fontSize: '0.83rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>Nombre de la Categoría:</label>
@@ -74,7 +127,7 @@ export const GroupTagModal: React.FC<GroupTagModalProps> = ({
             type="text"
             value={newTagName}
             onChange={e => setNewTagName(e.target.value)}
-            placeholder="ej: Ventas Santiago, Inmobiliaria, Oferta Pro"
+            placeholder="ej: alcaldia, Ventas Santiago, Inmobiliaria"
             style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
           />
         </div>

@@ -122,6 +122,7 @@ export function Polls() {
   const [options, setOptions] = useState<string[]>(['Opción 1', 'Opción 2', 'Otras']);
   const [allowMultiple, setAllowMultiple] = useState(false);
   const [otherKeyword, setOtherKeyword] = useState('otras');
+  const [isQuilicuraMode, setIsQuilicuraMode] = useState(false);
 
   // Citation schedule form state
   const [citationEnabled, setCitationEnabled] = useState(true);
@@ -131,6 +132,39 @@ export function Polls() {
   const [reminderMessage, setReminderMessage] = useState(
     '📢 ¡Recordatorio! Recuerda participar y dejar tu voto en la encuesta de arriba ☝️'
   );
+
+  const handleToggleQuilicuraTemplate = () => {
+    if (!isQuilicuraMode) {
+      setIsQuilicuraMode(true);
+      // a) Anteponer automáticamente prefijo [Consulta Comunal]
+      setQuestion(prev => {
+        const cleaned = prev.replace(/^\[Consulta Comunal\]\s*/i, '').trim();
+        return `[Consulta Comunal] ${cleaned || 'Prioridad en iluminación o patrullaje vecinal'}`;
+      });
+      // b) Filtrar para que la encuesta solo se despache a categoría "alcaldia"
+      setChatType('category');
+      const alcaldiaTag = groupTags.find(t => /^(alcaldia|alcald[ií]a)$/i.test(t.name.trim()));
+      if (alcaldiaTag) {
+        setSelectedTagId(alcaldiaTag.id);
+        setSendToAllInTag(true);
+      } else {
+        addToast({
+          type: 'warning',
+          title: 'Categoría "alcaldia" no encontrada',
+          message: 'Crea o asigna la categoría "alcaldia" a tus grupos vecinales para publicar automáticamente en ellos.',
+        });
+      }
+      // Opciones cívicas por defecto si están vacías o por defecto
+      if (options.length === 0 || (options.length === 3 && options[0] === 'Opción 1')) {
+        setOptions(['Mayor patrullaje e iluminación LED', 'Recuperación de plazas y áreas verdes', 'Otras']);
+      }
+      setAllowMultiple(false);
+      setOtherKeyword('otras');
+    } else {
+      setIsQuilicuraMode(false);
+      setQuestion(prev => prev.replace(/^\[Consulta Comunal\]\s*/i, '').trim());
+    }
+  };
 
   // Fetch polls
   const fetchPolls = useCallback(async () => {
@@ -460,9 +494,26 @@ export function Polls() {
       return;
     }
 
-    if (!question.trim()) {
+    let finalQuestion = question.trim();
+    if (isQuilicuraMode && !finalQuestion.toLowerCase().startsWith('[consulta comunal]')) {
+      finalQuestion = `[Consulta Comunal] ${finalQuestion}`;
+    }
+
+    if (!finalQuestion) {
       addToast({ type: 'warning', title: 'Escribe la pregunta de la encuesta' });
       return;
+    }
+
+    if (isQuilicuraMode) {
+      const alcaldiaTag = groupTags.find(t => /^(alcaldia|alcald[ií]a)$/i.test(t.name.trim()));
+      if (!alcaldiaTag || selectedTagId !== alcaldiaTag.id || chatType !== 'category') {
+        addToast({
+          type: 'warning',
+          title: 'Destino Quilicura Inválido',
+          message: 'La Consulta Comunal Quilicura debe despacharse exclusivamente a la categoría "alcaldia".',
+        });
+        return;
+      }
     }
 
     const cleanOptions = options.map(o => o.trim()).filter(Boolean);
@@ -532,7 +583,7 @@ export function Polls() {
           sessionId: newSessionId,
           chatId: tgt.chatId,
           chatName: tgt.chatName,
-          question: question.trim(),
+          question: finalQuestion,
           options: cleanOptions,
           allowMultipleAnswers: allowMultiple,
           otherOptionKeyword: otherKeyword.trim() || 'otras',
@@ -1272,6 +1323,90 @@ export function Polls() {
         }
       >
         <form onSubmit={handleCreateSubmit}>
+          {/* Plantilla Rápida Quilicura */}
+          <div
+            style={{
+              padding: '12px 14px',
+              borderRadius: '10px',
+              background: isQuilicuraMode
+                ? 'linear-gradient(135deg, rgba(2, 132, 199, 0.15) 0%, rgba(14, 165, 233, 0.08) 100%)'
+                : 'var(--bg-surface-secondary, #f8fafc)',
+              border: isQuilicuraMode
+                ? '1.5px solid #0284c7'
+                : '1px solid var(--border-color, #e2e8f0)',
+              marginBottom: '1.25rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '8px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '1.3rem' }}>🏛️</span>
+                <div>
+                  <div
+                    style={{
+                      fontWeight: 600,
+                      fontSize: '0.92rem',
+                      color: isQuilicuraMode ? '#0284c7' : 'var(--text-main)',
+                    }}
+                  >
+                    Lanzar Consulta Comunal Quilicura
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                    Prefijo automático <strong>[Consulta Comunal]</strong>, filtrado a categoría <strong>alcaldia</strong> y votación nativa por botones (sin mensajes 1, 2 o 3).
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleToggleQuilicuraTemplate}
+                className="poll-btn"
+                style={{
+                  background: isQuilicuraMode ? '#0284c7' : '#ffffff',
+                  color: isQuilicuraMode ? '#ffffff' : '#0284c7',
+                  border: '1.5px solid #0284c7',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  padding: '6px 14px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  boxShadow: isQuilicuraMode
+                    ? '0 2px 8px rgba(2, 132, 199, 0.3)'
+                    : 'none',
+                }}
+              >
+                {isQuilicuraMode
+                  ? '✓ Consulta Quilicura Activa'
+                  : '⚡ Activar Plantilla Quilicura'}
+              </button>
+            </div>
+
+            {isQuilicuraMode && (
+              <div
+                style={{
+                  fontSize: '0.8rem',
+                  color: '#0369a1',
+                  background: 'rgba(2, 132, 199, 0.1)',
+                  padding: '6px 10px',
+                  borderRadius: '6px',
+                  lineHeight: 1.4,
+                }}
+              >
+                🛡️ <strong>Modo Consulta Comunal Activo:</strong> La encuesta se despacha exclusivamente a los grupos autorizados de la categoría <code>alcaldia</code>. Los votos se capturan 100% mediante los botones nativos de WhatsApp para máxima fidelidad ciudadana y cero falsos positivos.
+              </div>
+            )}
+          </div>
+
           {/* WhatsApp Session Selector */}
           <div className="poll-form-group">
             <label className="poll-form-label">Sesión de WhatsApp Emisora *</label>

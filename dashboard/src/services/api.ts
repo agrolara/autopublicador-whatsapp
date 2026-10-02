@@ -2235,6 +2235,70 @@ export const pollsApi = {
   exportCsvUrl: (id: string) => `${API_BASE_URL}/polls/${id}/export`,
 };
 
+// =============================================================================
+// Quilicura / JEV Rules API
+// =============================================================================
+
+export interface QuilicuraCategoriaAlerta {
+  nombre: string;
+  urgencia: 'critica' | 'alta' | 'media' | 'baja';
+  despachoInmediato: boolean;
+  palabrasClave: string[];
+}
+
+export interface QuilicuraReglasAlertas {
+  sensibilidadJev: number;
+  notificarPorWhatsApp: boolean;
+  categorias: {
+    ilicito: QuilicuraCategoriaAlerta;
+    consumo_sustancias: QuilicuraCategoriaAlerta;
+    microbasural: QuilicuraCategoriaAlerta;
+    ruidos: QuilicuraCategoriaAlerta;
+    [key: string]: QuilicuraCategoriaAlerta;
+  };
+}
+
+export interface QuilicuraReglasAlertasResponse {
+  reglasAlertas: QuilicuraReglasAlertas;
+  source: 'termometro' | 'local';
+  termometroOnline: boolean;
+}
+
+export interface QuilicuraStatusResponse {
+  online: boolean;
+  url: string;
+  gruposAlcaldiaCount: number;
+  grupos: Array<{ id: string; name: string }>;
+}
+
+export const quilicuraApi = {
+  getStatus: () => request<QuilicuraStatusResponse>('/quilicura/status'),
+  getReglasAlertas: () =>
+    request<QuilicuraReglasAlertasResponse>('/quilicura/reglas-alertas'),
+  saveReglasAlertas: (rules: QuilicuraReglasAlertas) =>
+    request<{
+      exito: boolean;
+      syncedToTermometro: boolean;
+      mensaje: string;
+      reglasAlertas: QuilicuraReglasAlertas;
+    }>('/quilicura/reglas-alertas', {
+      method: 'POST',
+      body: JSON.stringify({ reglasAlertas: rules }),
+    }),
+  syncGruposAlcaldia: (grupos?: Array<{ id: string; name: string }>) =>
+    request<{
+      exito: boolean;
+      synced: boolean;
+      categoria: string;
+      total: number;
+      mensaje: string;
+      grupos: Array<{ id: string; name: string }>;
+    }>('/quilicura/sync-grupos', {
+      method: 'POST',
+      body: JSON.stringify({ grupos }),
+    }),
+};
+
 
 
 
