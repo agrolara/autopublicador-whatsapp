@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { type GroupTagItem, groupTagsApi } from '../../services/api';
 
 export interface GroupTagModalProps {
@@ -17,6 +17,8 @@ export interface GroupTagModalProps {
   groupSearchQuery: string;
   setGroupSearchQuery: (v: string) => void;
   onSaved: (name: string, count: number) => void;
+  onRefresh?: () => void;
+  isLoading?: boolean;
 }
 
 export const GroupTagModal: React.FC<GroupTagModalProps> = ({
@@ -35,8 +37,43 @@ export const GroupTagModal: React.FC<GroupTagModalProps> = ({
   groupSearchQuery,
   setGroupSearchQuery,
   onSaved,
+  onRefresh,
+  isLoading = false,
 }) => {
   if (!isOpen) return null;
+
+  // Merge groups from session with any known groups from categories and metadata
+  const effectiveGroups = useMemo(() => {
+    const map = new Map<string, { id: string; name: string }>();
+
+    // 1. Add groups from active session query
+    for (const g of groups || []) {
+      if (g && g.id) {
+        map.set(g.id, { id: g.id, name: g.name || g.id });
+      }
+    }
+
+    // 2. Add groups already known in all groupTags
+    for (const tag of groupTags || []) {
+      if (tag && tag.groupIds) {
+        for (const gid of tag.groupIds) {
+          if (!map.has(gid)) {
+            const metaName = (tag as any).groupMetadata?.[gid];
+            map.set(gid, { id: gid, name: metaName || gid });
+          }
+        }
+      }
+    }
+
+    // 3. Add groups in selectedGroupIdsForTag if still missing
+    for (const gid of selectedGroupIdsForTag || []) {
+      if (!map.has(gid)) {
+        map.set(gid, { id: gid, name: gid });
+      }
+    }
+
+    return Array.from(map.values()).sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+  }, [groups, groupTags, selectedGroupIdsForTag]);
 
   const handleSave = async () => {
     if (!newTagName.trim()) {
@@ -48,7 +85,7 @@ export const GroupTagModal: React.FC<GroupTagModalProps> = ({
       return;
     }
     const groupMetadata: Record<string, string> = {};
-    for (const g of groups) {
+    for (const g of effectiveGroups) {
       if (selectedGroupIdsForTag.has(g.id)) {
         groupMetadata[g.id] = g.name || g.id;
       }
@@ -153,14 +190,33 @@ export const GroupTagModal: React.FC<GroupTagModalProps> = ({
         </div>
 
         <div style={{ marginBottom: '16px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap', gap: '6px' }}>
             <label style={{ fontSize: '0.83rem', fontWeight: 600, color: '#334155', margin: 0 }}>
-              Grupos de tu WhatsApp ({selectedGroupIdsForTag.size} de {groups.length}):
+              Grupos de tu WhatsApp ({selectedGroupIdsForTag.size} de {effectiveGroups.length}):
             </label>
-            <div style={{ display: 'flex', gap: '6px' }}>
+            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+              {onRefresh && (
+                <button
+                  type="button"
+                  onClick={onRefresh}
+                  disabled={isLoading}
+                  style={{
+                    fontSize: '0.72rem',
+                    background: '#e0f2fe',
+                    color: '#0369a1',
+                    border: '1px solid #bae6fd',
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontWeight: 500,
+                  }}
+                >
+                  {isLoading ? '⏳ Sincronizando...' : '🔄 Sincronizar'}
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => setSelectedGroupIdsForTag(new Set(groups.map(g => g.id)))}
+                onClick={() => setSelectedGroupIdsForTag(new Set(effectiveGroups.map(g => g.id)))}
                 style={{ fontSize: '0.75rem', background: '#e2e8f0', border: 'none', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer', fontWeight: 500 }}
               >
                 Marcar todos
@@ -184,12 +240,35 @@ export const GroupTagModal: React.FC<GroupTagModalProps> = ({
           />
 
           <div style={{ maxHeight: '220px', overflowY: 'auto', border: '1px solid #cbd5e1', borderRadius: '6px', background: '#fafafa', padding: '6px' }}>
-            {groups.length === 0 ? (
-              <p style={{ margin: '8px', fontSize: '0.8rem', color: '#64748b', textAlign: 'center' }}>
-                Sincronizando chats de WhatsApp... Aguarda unos segundos.
-              </p>
+            {effectiveGroups.length === 0 ? (
+              <div style={{ padding: '16px', textAlign: 'center', color: '#64748b' }}>
+                <p style={{ margin: '0 0 8px 0', fontSize: '0.82rem' }}>
+                  {isLoading
+                    ? '⏳ Sincronizando chats de WhatsApp... Aguarda unos segundos.'
+                    : '⚠️ No se encontraron chats grupales activos en WhatsApp.'}
+                </p>
+                {onRefresh && (
+                  <button
+                    type="button"
+                    onClick={onRefresh}
+                    disabled={isLoading}
+                    style={{
+                      fontSize: '0.78rem',
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      background: '#0284c7',
+                      color: '#ffffff',
+                      border: 'none',
+                      cursor: 'pointer',
+                      fontWeight: 600,
+                    }}
+                  >
+                    🔄 Reintentar Sincronización
+                  </button>
+                )}
+              </div>
             ) : (
-              groups
+              effectiveGroups
                 .filter(g => (g.name || g.id).toLowerCase().includes(groupSearchQuery.toLowerCase()))
                 .map(g => {
                   const isChecked = selectedGroupIdsForTag.has(g.id);

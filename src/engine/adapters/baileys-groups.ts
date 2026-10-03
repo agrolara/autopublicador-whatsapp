@@ -1,5 +1,6 @@
 import type { WASocket } from '@whiskeysockets/baileys';
 import {
+  ChatSummary,
   Group,
   GroupInfo,
   GroupJoinInfo,
@@ -31,6 +32,7 @@ export interface BaileysGroupsHost {
   toNeutralJid(jid: string): string;
   toEngineJid(jid: string): string;
   normalizedSelfJid(): string;
+  listChats?(): ChatSummary[];
 }
 
 /**
@@ -102,6 +104,10 @@ const MEMBERSHIP_REQUEST_METHODS: readonly GroupMembershipRequestMethod[] = [
 ];
 
 export class BaileysGroups {
+  private cachedGroups: Group[] | null = null;
+  private cachedGroupsAt = 0;
+  private inFlightFetch: Promise<Group[]> | null = null;
+
   constructor(
     private readonly host: BaileysGroupsHost,
     private readonly queryBudgetMs: number = BAILEYS_QUERY_BUDGET_MS,
@@ -124,16 +130,82 @@ export class BaileysGroups {
 
   async getGroups(): Promise<Group[]> {
     this.host.ensureReady();
-    // groupFetchAllParticipating yields {} for BOTH an unanswered query and an account with no
-    // groups, so the empty list carries no signal — only our own clock separates them, and an
-    // empty list is the shape a caller is least able to question.
-    const all = await withQueryDeadline(
-      this.sock().groupFetchAllParticipating(),
-      this.queryBudgetMs,
-      'WhatsApp did not answer the group list query in time',
-    );
-    const self = this.host.normalizedSelfJid();
-    return Object.values(all).map(metadata => mapBaileysGroup(metadata, self, jid => this.host.toNeutralJid(jid)));
+
+    const now = Date.now();
+    // 60-second in-memory cache to prevent WhatsApp 'rate-overlimit' (429) bans
+    if (this.cachedGroups && now - this.cachedGroupsAt < 60_000) {
+      return this.cachedGroups;
+    }
+
+    if (this.inFlightFetch) {
+      return this.inFlightFetch;
+    }
+
+    this.inFlightFetch = (async () => {
+      try {
+        const all = await withQueryDeadline(
+          this.sock().groupFetchAllParticipating(),
+          this.queryBudgetMs,
+          'WhatsApp did not answer the group list query in time',
+        );
+        const self = this.host.normalizedSelfJid();
+        const mapped = Object.values(all).map(metadata =>
+          mapBaileysGroup(metadata, self, jid => this.host.toNeutralJid(jid)),
+        );
+        this.cachedGroups = mapped;
+        this.cachedGroupsAt = Date.now();
+        return mapped;
+      } catch (err: any) {
+        const errMsg = err?.message || String(err);
+        const isRateLimit = errMsg.includes('rate-overlimit') || err?.data === 429;
+
+        // If WhatsApp rate-limits group queries, return cached groups if available
+        if (this.cachedGroups && this.cachedGroups.length > 0) {
+          this.host.logger?.warn(
+            `WhatsApp groupFetchAllParticipating rate-limited (${errMsg}). Returning ${this.cachedGroups.length} cached groups.`,
+          );
+          return this.cachedGroups;
+        }
+
+        // If no cached groups yet, fallback to group chats found in session store
+        if (typeof this.host.listChats === 'function') {
+          try {
+            const chats = this.host.listChats();
+            const fallbackGroups: Group[] = chats
+              .filter(c => c.isGroup)
+              .map(c => ({
+                id: c.id,
+                name: c.name || c.id,
+                participants: [],
+              }));
+
+            if (fallbackGroups.length > 0) {
+              this.host.logger?.warn(
+                `WhatsApp groupFetchAllParticipating rate-limited (${errMsg}). Recovered ${fallbackGroups.length} groups from session chat store.`,
+              );
+              this.cachedGroups = fallbackGroups;
+              this.cachedGroupsAt = Date.now();
+              return fallbackGroups;
+            }
+          } catch {
+            // ignore fallback error
+          }
+        }
+
+        if (isRateLimit) {
+          this.host.logger?.warn(
+            `WhatsApp group query rate-limited with no cached groups. Returning empty list gracefully.`,
+          );
+          return [];
+        }
+
+        throw err;
+      } finally {
+        this.inFlightFetch = null;
+      }
+    })();
+
+    return this.inFlightFetch;
   }
 
   async getGroupInfo(groupId: string): Promise<GroupInfo | null> {

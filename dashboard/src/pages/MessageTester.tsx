@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type ChangeEvent } from 'react';
+import { useState, useEffect, useRef, useMemo, type ChangeEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Send, CheckCircle, XCircle, Loader2, Upload, X, Plus, Trash2, Clock, Link as LinkIcon, Calendar } from 'lucide-react';
 import {
@@ -574,6 +574,26 @@ export function MessageTester() {
   const { data: groups = [], refetch: refetchGroups, isLoading: loadingGroups } = useSessionGroupsQuery(session, true);
   const { data: templates = [] } = useTemplatesQuery(session || 'default', true);
 
+  const allKnownGroups = useMemo(() => {
+    const map = new Map<string, { id: string; name: string }>();
+    for (const g of groups || []) {
+      if (g && g.id) {
+        map.set(g.id, { id: g.id, name: g.name || g.id });
+      }
+    }
+    for (const tag of groupTags || []) {
+      if (tag && tag.groupIds) {
+        for (const gid of tag.groupIds) {
+          if (!map.has(gid)) {
+            const metaName = (tag as any).groupMetadata?.[gid];
+            map.set(gid, { id: gid, name: metaName || gid });
+          }
+        }
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+  }, [groups, groupTags]);
+
   useEffect(() => {
     if (sessions.length > 0 && !session) {
       setSession(sessions[0].id);
@@ -587,13 +607,14 @@ export function MessageTester() {
   }, [session]);
 
   useEffect(() => {
-    if (groups.length > 0 && !selectedGroup) {
-      setSelectedGroup(groups[0].id);
+    const activeList = groups.length > 0 ? groups : allKnownGroups;
+    if (activeList.length > 0 && !selectedGroup) {
+      setSelectedGroup(activeList[0].id);
     }
     if (recipientType !== 'group') {
       setSelectedGroup('');
     }
-  }, [groups, selectedGroup, recipientType]);
+  }, [groups, allKnownGroups, selectedGroup, recipientType]);
 
   const stopBatchPolling = () => {
     if (batchPollRef.current) {
@@ -1040,15 +1061,17 @@ export function MessageTester() {
                     <select
                       value={selectedGroup}
                       onChange={e => setSelectedGroup(e.target.value)}
-                      disabled={loadingGroups || groups.length === 0}
+                      disabled={loadingGroups || (groups.length === 0 && allKnownGroups.length === 0)}
                     >
-                      {loadingGroups && <option value="">{t('messageTester.loadingGroups')}</option>}
-                      {!loadingGroups && groups.length === 0 && (
+                      {loadingGroups && groups.length === 0 && allKnownGroups.length === 0 && (
+                        <option value="">{t('messageTester.loadingGroups')}</option>
+                      )}
+                      {!loadingGroups && groups.length === 0 && allKnownGroups.length === 0 && (
                         <option value="">{t('messageTester.noGroupsFound')}</option>
                       )}
-                      {groups.map(g => (
+                      {(groups.length > 0 ? groups : allKnownGroups).map(g => (
                         <option key={g.id} value={g.id}>
-                          {g.name}
+                          {g.name || g.id}
                         </option>
                       ))}
                     </select>
@@ -1601,21 +1624,27 @@ export function MessageTester() {
                           return;
                         }
                         try {
-                          const res = await refetchGroups();
-                          const activeGroups = res.data || [];
-                          if (activeGroups.length === 0) {
+                          let activeGroups: any[] = [];
+                          try {
+                            const res = await refetchGroups();
+                            activeGroups = res.data || [];
+                          } catch {
+                            // ignore fetch error and use allKnownGroups
+                          }
+                          const finalGroups = activeGroups.length > 0 ? activeGroups : allKnownGroups;
+                          if (finalGroups.length === 0) {
                             setToast({ type: 'info', message: 'WhatsApp está sincronizando tus chats en el servidor. Aguarda unos 5 a 10 segundos y vuelve a presionar el botón.' });
                             return;
                           }
-                          const allGroupIds = activeGroups.map((g: any) => g.id).join('\n');
+                          const allGroupIds = finalGroups.map((g: any) => g.id).join('\n');
                           setBulkRecipients(allGroupIds);
-                          setToast({ type: 'success', message: `✨ ¡Se cargaron con éxito los ${activeGroups.length} grupos de tu cuenta!` });
+                          setToast({ type: 'success', message: `✨ ¡Se cargaron con éxito los ${finalGroups.length} grupos de tu cuenta!` });
                         } catch (err) {
                           setToast({ type: 'error', message: 'WhatsApp se está sincronizando en el servidor. Aguarda unos segundos y vuelve a presionar.' });
                         }
                       }}
                     >
-                      👥 Cargar todos mis grupos ({groups.length})
+                      👥 Cargar todos mis grupos ({Math.max(groups.length, allKnownGroups.length)})
                     </button>
                     <button
                       type="button"
@@ -1638,9 +1667,15 @@ export function MessageTester() {
                           return;
                         }
                         try {
-                          const res = await refetchGroups();
-                          const latestGroups = res.data || [];
-                          if (latestGroups.length === 0) {
+                          let latestGroups: any[] = [];
+                          try {
+                            const res = await refetchGroups();
+                            latestGroups = res.data || [];
+                          } catch {
+                            // ignore
+                          }
+                          const effectiveLatest = latestGroups.length > 0 ? latestGroups : allKnownGroups;
+                          if (effectiveLatest.length === 0) {
                             setToast({ type: 'info', message: 'WhatsApp se está sincronizando. Aguarda unos segundos y vuelve a intentar.' });
                             setNewGroupsFound([]);
                             return;
@@ -1649,7 +1684,7 @@ export function MessageTester() {
                           const currentTextRecipients = new Set(parseBulkRecipients(bulkRecipients));
                           
                           // Filter groups that are NOT currently in the textarea
-                          const diffGroups = latestGroups.filter((g: any) => !currentTextRecipients.has(g.id));
+                          const diffGroups = effectiveLatest.filter((g: any) => !currentTextRecipients.has(g.id));
                           
                           if (diffGroups.length > 0) {
                             setNewGroupsFound(diffGroups);
@@ -1661,7 +1696,7 @@ export function MessageTester() {
                             setNewGroupsFound([]);
                             setToast({
                               type: 'info',
-                              message: `No hay grupos nuevos por agregar. Todos los ${latestGroups.length} grupos ya están en tu lista.`,
+                              message: `No hay grupos nuevos por agregar. Todos los ${effectiveLatest.length} grupos ya están en tu lista.`,
                             });
                           }
                         } catch (err: any) {
@@ -2416,6 +2451,8 @@ export function MessageTester() {
         groupTags={groupTags}
         groupSearchQuery={groupSearchQuery}
         setGroupSearchQuery={setGroupSearchQuery}
+        onRefresh={() => refetchGroups()}
+        isLoading={loadingGroups}
         onSaved={(tagName, count) => {
           loadGroupTags();
           setNewTagName('');

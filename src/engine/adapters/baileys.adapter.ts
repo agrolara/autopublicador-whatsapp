@@ -153,6 +153,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
       toNeutralJid: jid => this.sessionStore.toNeutralJid(jid),
       toEngineJid: jid => this.sessionStore.toEngineJid(jid),
       normalizedSelfJid: () => this.normalizedSelfJid(),
+      listChats: () => this.sessionStore.listChats(),
     });
     this.messaging = new BaileysMessaging({
       ensureReady: () => this.ensureReady(),

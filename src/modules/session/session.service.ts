@@ -502,13 +502,33 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       throw new BadRequestException('Session is not started');
     }
 
-    const groups = await engine.getGroups();
-    const mapped = groups.map(g => ({
-      id: g.id,
-      name: g.name,
-      linkedParentJID: g.linkedParentJID,
-    }));
-    return paginate(mapped, opts.limit, opts.offset);
+    try {
+      const groups = await engine.getGroups();
+      const mapped = groups.map(g => ({
+        id: g.id,
+        name: g.name,
+        linkedParentJID: g.linkedParentJID,
+      }));
+      return paginate(mapped, opts.limit, opts.offset);
+    } catch (err: any) {
+      this.logger.warn(`Failed to fetch groups directly for session ${id}: ${err?.message}`);
+      try {
+        const chats = await engine.getChats();
+        const groupChats = chats
+          .filter(c => c.isGroup)
+          .map(c => ({
+            id: c.id,
+            name: c.name || c.id,
+            linkedParentJID: null,
+          }));
+        if (groupChats.length > 0) {
+          return paginate(groupChats, opts.limit, opts.offset);
+        }
+      } catch {
+        // ignore
+      }
+      return [];
+    }
   }
 
   async getChats(id: string, opts: ListOptions = {}): Promise<ChatSummary[]> {
