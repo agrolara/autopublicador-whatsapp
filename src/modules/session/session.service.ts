@@ -100,15 +100,20 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       SessionStatus.QR_READY,
       SessionStatus.AUTHENTICATING,
       SessionStatus.ACTION_REQUIRED,
+      SessionStatus.FAILED,
     ];
 
     // Clear any stale node leases from prior dead containers so they never lock out this instance
     try {
-      await this.sessionRepository.update({}, {
-        nodeId: null,
-        claimedAt: null,
-        leaseExpiresAt: null,
-      });
+      await this.sessionRepository
+        .createQueryBuilder()
+        .update(Session)
+        .set({
+          nodeId: null,
+          claimedAt: null,
+          leaseExpiresAt: null,
+        })
+        .execute();
     } catch {
       // Ignored if columns not present
     }
@@ -158,6 +163,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
         { status: SessionStatus.DISCONNECTED },
         { status: SessionStatus.INITIALIZING },
         { status: SessionStatus.AUTHENTICATING },
+        { status: SessionStatus.FAILED },
       ],
     });
 
@@ -169,6 +175,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
           { status: SessionStatus.DISCONNECTED },
           { status: SessionStatus.INITIALIZING },
           { status: SessionStatus.AUTHENTICATING },
+          { status: SessionStatus.FAILED },
         ],
       });
     }
