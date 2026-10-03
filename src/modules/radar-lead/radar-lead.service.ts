@@ -472,7 +472,7 @@ export class RadarLeadService implements OnModuleInit {
 
         await this.clientsRepo.query(`
           CREATE TABLE IF NOT EXISTS radar_clients (
-            id VARCHAR(36) PRIMARY KEY,
+            id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid()::text,
             name VARCHAR(128) NOT NULL,
             "rubroKey" VARCHAR(64) NOT NULL,
             "targetPhone" VARCHAR(32) NOT NULL,
@@ -496,7 +496,7 @@ export class RadarLeadService implements OnModuleInit {
         if (this.logsRepo) {
           await this.logsRepo.query(`
             CREATE TABLE IF NOT EXISTS radar_lead_logs (
-              id VARCHAR(36) PRIMARY KEY,
+              id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid()::text,
               "clientId" VARCHAR(64),
               "clientName" VARCHAR(128) NOT NULL,
               "rubroKey" VARCHAR(64) NOT NULL DEFAULT '',
@@ -1238,6 +1238,7 @@ export class RadarLeadService implements OnModuleInit {
 
   async createClient(dto: CreateRadarClientDto): Promise<RadarClient> {
     const client = this.clientsRepo.create({
+      id: crypto.randomUUID ? crypto.randomUUID() : undefined,
       name: dto.name,
       rubroKey: dto.rubroKey,
       targetPhone: dto.targetPhone,
