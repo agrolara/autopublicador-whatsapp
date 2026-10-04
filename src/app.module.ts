@@ -288,17 +288,17 @@ if (dashboardServingEnabled && dashboardBuildPresent) {
           {
             name: 'short',
             ttl: configService.get<number>('api.rateLimit.shortTtl', 1000),
-            limit: configService.get<number>('api.rateLimit.shortLimit', 10),
+            limit: configService.get<number>('api.rateLimit.shortLimit', 60),
           },
           {
             name: 'medium',
             ttl: configService.get<number>('api.rateLimit.mediumTtl', 60000),
-            limit: configService.get<number>('api.rateLimit.mediumLimit', 100),
+            limit: configService.get<number>('api.rateLimit.mediumLimit', 600),
           },
           {
             name: 'long',
             ttl: configService.get<number>('api.rateLimit.longTtl', 3600000),
-            limit: configService.get<number>('api.rateLimit.longLimit', 1000),
+            limit: configService.get<number>('api.rateLimit.longLimit', 5000),
           },
         ];
         // Fail-open on Redis error (see RedisThrottlerStorage), so a Redis outage never blocks the

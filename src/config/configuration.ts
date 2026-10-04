@@ -266,15 +266,15 @@ export default () => ({
   // API configuration
   api: {
     rateLimit: {
-      // Short burst protection: 10 requests per second
+      // Short burst protection: 60 requests per second
       shortTtl: parseInt(process.env.RATE_LIMIT_SHORT_TTL || '1000', 10),
-      shortLimit: parseInt(process.env.RATE_LIMIT_SHORT_LIMIT || '10', 10),
-      // Medium protection: 100 requests per minute
+      shortLimit: parseInt(process.env.RATE_LIMIT_SHORT_LIMIT || '60', 10),
+      // Medium protection: 600 requests per minute
       mediumTtl: parseInt(process.env.RATE_LIMIT_MEDIUM_TTL || '60000', 10),
-      mediumLimit: parseInt(process.env.RATE_LIMIT_MEDIUM_LIMIT || '100', 10),
-      // Long protection: 1000 requests per hour
+      mediumLimit: parseInt(process.env.RATE_LIMIT_MEDIUM_LIMIT || '600', 10),
+      // Long protection: 5000 requests per hour
       longTtl: parseInt(process.env.RATE_LIMIT_LONG_TTL || '3600000', 10),
-      longLimit: parseInt(process.env.RATE_LIMIT_LONG_LIMIT || '1000', 10),
+      longLimit: parseInt(process.env.RATE_LIMIT_LONG_LIMIT || '5000', 10),
     },
   },
 
