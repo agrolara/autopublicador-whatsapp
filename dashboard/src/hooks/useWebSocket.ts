@@ -24,6 +24,7 @@ interface MessageAckEvent {
   sessionId: string;
   id: string;
   messageId: string;
+  chatId?: string;
   // Neutral delivery status emitted by the backend (engine-agnostic), not a raw wwebjs ack integer.
   status: 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
   // Deprecated legacy numeric ack kept for backward compatibility; prefer `status`.
@@ -145,6 +146,8 @@ warnIfInsecureHttpUrl(SOCKET_URL, 'VITE_WS_URL');
 
 export function useWebSocket(events: WebSocketEvents = {}) {
   const socketRef = useRef<Socket | null>(null);
+  const eventsRef = useRef(events);
+  eventsRef.current = events;
   const [isConnected, setIsConnected] = useState(false);
   // True when the connection is dead until the user retries: Socket.IO either exhausted its
   // reconnection attempts, or the server itself closed the socket (rate limit, auth rejection,
@@ -152,6 +155,101 @@ export function useWebSocket(events: WebSocketEvents = {}) {
   // `reconnect_failed` never fires). Lets the UI show a "connection lost" indicator + a manual
   // retry instead of silently going stale.
   const [connectionFailed, setConnectionFailed] = useState(false);
+
+  const handleIncomingMessage = useCallback(
+    (msg: ServerEventEnvelope | ServerAckFrame | ServerErrorFrame) => {
+      if (!msg || typeof msg.type !== 'string') return;
+
+      if (msg.type === 'error') {
+        eventsRef.current.onServerError?.({ code: String(msg.code ?? ''), message: String(msg.message ?? '') });
+        return;
+      }
+      if (msg.type === 'subscribed') {
+        eventsRef.current.onSubscribed?.({
+          sessionId: String(msg.sessionId ?? ''),
+          events: Array.isArray(msg.events) ? msg.events : [],
+        });
+        return;
+      }
+      if (msg.type !== 'event' || !msg.payload) return;
+
+      const { event, sessionId, data } = msg.payload;
+
+      switch (event) {
+        case 'session.status':
+          eventsRef.current.onSessionStatus?.({ sessionId, status: String(data.status), timestamp: msg.timestamp });
+          break;
+        case 'session.qr':
+          eventsRef.current.onQRCode?.({ sessionId, qrCode: String(data.qrCode), timestamp: msg.timestamp });
+          break;
+        case 'message.received':
+        case 'message.sent':
+          eventsRef.current.onMessage?.({ sessionId, message: data, timestamp: msg.timestamp });
+          break;
+        case 'status.received':
+          eventsRef.current.onStatusReceived?.({ sessionId, timestamp: msg.timestamp });
+          break;
+        case 'session.restriction':
+          eventsRef.current.onSessionRestriction?.({ sessionId, timestamp: msg.timestamp });
+          break;
+        case 'message.ack':
+          eventsRef.current.onMessageAck?.({
+            sessionId,
+            id: String(data.id),
+            messageId: String(data.messageId),
+            chatId: typeof data.chatId === 'string' ? data.chatId : undefined,
+            status: data.status as MessageAckEvent['status'],
+            ack: typeof data.ack === 'number' ? data.ack : undefined,
+            timestamp: msg.timestamp,
+          });
+          break;
+        case 'message.reaction':
+          eventsRef.current.onMessageReaction?.({
+            sessionId,
+            messageId: String(data.messageId),
+            chatId: String(data.chatId),
+            reaction: String(data.reaction),
+            senderId: String(data.senderId),
+            reactions: data.reactions as Record<string, string> | undefined,
+            timestamp: msg.timestamp,
+          });
+          break;
+        case 'message.revoked':
+          eventsRef.current.onMessageRevoked?.({
+            sessionId,
+            id: String(data.id),
+            revokedId: typeof data.revokedId === 'string' ? data.revokedId : undefined,
+            chatId: String(data.chatId),
+            from: String(data.from),
+            to: String(data.to),
+            body: String(data.body ?? ''),
+            type: String(data.type),
+            timestamp: Number(data.timestamp),
+          });
+          break;
+        case 'message.edited':
+          if (
+            typeof data.messageId !== 'string' ||
+            !data.messageId ||
+            typeof data.chatId !== 'string' ||
+            typeof data.body !== 'string'
+          ) {
+            break;
+          }
+          eventsRef.current.onMessageEdited?.({
+            sessionId,
+            messageId: data.messageId,
+            chatId: data.chatId,
+            body: data.body,
+            timestamp: Number(data.timestamp),
+          });
+          break;
+        default:
+          break;
+      }
+    },
+    [],
+  );
 
   const connect = useCallback(() => {
     if (socketRef.current?.connected) return;
@@ -164,13 +262,11 @@ export function useWebSocket(events: WebSocketEvents = {}) {
       return;
     }
 
-    socketRef.current = io(`${SOCKET_URL}/events`, {
+    const socket = io(`${SOCKET_URL}/events`, {
       autoConnect: true,
       reconnection: true,
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
-      // Send the key via `auth` (and a header for proxies). NOT via `query` — a key in the
-      // handshake URL leaks into access logs / Referer. The gateway reads auth first.
       auth: {
         apiKey,
       },
@@ -178,34 +274,31 @@ export function useWebSocket(events: WebSocketEvents = {}) {
         'X-API-Key': apiKey,
       },
     });
+    socketRef.current = socket;
 
-    socketRef.current.on('connect', () => {
+    socket.on('connect', () => {
       setIsConnected(true);
       setConnectionFailed(false);
     });
 
-    socketRef.current.on('disconnect', reason => {
+    socket.on('disconnect', reason => {
       setIsConnected(false);
-      // A server-initiated close (handshake rate limit, auth rejection, key eviction) sets
-      // Socket.IO's skipReconnect: no auto-reconnect runs, so `reconnect_failed` never fires
-      // and without this the tab would silently stop receiving events. Surface the same
-      // recoverable failure state — the banner's manual retry opens a fresh socket, which
-      // skipReconnect does not block.
       if (reason === 'io server disconnect') {
         setConnectionFailed(true);
       }
     });
 
-    socketRef.current.on('connect_error', error => {
+    socket.on('connect_error', error => {
       console.warn('[WebSocket] Connection error:', error.message);
     });
 
-    // `reconnect_failed` is emitted on the Manager once all reconnectionAttempts are exhausted.
-    socketRef.current.io.on('reconnect_failed', () => {
+    socket.io.on('reconnect_failed', () => {
       console.warn('[WebSocket] Reconnection failed after max attempts');
       setConnectionFailed(true);
     });
-  }, []);
+
+    socket.on('message', handleIncomingMessage);
+  }, [handleIncomingMessage]);
 
   // Manual retry after the socket permanently gave up: tear down the dead socket and reconnect.
   const reconnect = useCallback(() => {
@@ -246,116 +339,6 @@ export function useWebSocket(events: WebSocketEvents = {}) {
       }
     };
   }, [connect]);
-
-  // Register the single envelope handler and fan out to the typed callbacks.
-  useEffect(() => {
-    if (!socketRef.current) return;
-
-    const socket = socketRef.current;
-
-    const handleIncomingMessage = (msg: ServerEventEnvelope | ServerAckFrame | ServerErrorFrame) => {
-      if (!msg || typeof msg.type !== 'string') return;
-
-      if (msg.type === 'error') {
-        events.onServerError?.({ code: String(msg.code ?? ''), message: String(msg.message ?? '') });
-        return;
-      }
-      if (msg.type === 'subscribed') {
-        events.onSubscribed?.({
-          sessionId: String(msg.sessionId ?? ''),
-          events: Array.isArray(msg.events) ? msg.events : [],
-        });
-        return;
-      }
-      if (msg.type !== 'event' || !msg.payload) return;
-
-      const { event, sessionId, data } = msg.payload;
-
-      switch (event) {
-        case 'session.status':
-          events.onSessionStatus?.({ sessionId, status: String(data.status), timestamp: msg.timestamp });
-          break;
-        case 'session.qr':
-          events.onQRCode?.({ sessionId, qrCode: String(data.qrCode), timestamp: msg.timestamp });
-          break;
-        case 'message.received':
-        case 'message.sent':
-          events.onMessage?.({ sessionId, message: data, timestamp: msg.timestamp });
-          break;
-        case 'status.received':
-          events.onStatusReceived?.({ sessionId, timestamp: msg.timestamp });
-          break;
-        case 'session.restriction':
-          events.onSessionRestriction?.({ sessionId, timestamp: msg.timestamp });
-          break;
-        case 'message.ack':
-          events.onMessageAck?.({
-            sessionId,
-            id: String(data.id),
-            messageId: String(data.messageId),
-            status: data.status as MessageAckEvent['status'],
-            ack: typeof data.ack === 'number' ? data.ack : undefined,
-            timestamp: msg.timestamp,
-          });
-          break;
-        case 'message.reaction':
-          events.onMessageReaction?.({
-            sessionId,
-            messageId: String(data.messageId),
-            chatId: String(data.chatId),
-            reaction: String(data.reaction),
-            senderId: String(data.senderId),
-            // Carried through as-is, including absent: `|| {}` here would tell every consumer that
-            // the message has no reactions left, which is a different claim from "we do not know".
-            reactions: data.reactions as Record<string, string> | undefined,
-            timestamp: msg.timestamp,
-          });
-          break;
-        case 'message.revoked':
-          events.onMessageRevoked?.({
-            sessionId,
-            id: String(data.id),
-            // Not String()-coerced like its neighbours: the field is optional on the wire, and
-            // String(undefined) would yield the truthy literal "undefined" and defeat the fallback.
-            revokedId: typeof data.revokedId === 'string' ? data.revokedId : undefined,
-            chatId: String(data.chatId),
-            from: String(data.from),
-            to: String(data.to),
-            body: String(data.body ?? ''),
-            type: String(data.type),
-            timestamp: Number(data.timestamp),
-          });
-          break;
-        case 'message.edited':
-          // Keep optional/malformed wire fields from becoming the truthy strings "undefined"/"null"
-          // and accidentally matching an unrelated cached row.
-          if (
-            typeof data.messageId !== 'string' ||
-            !data.messageId ||
-            typeof data.chatId !== 'string' ||
-            typeof data.body !== 'string'
-          ) {
-            break;
-          }
-          events.onMessageEdited?.({
-            sessionId,
-            messageId: data.messageId,
-            chatId: data.chatId,
-            body: data.body,
-            timestamp: Number(data.timestamp),
-          });
-          break;
-        default:
-          break;
-      }
-    };
-
-    socket.on('message', handleIncomingMessage);
-
-    return () => {
-      socket.off('message', handleIncomingMessage);
-    };
-  }, [events]);
 
   return { isConnected, connectionFailed, reconnect, subscribe, unsubscribe };
 }

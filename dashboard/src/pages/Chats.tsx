@@ -392,8 +392,24 @@ export function Chats() {
   );
 
   const handleIncomingMessageAck = useCallback(
-    (event: { sessionId: string; messageId: string; status: ChatMessageView['status'] }) => {
+    (event: { sessionId: string; messageId: string; status: ChatMessageView['status']; chatId?: string }) => {
       if (event.sessionId !== selectedSessionId) return;
+
+      if (event.chatId) {
+        const key = messagesQueryKey(event.sessionId, event.chatId);
+        const list = queryClient.getQueryData<ChatMessageView[]>(key);
+        if (list) {
+          const idx = list.findIndex(m => m.id === event.messageId || m.waMessageId === event.messageId);
+          if (idx !== -1) {
+            const target = list[idx];
+            const nextStatus = mergeDeliveryStatus(target.status, event.status) ?? target.status;
+            const next = list.slice();
+            next[idx] = { ...target, status: nextStatus };
+            queryClient.setQueryData(key, next);
+            return;
+          }
+        }
+      }
 
       // Acks can arrive for any cached chat under this session. Walk every cache entry under
       // ['messages', event.sessionId, *] and apply the forward-only delivery merge in place.
@@ -417,8 +433,29 @@ export function Chats() {
   );
 
   const handleIncomingMessageReaction = useCallback(
-    (event: { sessionId: string; messageId: string; reactions?: Record<string, string> }) => {
+    (event: { sessionId: string; messageId: string; chatId?: string; reactions?: Record<string, string> }) => {
       if (event.sessionId !== selectedSessionId) return;
+
+      if (event.chatId) {
+        const key = messagesQueryKey(event.sessionId, event.chatId);
+        const list = queryClient.getQueryData<ChatMessageView[]>(key);
+        if (list) {
+          const idx = list.findIndex(m => m.id === event.messageId || m.waMessageId === event.messageId);
+          if (idx !== -1) {
+            const target = list[idx];
+            const next = list.slice();
+            next[idx] = {
+              ...target,
+              metadata: {
+                ...(target.metadata || {}),
+                reactions: mergeReactionSnapshot(target.metadata?.reactions, event.reactions),
+              },
+            };
+            queryClient.setQueryData(key, next);
+            return;
+          }
+        }
+      }
 
       // Reactions update `metadata.reactions` while preserving `metadata.media` / `metadata.quotedMessage`,
       // so we must read the prior message and deep-merge — `updateMessage`'s shallow merge would clobber
@@ -449,8 +486,23 @@ export function Chats() {
   );
 
   const handleIncomingMessageRevoked = useCallback(
-    (event: { sessionId: string; id: string; revokedId?: string; type: string }) => {
+    (event: { sessionId: string; id: string; revokedId?: string; chatId?: string; type: string }) => {
       if (event.sessionId !== selectedSessionId) return;
+
+      if (event.chatId) {
+        const key = messagesQueryKey(event.sessionId, event.chatId);
+        const list = queryClient.getQueryData<ChatMessageView[]>(key);
+        if (list) {
+          const idx = findRevokedIndex(list, event);
+          if (idx !== -1) {
+            const target = list[idx];
+            const next = list.slice();
+            next[idx] = { ...target, body: '', type: asMessageType(event.type) };
+            queryClient.setQueryData(key, next);
+            return;
+          }
+        }
+      }
 
       // Walk every cached chat under this session, find the deleted message and zero it — the
       // backend emits an empty body; the localized "deleted" label is rendered below. Matching is
@@ -475,24 +527,42 @@ export function Chats() {
     (event: { sessionId: string; messageId: string; chatId: string; body: string }) => {
       if (event.sessionId !== selectedSessionId) return;
 
-      const caches = queryClient.getQueriesData<ChatMessageView[]>({
-        queryKey: ['messages', event.sessionId],
-      });
       let matchedCachedMessage = false;
       let editedLastMessage = false;
-      for (const [key, list] of caches) {
-        if (!list) continue;
-        const next = applyMessageEdit(list, event);
-        if (next === list) continue;
-        matchedCachedMessage = true;
-        queryClient.setQueryData(key, next);
 
-        // Message caches are chronological; only editing the final row changes the sidebar preview.
-        // Confirm the cache belongs to the event chat before touching that summary.
-        const cachedChatId = Array.isArray(key) && typeof key[2] === 'string' ? key[2] : undefined;
-        const editedIndex = list.findIndex(m => m.id === event.messageId || m.waMessageId === event.messageId);
-        if (cachedChatId === event.chatId && editedIndex === list.length - 1) editedLastMessage = true;
+      if (event.chatId) {
+        const key = messagesQueryKey(event.sessionId, event.chatId);
+        const list = queryClient.getQueryData<ChatMessageView[]>(key);
+        if (list) {
+          const next = applyMessageEdit(list, event);
+          if (next !== list) {
+            matchedCachedMessage = true;
+            queryClient.setQueryData(key, next);
+            const editedIndex = list.findIndex(m => m.id === event.messageId || m.waMessageId === event.messageId);
+            if (editedIndex === list.length - 1) editedLastMessage = true;
+          }
+        }
       }
+
+      if (!matchedCachedMessage) {
+        const caches = queryClient.getQueriesData<ChatMessageView[]>({
+          queryKey: ['messages', event.sessionId],
+        });
+        for (const [key, list] of caches) {
+          if (!list) continue;
+          const next = applyMessageEdit(list, event);
+          if (next === list) continue;
+          matchedCachedMessage = true;
+          queryClient.setQueryData(key, next);
+
+          // Message caches are chronological; only editing the final row changes the sidebar preview.
+          // Confirm the cache belongs to the event chat before touching that summary.
+          const cachedChatId = Array.isArray(key) && typeof key[2] === 'string' ? key[2] : undefined;
+          const editedIndex = list.findIndex(m => m.id === event.messageId || m.waMessageId === event.messageId);
+          if (cachedChatId === event.chatId && editedIndex === list.length - 1) editedLastMessage = true;
+        }
+      }
+
       if (editedLastMessage) {
         setChats(previous =>
           previous.map(chat => (chat.id === event.chatId ? { ...chat, lastMessage: event.body } : chat)),
@@ -517,14 +587,26 @@ export function Chats() {
     [queryClient],
   );
 
-  const { isConnected, connectionFailed, reconnect, subscribe, unsubscribe } = useWebSocket({
-    onMessage: handleIncomingMessage,
-    onMessageAck: handleIncomingMessageAck,
-    onMessageReaction: handleIncomingMessageReaction,
-    onMessageRevoked: handleIncomingMessageRevoked,
-    onMessageEdited: handleIncomingMessageEdited,
-    onStatusReceived: handleStatusReceived,
-  });
+  const wsEvents = useMemo(
+    () => ({
+      onMessage: handleIncomingMessage,
+      onMessageAck: handleIncomingMessageAck,
+      onMessageReaction: handleIncomingMessageReaction,
+      onMessageRevoked: handleIncomingMessageRevoked,
+      onMessageEdited: handleIncomingMessageEdited,
+      onStatusReceived: handleStatusReceived,
+    }),
+    [
+      handleIncomingMessage,
+      handleIncomingMessageAck,
+      handleIncomingMessageReaction,
+      handleIncomingMessageRevoked,
+      handleIncomingMessageEdited,
+      handleStatusReceived,
+    ],
+  );
+
+  const { isConnected, connectionFailed, reconnect, subscribe, unsubscribe } = useWebSocket(wsEvents);
 
   // A transient WebSocket gap means message.received/ack/revoke events were missed, and the chat
   // cache uses staleTime: Infinity so it won't refetch on its own. On a reconnect (isConnected

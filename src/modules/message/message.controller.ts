@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Put, Patch, Delete, Param, Body, Query, Res, HttpCode, HttpStatus, StreamableFile } from '@nestjs/common';
+import { Controller, Post, Get, Put, Patch, Delete, Param, Body, Query, Headers, Res, HttpCode, HttpStatus, StreamableFile } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery, ApiBody } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { MessageService } from './message.service';
@@ -766,16 +766,24 @@ export class MessageController {
     @Body() dto: { base64: string; mimetype?: string; filename?: string },
   ) {
     const filename = await this.messageService.saveTempMedia(dto);
+    const token = this.messageService.generateMediaToken(filename);
     const port = process.env.PORT || '2785';
     const baseUrl = process.env.PUBLIC_URL || `http://127.0.0.1:${port}`;
-    const fileUrl = `${baseUrl}/api/sessions/${sessionId}/messages/media-file/${filename}`;
-    return { url: fileUrl, filename };
+    const fileUrl = `${baseUrl}/api/sessions/${sessionId}/messages/media-file/${filename}?token=${token}`;
+    return { url: fileUrl, filename, token };
   }
 
   @Get('media-file/:filename')
   @Public()
   @ApiOperation({ summary: 'Get temp media file for bulk send or scheduled campaigns' })
-  getMediaFile(@Param('filename') filename: string, @Res() res: Response) {
+  @ApiQuery({ name: 'token', required: false, description: 'Signed time-limited HMAC token for public access' })
+  getMediaFile(
+    @Param('filename') filename: string,
+    @Query('token') token: string | undefined,
+    @Headers('x-api-key') apiKey: string | undefined,
+    @Res() res: Response,
+  ) {
+    this.messageService.verifyMediaAccess(filename, token, apiKey);
     const filePath = this.messageService.getTempMediaPath(filename);
     res.sendFile(filePath);
   }

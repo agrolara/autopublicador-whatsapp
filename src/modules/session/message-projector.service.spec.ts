@@ -509,6 +509,19 @@ describe('MessageProjector (inbound projection)', () => {
         expect(webhookService.dispatch).toHaveBeenCalledWith(SESSION_ID, 'message.received', expect.anything());
         expect(eventsGateway.emitMessage).toHaveBeenCalledWith(SESSION_ID, expect.anything());
       });
+
+      it('throttles lastActiveAt updates to at most once per 30 seconds per session', async () => {
+        const engine = makeEngine();
+        engines.set(SESSION_ID, engine);
+
+        projector.handleInboundMessage(SESSION_ID, engine, makeIncoming({ id: 'msg-1' }));
+        projector.handleInboundMessage(SESSION_ID, engine, makeIncoming({ id: 'msg-2' }));
+        projector.handleInboundMessage(SESSION_ID, engine, makeIncoming({ id: 'msg-3' }));
+        await new Promise(resolve => setImmediate(resolve));
+
+        // 3 messages in rapid succession should only trigger 1 DB update
+        expect(sessionRepository.update).toHaveBeenCalledTimes(1);
+      });
     });
   });
 });

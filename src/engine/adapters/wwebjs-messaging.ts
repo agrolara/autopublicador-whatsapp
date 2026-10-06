@@ -22,6 +22,8 @@ import { buildVCard } from './vcard';
 import { EngineNotSupportedError } from '../../common/errors/engine-not-supported.error';
 import { RecipientUnreachableError } from '../../common/errors/recipient-unreachable.error';
 import { type WwebjsEngineHost } from './wwebjs-host';
+import * as fs from 'fs';
+import * as path from 'path';
 
 /**
  * Map a whatsapp-web.js MessageAck integer to the neutral DeliveryStatus.
@@ -111,6 +113,19 @@ export function isNoLidForUserError(err: unknown): boolean {
  * a label, and nothing branches on it.
  */
 export async function toMessageMedia(media: MediaInput, opts?: { trustDeclaredType?: boolean }): Promise<MessageMedia> {
+  if (typeof media.data === 'string') {
+    const mediaFileMatch = media.data.match(/\/media-file\/([^/?#]+)/i);
+    if (mediaFileMatch) {
+      const filename = path.basename(mediaFileMatch[1]);
+      const localUploadPath = path.join(process.cwd(), 'data', 'uploads', filename);
+      if (fs.existsSync(localUploadPath)) {
+        const buffer = fs.readFileSync(localUploadPath);
+        const ext = path.extname(filename).toLowerCase().replace('.', '');
+        const mime = ext === 'png' ? 'image/png' : ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'mp4' ? 'video/mp4' : media.mimetype;
+        return new MessageMedia(mime || 'application/octet-stream', buffer.toString('base64'), filename);
+      }
+    }
+  }
   if (typeof media.data === 'string' && isHttpUrl(media.data)) {
     const fetched = await loadRemoteMedia(media.data);
     // `loadRemoteMedia` derives both fields from the response (content-type, URL basename) because

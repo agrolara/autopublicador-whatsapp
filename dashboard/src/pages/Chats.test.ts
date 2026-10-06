@@ -132,7 +132,10 @@ function installFetchStub(): void {
     if (method === 'GET' && /\/contacts\/[^/]+\/profile-picture$/.test(path)) {
       return Promise.resolve(jsonResponse({ url: null }));
     }
-    if (method === 'GET' && path === `/api/sessions/${SESSION.id}/contacts`) {
+    if (
+      method === 'GET' &&
+      (path === `/api/sessions/${SESSION.id}/contacts` || path.startsWith(`/api/sessions/${SESSION.id}/contacts?`))
+    ) {
       return Promise.resolve(jsonResponse([CONTACT]));
     }
     if (method === 'GET' && path.startsWith(`/api/sessions/${SESSION.id}/messages?`)) {

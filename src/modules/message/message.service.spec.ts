@@ -1,7 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
-import { BadRequestException, NotFoundException, PayloadTooLargeException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException, PayloadTooLargeException } from '@nestjs/common';
+import * as fs from 'fs';
+import * as path from 'path';
 import { MessageService } from './message.service';
 import { Message, MessageDirection, MessageStatus } from './entities/message.entity';
 import { SessionService } from '../session/session.service';
@@ -1878,6 +1880,76 @@ describe('MessageService', () => {
         buffer: Buffer.from('INLINE'),
         mimetype: 'image/jpeg',
       });
+    });
+  });
+
+  describe('temp media security and lifecycle', () => {
+    const testFile = 'media_12345_test.png';
+
+    it('generates a valid time-limited token', () => {
+      const token = service.generateMediaToken(testFile, 60);
+      expect(typeof token).toBe('string');
+      const parts = token.split('.');
+      expect(parts).toHaveLength(2);
+      const expiresAt = Number(parts[0]);
+      expect(expiresAt).toBeGreaterThan(Date.now());
+      expect(service.verifyMediaToken(testFile, token)).toBe(true);
+    });
+
+    it('rejects tampered, expired, or mismatched tokens', () => {
+      const token = service.generateMediaToken(testFile, 60);
+      // Tampered filename
+      expect(service.verifyMediaToken('media_other.png', token)).toBe(false);
+      // Tampered signature
+      expect(service.verifyMediaToken(testFile, `${token}bad`)).toBe(false);
+      // Expired token (-10 seconds)
+      const expiredToken = service.generateMediaToken(testFile, -10);
+      expect(service.verifyMediaToken(testFile, expiredToken)).toBe(false);
+      // Malformed tokens
+      expect(service.verifyMediaToken(testFile, undefined)).toBe(false);
+      expect(service.verifyMediaToken(testFile, 'invalid')).toBe(false);
+      expect(service.verifyMediaToken(testFile, 'notanumber.sig')).toBe(false);
+    });
+
+    it('verifies media access with valid token or master API key', () => {
+      const token = service.generateMediaToken(testFile, 60);
+      expect(() => service.verifyMediaAccess(testFile, token)).not.toThrow();
+
+      process.env.API_MASTER_KEY = 'master-secret-123';
+      expect(() => service.verifyMediaAccess(testFile, undefined, 'master-secret-123')).not.toThrow();
+
+      expect(() => service.verifyMediaAccess(testFile, 'bad-token', 'wrong-key')).toThrow(ForbiddenException);
+      expect(() => service.verifyMediaAccess(testFile, undefined, undefined)).toThrow(ForbiddenException);
+    });
+
+    it('rejects oversized payload in saveTempMedia', async () => {
+      const prevEnv = process.env.TEMP_MEDIA_MAX_BYTES;
+      process.env.TEMP_MEDIA_MAX_BYTES = '100'; // 100 bytes
+      try {
+        const largeData = Buffer.alloc(200, 'a').toString('base64');
+        await expect(service.saveTempMedia({ base64: largeData, mimetype: 'image/png' })).rejects.toThrow(
+          PayloadTooLargeException,
+        );
+      } finally {
+        if (prevEnv !== undefined) process.env.TEMP_MEDIA_MAX_BYTES = prevEnv;
+        else delete process.env.TEMP_MEDIA_MAX_BYTES;
+      }
+    });
+
+    it('saves temp media and cleans up expired files', async () => {
+      const sample = Buffer.from('hello-world').toString('base64');
+      const filename = await service.saveTempMedia({ base64: sample, mimetype: 'image/png' });
+      expect(filename).toMatch(/^media_\d+_[a-z0-9]+\.png$/);
+
+      const filePath = service.getTempMediaPath(filename);
+      expect(fs.existsSync(filePath)).toBe(true);
+
+      // Verify cleanup of old file
+      const oldTime = Date.now() - 10000;
+      fs.utimesSync(filePath, new Date(oldTime), new Date(oldTime));
+      const deleted = await service.cleanupExpiredTempMedia(5000); // ttl: 5s
+      expect(deleted).toBeGreaterThanOrEqual(1);
+      expect(fs.existsSync(filePath)).toBe(false);
     });
   });
 });

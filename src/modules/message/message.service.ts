@@ -1,6 +1,21 @@
-import { Injectable, BadRequestException, NotFoundException, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+  ForbiddenException,
+  PayloadTooLargeException,
+  Optional,
+} from '@nestjs/common';
+import * as crypto from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
+
+function positiveIntFromEnv(name: string, fallback: number): number {
+  const parsed = Number.parseInt(process.env[name] ?? '', 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
 import { In, Repository } from 'typeorm';
 import { QueryDeepPartialEntity } from 'typeorm';
 import { SessionService } from '../session/session.service';
@@ -1082,25 +1097,116 @@ export class MessageService {
     };
   }
 
+  private lastTempMediaCleanupAt = 0;
+
+  /**
+   * Generates a tamper-proof time-limited HMAC-SHA256 signature token for temp media download.
+   */
+  generateMediaToken(filename: string, ttlMs = 24 * 60 * 60 * 1000): string {
+    const sanitized = path.basename(filename);
+    const expiresAt = Date.now() + ttlMs;
+    const secret = process.env.MEDIA_TOKEN_SECRET || process.env.API_MASTER_KEY || 'openwa-temp-media-vault';
+    const payload = `${sanitized}:${expiresAt}`;
+    const signature = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+    return `${expiresAt}.${signature}`;
+  }
+
+  /**
+   * Verifies the time-limited HMAC-SHA256 token using constant-time comparison to prevent timing attacks.
+   */
+  verifyMediaToken(filename: string, token?: string): boolean {
+    if (!token || typeof token !== 'string') return false;
+    const parts = token.split('.');
+    if (parts.length !== 2) return false;
+    const [expiresAtStr, signature] = parts;
+    const expiresAt = Number.parseInt(expiresAtStr, 10);
+    if (!Number.isFinite(expiresAt) || Date.now() > expiresAt) return false;
+    const sanitized = path.basename(filename);
+    const secret = process.env.MEDIA_TOKEN_SECRET || process.env.API_MASTER_KEY || 'openwa-temp-media-vault';
+    const payload = `${sanitized}:${expiresAt}`;
+    const expectedSig = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+    const sigBuf = Buffer.from(signature);
+    const expBuf = Buffer.from(expectedSig);
+    if (sigBuf.length !== expBuf.length) return false;
+    return crypto.timingSafeEqual(sigBuf, expBuf);
+  }
+
+  /**
+   * Ensures the request has either a valid signed token or an authorized operator API key.
+   */
+  verifyMediaAccess(filename: string, token?: string, apiKey?: string): void {
+    if (token && this.verifyMediaToken(filename, token)) {
+      return;
+    }
+    const masterKey = process.env.API_MASTER_KEY;
+    if (apiKey && masterKey && apiKey === masterKey) {
+      return;
+    }
+    throw new ForbiddenException('Invalid or expired media token');
+  }
+
+  /**
+   * Cleans up temporary media files older than the specified TTL (default 24h).
+   */
+  async cleanupExpiredTempMedia(ttlMs = 24 * 60 * 60 * 1000): Promise<number> {
+    const uploadsDir = path.join(process.cwd(), 'data', 'uploads');
+    if (!fs.existsSync(uploadsDir)) return 0;
+    let deletedCount = 0;
+    try {
+      const files = await fs.promises.readdir(uploadsDir);
+      const now = Date.now();
+      for (const file of files) {
+        if (!file.startsWith('media_')) continue;
+        const filePath = path.join(uploadsDir, file);
+        try {
+          const stat = await fs.promises.stat(filePath);
+          if (now - stat.mtimeMs > ttlMs) {
+            await fs.promises.unlink(filePath);
+            deletedCount++;
+          }
+        } catch {
+          // File may have been removed concurrently, ignore
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`Failed during temp media cleanup: ${err}`);
+    }
+    return deletedCount;
+  }
+
   async saveTempMedia(dto: { base64: string; mimetype?: string; filename?: string }): Promise<string> {
     const rawData = dto.base64.replace(/^data:[^;]+;base64,/, '');
+    const maxBytes = positiveIntFromEnv('TEMP_MEDIA_MAX_BYTES', 25 * 1024 * 1024);
+    if ((rawData.length * 3) / 4 > maxBytes * 1.05) {
+      throw new PayloadTooLargeException(`Media file exceeds maximum allowed size of ${Math.round(maxBytes / (1024 * 1024))}MB`);
+    }
     const buffer = Buffer.from(rawData, 'base64');
-    const uploadsDir = require('path').join(process.cwd(), 'data', 'uploads');
-    const fs = require('fs');
+    if (buffer.length > maxBytes) {
+      throw new PayloadTooLargeException(`Media file exceeds maximum allowed size of ${Math.round(maxBytes / (1024 * 1024))}MB`);
+    }
+
+    const uploadsDir = path.join(process.cwd(), 'data', 'uploads');
     if (!fs.existsSync(uploadsDir)) {
       fs.mkdirSync(uploadsDir, { recursive: true });
     }
+
+    // Opportunistic TTL cleanup throttled to at most once every 15 minutes
+    const now = Date.now();
+    if (now - this.lastTempMediaCleanupAt > 15 * 60 * 1000) {
+      this.lastTempMediaCleanupAt = now;
+      const ttlMs = positiveIntFromEnv('TEMP_MEDIA_TTL_MS', 24 * 60 * 60 * 1000);
+      void this.cleanupExpiredTempMedia(ttlMs);
+    }
+
     const ext = dto.mimetype ? (dto.mimetype.split('/')[1] || 'bin') : 'bin';
     const cleanExt = ext.split('+')[0].split(';')[0].split('?')[0];
     const filename = `media_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${cleanExt}`;
-    const filePath = require('path').join(uploadsDir, filename);
+    const filePath = path.join(uploadsDir, filename);
     await fs.promises.writeFile(filePath, buffer);
     return filename;
   }
 
   getTempMediaPath(filename: string): string {
-    const path = require('path');
-    const fs = require('fs');
     const sanitized = path.basename(filename);
     const filePath = path.join(process.cwd(), 'data', 'uploads', sanitized);
     if (!fs.existsSync(filePath)) {

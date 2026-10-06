@@ -264,7 +264,7 @@ export class BaileysLifecycle {
         if (!key.id) {
           return undefined;
         }
-        const stored = await this.host.config.messageStore?.getMessage(this.host.config.dbSessionId, key.id);
+        const stored = await this.host.config.messageStore?.getMessage(this.host.config.dbSessionId, key.id, true);
         return stored?.message ?? undefined;
       },
       logger: baileysLogger,

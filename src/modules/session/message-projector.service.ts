@@ -93,6 +93,18 @@ export class MessageProjector {
   // messageMutations queue, so the public enqueue path and the queued applies serialize on one chain.
   private readonly mutationProjector: MessageMutationProjector;
 
+  /** In-memory throttle map to avoid bombarding sessions table with lastActiveAt writes (max 1 per 30s per session). */
+  private readonly lastActiveThrottle = new Map<string, number>();
+
+  private touchSessionActive(id: string): void {
+    const now = Date.now();
+    const last = this.lastActiveThrottle.get(id) ?? 0;
+    if (now - last > 30_000) {
+      this.lastActiveThrottle.set(id, now);
+      void this.sessionRepository.update(id, { lastActiveAt: new Date() }).catch(() => undefined);
+    }
+  }
+
   constructor(
     @InjectRepository(Message, 'data')
     private readonly messageRepository: Repository<Message>,
@@ -146,8 +158,8 @@ export class MessageProjector {
       from: message.from,
       action: 'message_received',
     });
-    // Update last active timestamp
-    void this.sessionRepository.update(id, { lastActiveAt: new Date() }).catch(() => undefined);
+    // Update last active timestamp with in-memory throttle (max once every 30s)
+    this.touchSessionActive(id);
     // Convert IncomingMessage to plain object for dispatch
     const messageData = { ...message };
 
@@ -440,8 +452,8 @@ export class MessageProjector {
       to: message.to,
       action: 'message_sent',
     });
-    // Update last active timestamp
-    void this.sessionRepository.update(id, { lastActiveAt: new Date() }).catch(() => undefined);
+    // Update last active timestamp with in-memory throttle (max once every 30s)
+    this.touchSessionActive(id);
     const messageData = { ...message };
 
     // Execute hook for message sent - plugins can modify or stop processing

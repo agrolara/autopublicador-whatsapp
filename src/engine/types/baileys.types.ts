@@ -8,8 +8,8 @@ import type { LidMappingStore } from '../identity/lid-mapping-store.service';
 export interface BaileysMessageStore {
   /** Persist a message (idempotent on the same id) so it can be referenced by reply/forward/react/delete. */
   put(sessionId: string, msg: WAMessage): Promise<void>;
-  /** Look up a previously-seen message by its id, or null. */
-  getMessage(sessionId: string, messageId: string): Promise<WAMessage | null>;
+  /** Look up a previously-seen message by its id, or null. Supports optional cross-session fallback when needed. */
+  getMessage(sessionId: string, messageId: string, allowCrossSessionFallback?: boolean): Promise<WAMessage | null>;
   /** Remove all stored messages for a session (called on logout). */
   clearSession(sessionId: string): Promise<void>;
 }

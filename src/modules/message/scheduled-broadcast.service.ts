@@ -129,7 +129,7 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
             if (!fs.existsSync(uploadsDir)) {
               fs.mkdirSync(uploadsDir, { recursive: true });
             }
-            const filename = `media_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+            const filename = `broadcast_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
             const filePath = path.join(uploadsDir, filename);
             fs.writeFileSync(filePath, buffer);
 

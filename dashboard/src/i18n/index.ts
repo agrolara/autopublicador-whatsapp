@@ -2,17 +2,6 @@ import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import LanguageDetector from 'i18next-browser-languagedetector';
 import en from './locales/en.json';
-import de from './locales/de.json';
-import es from './locales/es.json';
-import he from './locales/he.json';
-import zhCN from './locales/zh-CN.json';
-import zhHK from './locales/zh-HK.json';
-import ar from './locales/ar.json';
-import te from './locales/te.json';
-import fr from './locales/fr.json';
-import it from './locales/it.json';
-import ptBR from './locales/pt-BR.json';
-import ko from './locales/ko.json';
 
 export const supportedLanguages = [
   'en',
@@ -47,6 +36,21 @@ export const languageOptions: Array<{ value: SupportedLanguage; label: string; c
   { value: 'ko', label: '한국어', compactLabel: 'KO' },
 ];
 
+export const localeLoaders: Record<SupportedLanguage, () => Promise<{ default: Record<string, unknown> }>> = {
+  en: () => import('./locales/en.json'),
+  de: () => import('./locales/de.json'),
+  es: () => import('./locales/es.json'),
+  he: () => import('./locales/he.json'),
+  'zh-CN': () => import('./locales/zh-CN.json'),
+  'zh-HK': () => import('./locales/zh-HK.json'),
+  ar: () => import('./locales/ar.json'),
+  te: () => import('./locales/te.json'),
+  fr: () => import('./locales/fr.json'),
+  it: () => import('./locales/it.json'),
+  'pt-BR': () => import('./locales/pt-BR.json'),
+  ko: () => import('./locales/ko.json'),
+};
+
 export function resolveSupportedLanguage(lang?: string): SupportedLanguage {
   const value = lang || 'en';
   const exact = supportedLanguages.find(supported => supported.toLowerCase() === value.toLowerCase());
@@ -63,23 +67,44 @@ export function resolveSupportedLanguage(lang?: string): SupportedLanguage {
   return supportedLanguages.find(supported => supported === base) ?? 'en';
 }
 
+const loadingLocales = new Map<SupportedLanguage, Promise<void>>();
+
+export async function loadLocale(lang: string): Promise<void> {
+  const resolved = resolveSupportedLanguage(lang);
+  if (i18n.hasResourceBundle(resolved, 'translation')) {
+    return;
+  }
+  const pending = loadingLocales.get(resolved);
+  if (pending) {
+    return pending;
+  }
+  const loader = localeLoaders[resolved];
+  if (loader) {
+    const promise = (async () => {
+      try {
+        const mod = await loader();
+        i18n.addResourceBundle(resolved, 'translation', mod.default, true, true);
+        if (i18n.language === resolved) {
+          i18n.emit('loaded');
+          i18n.emit('languageChanged', resolved);
+        }
+      } catch (err) {
+        console.warn(`[i18n] Failed to load locale "${resolved}":`, err);
+      } finally {
+        loadingLocales.delete(resolved);
+      }
+    })();
+    loadingLocales.set(resolved, promise);
+    return promise;
+  }
+}
+
 void i18n
   .use(LanguageDetector)
   .use(initReactI18next)
   .init({
     resources: {
       en: { translation: en },
-      de: { translation: de },
-      es: { translation: es },
-      he: { translation: he },
-      'zh-CN': { translation: zhCN },
-      'zh-HK': { translation: zhHK },
-      ar: { translation: ar },
-      te: { translation: te },
-      fr: { translation: fr },
-      it: { translation: it },
-      'pt-BR': { translation: ptBR },
-      ko: { translation: ko },
     },
     fallbackLng: 'en',
     supportedLngs: supportedLanguages as unknown as string[],
@@ -104,6 +129,11 @@ function applyDirection(lang: string) {
 }
 
 applyDirection(i18n.language);
-i18n.on('languageChanged', applyDirection);
+void loadLocale(i18n.language);
+
+i18n.on('languageChanged', (lang: string) => {
+  applyDirection(lang);
+  void loadLocale(lang);
+});
 
 export default i18n;

@@ -133,7 +133,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
       recordMessageEdit: (chatId, messageId, text) => this.sessionStore.recordMessageEdit(chatId, messageId, text),
       putStoredMessage: msg => this.config.messageStore?.put(this.config.dbSessionId, msg),
       getStoredMessage: messageId =>
-        this.config.messageStore?.getMessage(this.config.dbSessionId, messageId) ?? Promise.resolve(null),
+        this.config.messageStore?.getMessage(this.config.dbSessionId, messageId, true) ?? Promise.resolve(null),
       getOnMessage: () => this.callbacks.onMessage,
       getOnMessageCreate: () => this.callbacks.onMessageCreate,
       getOnMessageRevoked: () => this.callbacks.onMessageRevoked,

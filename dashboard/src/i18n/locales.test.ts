@@ -203,15 +203,12 @@ const localeIdsIn = (text: string): string[] => [
 
 test('every locale file is registered in all four index.ts sites', () => {
   const registrations: Array<[string, string[]]> = [
-    ['import', [...I18N_INDEX_SOURCE.matchAll(/from '\.\/locales\/([^']+)\.json'/g)].map(m => m[1])],
+    ['import', [...new Set([...I18N_INDEX_SOURCE.matchAll(/(?:from|import\()\s*['"]\.\/locales\/([^'"]+)\.json['"]/g)].map(m => m[1]))]],
     ['supportedLanguages', localeIdsIn(section('export const supportedLanguages = ['))],
     ['languageOptions', localeIdsIn(section('export const languageOptions:'))],
-    // Anchored on `: { translation:` — the resources map is the only place that shape occurs, and
-    // it quotes only hyphenated ids ('zh-CN') while leaving simple ones bare (en), so both forms
-    // must be accepted.
     [
-      'resources',
-      [...I18N_INDEX_SOURCE.matchAll(/(?:'([\w-]+)'|([\w-]+))\s*:\s*\{\s*translation:/g)].map(m => m[1] ?? m[2]),
+      'localeLoaders',
+      [...I18N_INDEX_SOURCE.matchAll(/import\(['"]\.\/locales\/([^'"]+)\.json['"]\)/g)].map(m => m[1]),
     ],
   ];
 

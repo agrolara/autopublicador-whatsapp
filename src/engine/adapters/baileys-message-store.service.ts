@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import type * as BaileysLib from '@whiskeysockets/baileys';
@@ -32,10 +32,21 @@ function isMissingParentSessionError(err: unknown): boolean {
 }
 
 @Injectable()
-export class BaileysMessageStoreService implements BaileysMessageStore {
+export class BaileysMessageStoreService implements BaileysMessageStore, OnModuleDestroy {
   private readonly logger = createLogger('BaileysMessageStore');
   /** Sessions already warned about a missing parent row — keeps the orphan log to once per session. */
   private readonly orphanWarnedSessions = new Set<string>();
+
+  /** Tracks writes per session to batch purge operations and avoid DB saturation on every message. */
+  private readonly writeCounters = new Map<string, number>();
+
+  /** Active purge promises keyed by sessionId to avoid concurrent conflicting purge queries. */
+  private readonly activePurges = new Map<string, Promise<void>>();
+
+  /** Set of sessionIds that requested another purge while one was already running. */
+  private readonly pendingPurgeSessions = new Set<string>();
+
+  private isDestroyed = false;
 
   /** Lazily loaded @whiskeysockets/baileys module (ESM-only; loaded on first use, not at boot). */
   private baileysLib?: typeof BaileysLib;
@@ -48,6 +59,13 @@ export class BaileysMessageStoreService implements BaileysMessageStore {
     @InjectRepository(BaileysStoredMessage, 'data')
     private readonly repo: Repository<BaileysStoredMessage>,
   ) {}
+
+  async onModuleDestroy(): Promise<void> {
+    this.isDestroyed = true;
+    while (this.activePurges.size > 0) {
+      await Promise.all(Array.from(this.activePurges.values())).catch(() => undefined);
+    }
+  }
 
   async put(sessionId: string, msg: WAMessage): Promise<void> {
     const waMessageId = msg.key?.id;
@@ -84,15 +102,61 @@ export class BaileysMessageStoreService implements BaileysMessageStore {
       }
       throw err; // a genuine persistence failure — let the adapter's catch surface it
     }
-    await this.enforceLimit(sessionId);
+
+    const limit = positiveIntFromEnv('BAILEYS_MESSAGE_STORE_LIMIT', 5000);
+    // Controlled batch purge: run every N writes (default 100 in production, or 1 in small-cap test scenarios)
+    const batchThreshold = process.env.BAILEYS_MESSAGE_STORE_PURGE_BATCH
+      ? positiveIntFromEnv('BAILEYS_MESSAGE_STORE_PURGE_BATCH', 100)
+      : limit <= 10
+        ? 1
+        : Math.min(100, Math.max(1, Math.floor(limit / 10)));
+
+    const currentCount = (this.writeCounters.get(sessionId) ?? 0) + 1;
+    if (currentCount >= batchThreshold) {
+      this.writeCounters.set(sessionId, 0);
+      await this.scheduleOrRunPurge(sessionId);
+    } else {
+      this.writeCounters.set(sessionId, currentCount);
+    }
   }
 
-  async getMessage(sessionId: string, messageId: string): Promise<WAMessage | null> {
+  /**
+   * Schedule or run purge with concurrency control (single-flight per session)
+   * to protect against race conditions and lock contention.
+   */
+  async scheduleOrRunPurge(sessionId: string): Promise<void> {
+    if (this.isDestroyed) return;
+
+    const running = this.activePurges.get(sessionId);
+    if (running) {
+      this.pendingPurgeSessions.add(sessionId);
+      return running;
+    }
+
+    const purgePromise = (async () => {
+      try {
+        await this.enforceLimit(sessionId);
+      } catch (err) {
+        this.logger.error(`Failed to enforce message limit for session "${sessionId}"`, String(err));
+      } finally {
+        this.activePurges.delete(sessionId);
+        if (this.pendingPurgeSessions.has(sessionId) && !this.isDestroyed) {
+          this.pendingPurgeSessions.delete(sessionId);
+          void this.scheduleOrRunPurge(sessionId);
+        }
+      }
+    })();
+
+    this.activePurges.set(sessionId, purgePromise);
+    return purgePromise;
+  }
+
+  async getMessage(sessionId: string, messageId: string, allowCrossSessionFallback = false): Promise<WAMessage | null> {
     // Baileys retry/poll paths can hand over a key with no id; treat that as not-found rather than
     // letting an undefined criterion reach the ORM (TypeORM 1.x throws; 0.3 matched an arbitrary row).
     if (!messageId) return null;
     let row = await this.repo.findOne({ where: { sessionId, waMessageId: messageId } });
-    if (!row) {
+    if (!row && allowCrossSessionFallback) {
       // Cross-session fallback: If multiple bot sessions are in the same group, another session may have sent the poll
       row = await this.repo.findOne({ where: { waMessageId: messageId } });
     }
@@ -104,6 +168,12 @@ export class BaileysMessageStoreService implements BaileysMessageStore {
   }
 
   async clearSession(sessionId: string): Promise<void> {
+    this.writeCounters.delete(sessionId);
+    this.pendingPurgeSessions.delete(sessionId);
+    const running = this.activePurges.get(sessionId);
+    if (running) {
+      await running.catch(() => undefined);
+    }
     await this.repo.delete({ sessionId });
   }
 

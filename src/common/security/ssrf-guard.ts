@@ -51,7 +51,7 @@ export function isSsrfProtectionEnabled(): boolean {
  * bypass the block. Matched case-insensitively against the URL hostname.
  */
 function getAllowedHosts(): Set<string> {
-  const allowed = new Set<string>(['127.0.0.1', 'localhost', '::1']);
+  const allowed = new Set<string>();
   if (process.env.PUBLIC_URL) {
     try {
       const u = new URL(process.env.PUBLIC_URL);

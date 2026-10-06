@@ -182,4 +182,42 @@ describe('BaileysMessageStoreService', () => {
     expect(await service.getMessage('s1', 'M1')).toBeNull();
     expect(await service.getMessage('s2', 'M2')).not.toBeNull();
   });
+
+  it('batches purge operations according to BAILEYS_MESSAGE_STORE_PURGE_BATCH', async () => {
+    process.env.BAILEYS_MESSAGE_STORE_LIMIT = '100';
+    process.env.BAILEYS_MESSAGE_STORE_PURGE_BATCH = '4';
+    await seedSession('s_batch');
+    const s = new BaileysMessageStoreService(repo);
+    const findSpy = jest.spyOn(repo, 'find');
+
+    // 3 writes -> no purge runs
+    await s.put('s_batch', msg('B1'));
+    await s.put('s_batch', msg('B2'));
+    await s.put('s_batch', msg('B3'));
+    expect(findSpy).not.toHaveBeenCalled();
+
+    // 4th write -> batch threshold reached, purge runs
+    await s.put('s_batch', msg('B4'));
+    expect(findSpy).toHaveBeenCalledTimes(1);
+
+    delete process.env.BAILEYS_MESSAGE_STORE_PURGE_BATCH;
+  });
+
+  it('handles concurrent put calls cleanly and cleans up on onModuleDestroy', async () => {
+    process.env.BAILEYS_MESSAGE_STORE_LIMIT = '10';
+    process.env.BAILEYS_MESSAGE_STORE_PURGE_BATCH = '2';
+    await seedSession('s_concurrent');
+    const s = new BaileysMessageStoreService(repo);
+
+    await Promise.all([
+      s.put('s_concurrent', msg('P1')),
+      s.put('s_concurrent', msg('P2')),
+      s.put('s_concurrent', msg('P3')),
+      s.put('s_concurrent', msg('P4')),
+    ]);
+
+    expect(await repo.count({ where: { sessionId: 's_concurrent' } })).toBe(4);
+    await expect(s.onModuleDestroy()).resolves.toBeUndefined();
+    delete process.env.BAILEYS_MESSAGE_STORE_PURGE_BATCH;
+  });
 });
