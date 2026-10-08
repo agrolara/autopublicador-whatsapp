@@ -265,12 +265,23 @@ export function Contacts() {
     if (tpl) {
       const fullText = [tpl.header, tpl.body, tpl.footer].filter(Boolean).join('\n\n') || (tpl as any).content || (tpl as any).text || '';
       setMessageText(fullText);
-      if (tpl.mediaType === 'image' && (tpl.mediaUrl || (tpl.mediaUrls && tpl.mediaUrls.length > 0))) {
-        setAttachedImage({
-          url: tpl.mediaUrl || tpl.mediaUrls?.[0] || undefined,
-          mimetype: 'image/jpeg',
-          name: tpl.name ? `Plantilla: ${tpl.name}` : 'Imagen de plantilla',
-        });
+      const rawMedia = tpl.mediaUrl || (Array.isArray(tpl.mediaUrls) && tpl.mediaUrls.length > 0 ? tpl.mediaUrls[0] : undefined);
+      if (rawMedia) {
+        if (typeof rawMedia === 'string' && rawMedia.startsWith('data:')) {
+          const mimeMatch = rawMedia.match(/^data:([^;]+);base64,/);
+          const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+          setAttachedImage({
+            base64: rawMedia,
+            mimetype: mime,
+            name: tpl.name ? `Plantilla: ${tpl.name}` : 'Imagen de plantilla',
+          });
+        } else {
+          setAttachedImage({
+            url: rawMedia,
+            mimetype: 'image/jpeg',
+            name: tpl.name ? `Plantilla: ${tpl.name}` : 'Imagen de plantilla',
+          });
+        }
       }
     }
   };
@@ -354,9 +365,12 @@ export function Contacts() {
 
       try {
         if (attachedImage && (attachedImage.base64 || attachedImage.url)) {
+          const finalBase64 = attachedImage.base64 || (attachedImage.url?.startsWith('data:') ? attachedImage.url : undefined);
+          const finalUrl = !attachedImage.url?.startsWith('data:') ? attachedImage.url : undefined;
+
           await messageApi.sendMedia(selectedSessionId, target.id, 'image', {
-            base64: attachedImage.base64,
-            url: attachedImage.url,
+            base64: finalBase64,
+            url: finalUrl,
             mimetype: attachedImage.mimetype || 'image/jpeg',
             caption: formattedMessage,
           });
@@ -402,19 +416,22 @@ export function Contacts() {
       const recipientIds = targetContacts.map(c => c.id);
       const messages = recipientIds.map(chatId => {
         if (attachedImage && (attachedImage.base64 || attachedImage.url)) {
+          const finalBase64 = attachedImage.base64 || (attachedImage.url?.startsWith('data:') ? attachedImage.url : undefined);
+          const finalUrl = !attachedImage.url?.startsWith('data:') ? attachedImage.url : undefined;
+
           return {
             chatId,
             to: chatId,
             type: 'image' as const,
             content: {
               image: {
-                base64: attachedImage.base64,
-                url: attachedImage.url,
+                base64: finalBase64,
+                url: finalUrl,
                 mimetype: attachedImage.mimetype || 'image/jpeg',
               },
               caption: messageText,
             },
-            mediaUrl: attachedImage.url || attachedImage.base64,
+            mediaUrl: finalUrl || finalBase64,
           };
         }
         return {

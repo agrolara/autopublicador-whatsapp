@@ -22,6 +22,10 @@ export default defineConfig({
   appType: 'spa', // Enable SPA fallback for client-side routing
   build: {
     cssMinify: false,
+    chunkSizeWarningLimit: 3000,
+    rollupOptions: {
+      maxParallelFileOps: 2,
+    },
   },
   define: {
     __APP_VERSION__: JSON.stringify(process.env.APP_VERSION || pkgVersion),

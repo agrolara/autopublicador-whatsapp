@@ -220,8 +220,17 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
   }
 
   getBroadcasts(sessionId: string): ScheduledBroadcast[] {
-    return this.items
-      .filter(item => item.sessionId === sessionId)
+    const filtered = this.items.filter(item => {
+      if (!sessionId) return true;
+      if (!item.sessionId || item.sessionId === 'default' || item.sessionId === 'global') return true;
+      return item.sessionId === sessionId;
+    });
+
+    // Fallback: if no broadcasts match this specific sessionId, return all broadcasts
+    // so campaigns are never hidden when the user switches sessions or reconnects
+    const targetItems = (filtered.length === 0 && this.items.length > 0) ? this.items : filtered;
+
+    return targetItems
       .sort((a, b) => (a.scheduledTime || '').localeCompare(b.scheduledTime || ''))
       .map(item => {
         const mediaUrls = this.extractMediaUrls(item);
@@ -259,7 +268,7 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
   }
 
   async getBroadcastReport(sessionId: string, id: string): Promise<any> {
-    const broadcast = this.items.find(item => item.sessionId === sessionId && item.id === id);
+    const broadcast = this.items.find(item => item.id === id);
     if (!broadcast) {
       return null;
     }
@@ -358,7 +367,7 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
   }
 
   deleteBroadcast(sessionId: string, id: string): boolean {
-    const idx = this.items.findIndex(item => item.sessionId === sessionId && item.id === id);
+    const idx = this.items.findIndex(item => item.id === id);
     if (idx !== -1) {
       this.items.splice(idx, 1);
       this.saveToFile();
@@ -380,8 +389,9 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
     endDate?: string;
     postToStatus?: boolean;
   }): ScheduledBroadcast | null {
-    const item = this.items.find(i => i.sessionId === sessionId && i.id === id);
+    const item = this.items.find(i => i.id === id);
     if (!item) return null;
+    if (sessionId) item.sessionId = sessionId;
     if (dto.name !== undefined) item.name = dto.name;
     if (dto.scheduledTime !== undefined) item.scheduledTime = dto.scheduledTime;
     if (dto.frequency !== undefined) item.frequency = dto.frequency;
@@ -406,8 +416,9 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
   }
 
   toggleBroadcastStatus(sessionId: string, id: string): ScheduledBroadcast | null {
-    const item = this.items.find(i => i.sessionId === sessionId && i.id === id);
+    const item = this.items.find(i => i.id === id);
     if (!item) return null;
+    if (sessionId) item.sessionId = sessionId;
     item.status = item.status === 'paused' ? 'active' : 'paused';
     this.saveToFile();
     this.logger.log(`Toggled broadcast ${id} status to: ${item.status}`);

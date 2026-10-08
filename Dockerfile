@@ -12,6 +12,7 @@
 FROM --platform=$BUILDPLATFORM docker.io/node:22-slim AS builder
 
 WORKDIR /app
+ENV NODE_OPTIONS="--max-old-space-size=1536"
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -49,7 +50,7 @@ COPY . .
 # Drop the incremental-build cache afterwards: it is pinned inside dist/ (so nest's deleteOutDir
 # wipes it with the output), and the production stage copies dist/ wholesale — it would otherwise
 # ship dead compiler metadata in every image.
-RUN npm run build && npm run dashboard:ci -- --include=dev && npm run dashboard:build && rm -f dist/*.tsbuildinfo
+RUN npm run build && npm run dashboard:ci -- --include=dev && npm run dashboard:build && rm -f dist/*.tsbuildinfo && rm -rf /root/.npm
 
 # ===== Stage 2: Production =====
 FROM docker.io/node:22-slim AS production
@@ -110,6 +111,9 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 RUN groupadd -r openwa && useradd -r -g openwa openwa
 
 WORKDIR /app
+
+# Ensure builder stage finishes first to prevent concurrent memory contention on VPS
+COPY --from=builder /app/package.json /tmp/.builder-done
 
 # Copy package files
 COPY package*.json ./
