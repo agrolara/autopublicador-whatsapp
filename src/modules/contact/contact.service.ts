@@ -1,8 +1,12 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, Inject, Optional, forwardRef } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository, In, Not, IsNull } from 'typeorm';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { IWhatsAppEngine } from '../../engine/interfaces/whatsapp-engine.interface';
 import { paginate, ListOptions } from '../../common/utils/paginate';
 import { parseWaId } from '../../engine/identity/wa-id';
+import { LidMapping } from '../../engine/identity/lid-mapping.entity';
+import { SessionService } from '../session/session.service';
 
 /**
  * Owns engine access for contact operations so the "session not started" guard and
@@ -10,15 +14,27 @@ import { parseWaId } from '../../engine/identity/wa-id';
  */
 @Injectable()
 export class ContactService {
-  constructor(private readonly engines: EngineRegistry) {}
+  constructor(
+    private readonly engines: EngineRegistry,
+    @Optional()
+    @InjectRepository(LidMapping, 'data')
+    private readonly lidRepo?: Repository<LidMapping>,
+    @Optional()
+    @Inject(forwardRef(() => SessionService))
+    private readonly sessionService?: SessionService,
+  ) {}
 
   private getEngine(sessionId: string): IWhatsAppEngine {
     // EngineRegistry.require()'s default is this exact 400 "Session is not started".
     return this.engines.require(sessionId);
   }
 
-  async getContacts(sessionId: string, opts: ListOptions = {}) {
+  getContacts(sessionId: string, opts: ListOptions = {}) {
     const engine = this.getEngine(sessionId);
+    return this.internalGetContacts(engine, sessionId, opts);
+  }
+
+  private async internalGetContacts(engine: IWhatsAppEngine, sessionId: string, opts: ListOptions = {}) {
     const contacts = await engine.getContacts();
 
     let chats: any[] = [];
@@ -56,6 +72,51 @@ export class ContactService {
         });
       } else if (!existing.name && chat.name) {
         existing.name = chat.name;
+      }
+    }
+
+    // 3. Merge participants from lid_mappings
+    if (this.lidRepo) {
+      try {
+        const sessionIdsToQuery = new Set<string>();
+        sessionIdsToQuery.add(sessionId);
+
+        if (this.sessionService) {
+          try {
+            const session = await this.sessionService.findOne(sessionId);
+            if (session?.name) sessionIdsToQuery.add(session.name);
+            if (session?.id) sessionIdsToQuery.add(session.id);
+          } catch {
+            // ignore if session lookup fails
+          }
+        }
+
+        const idsArray = Array.from(sessionIdsToQuery).filter(Boolean);
+        const lidRows = await this.lidRepo.find({
+          where: {
+            sessionId: In(idsArray),
+            phone: Not(IsNull()),
+          },
+        });
+
+        for (const row of lidRows) {
+          if (!row.phone) continue;
+          const cleanPhone = row.phone.trim().replace(/^\+/, '').replace(/@.*$/, '');
+          if (!cleanPhone) continue;
+          const jid = `${cleanPhone}@c.us`;
+          if (!contactMap.has(jid)) {
+            contactMap.set(jid, {
+              id: jid,
+              number: cleanPhone,
+              name: undefined,
+              pushName: undefined,
+              isMyContact: false,
+              isBlocked: false,
+            });
+          }
+        }
+      } catch {
+        // Ignore DB query errors if any
       }
     }
 

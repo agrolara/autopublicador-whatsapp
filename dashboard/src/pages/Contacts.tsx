@@ -1300,12 +1300,12 @@ export function Contacts() {
                 <div style={{ fontSize: '0.875rem', color: 'var(--text-color)' }}>
                   <strong>Mensaje:</strong>
                   <p style={{ background: 'var(--bg-secondary)', padding: '0.5rem', borderRadius: '6px', margin: '0.25rem 0' }}>
-                    {c.payload?.message?.text || '-'}
+                    {c.payload?.messages?.[0]?.content?.caption || c.payload?.messages?.[0]?.content?.text || c.payload?.message?.text || '-'}
                   </p>
                 </div>
 
                 <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  <span>Destinatarios: {c.payload?.recipients?.length || 0}</span>
+                  <span>Destinatarios: {c.payload?.messages?.length || c.payload?.recipients?.length || 0}</span>
                   <span>Delay: {c.payload?.minDelaySeconds ?? 4}s - {c.payload?.maxDelaySeconds ?? 10}s</span>
                   {c.lastRunAt && <span>Último envío: {new Date(c.lastRunAt).toLocaleString()}</span>}
                 </div>

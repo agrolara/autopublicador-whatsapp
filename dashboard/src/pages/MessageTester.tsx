@@ -284,8 +284,12 @@ export function MessageTester() {
   };
 
   const applyLoadedTemplate = (tpl: MessageTemplate) => {
+    const isBulk = messageType === 'bulk' || bulkRecipients.trim().length > 0 || activeTagIds.size > 0;
+
     if (tpl.mediaType === 'poll') {
-      setMessageType('poll');
+      if (!isBulk) {
+        setMessageType('poll');
+      }
       setPollQuestion(tpl.body || '');
       const opts = Array.isArray(tpl.mediaUrls) && tpl.mediaUrls.length > 0 ? tpl.mediaUrls : ['', ''];
       setPollOptions(opts);
@@ -300,7 +304,8 @@ export function MessageTester() {
     setContent(fullText);
 
     if (tpl.mediaType && tpl.mediaType !== 'text') {
-      if (messageType === 'bulk') {
+      if (isBulk) {
+        setMessageType('bulk');
         setBulkMediaType(tpl.mediaType as any);
       } else {
         setMessageType(tpl.mediaType as any);
@@ -352,7 +357,8 @@ export function MessageTester() {
         }
       }
     } else {
-      if (messageType === 'bulk') {
+      if (isBulk) {
+        setMessageType('bulk');
         setBulkMediaType('text');
       } else {
         setMessageType('text');
@@ -2164,11 +2170,27 @@ export function MessageTester() {
         </div>
       </div>
 
-      {scheduledList.length > 0 && (
-        <div style={{ marginTop: '24px', padding: '20px', background: 'var(--bg-card, #ffffff)', border: '1px solid var(--border-color, #e2e8f0)', borderRadius: '12px' }}>
-          <h3 style={{ fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-            <Clock size={18} /> Campañas Programadas Activas ({scheduledList.length})
-          </h3>
+      <div style={{ marginTop: '24px', padding: '20px', background: 'var(--bg-card, #ffffff)', border: '1px solid var(--border-color, #e2e8f0)', borderRadius: '12px' }}>
+        <h3 style={{ fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+          <Clock size={18} /> Campañas Programadas Activas ({scheduledList.length})
+        </h3>
+        {scheduledList.length === 0 ? (
+          <div style={{
+            padding: '28px 20px',
+            textAlign: 'center',
+            color: 'var(--text-secondary, #64748b)',
+            background: 'var(--bg-secondary, #f8fafc)',
+            borderRadius: '8px',
+            border: '1px dashed var(--border-color, #cbd5e1)',
+          }}>
+            <p style={{ margin: 0, fontWeight: 500, fontSize: '0.95rem' }}>
+              No hay campañas de difusión programadas actualmente en esta sesión.
+            </p>
+            <span style={{ fontSize: '0.82rem', color: '#94a3b8', display: 'block', marginTop: '6px' }}>
+              Puedes programar una difusión automática configurando los grupos arriba y seleccionando &quot;⏰ Programar por Horario&quot;.
+            </span>
+          </div>
+        ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem' }}>
               <thead>
@@ -2407,8 +2429,8 @@ export function MessageTester() {
               </tbody>
             </table>
           </div>
-        </div>
-      )}
+        )}
+      </div>
       <EditScheduleModal
         isOpen={showEditScheduleModal}
         onClose={() => setShowEditScheduleModal(false)}

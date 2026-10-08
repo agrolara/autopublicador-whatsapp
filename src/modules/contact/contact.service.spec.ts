@@ -24,10 +24,31 @@ describe('ContactService', () => {
     expect(() => makeService(undefined).getBlockedContacts('s1')).toThrow(BadRequestException);
   });
 
-  it('caps an unbounded contacts list at the default limit (1000)', async () => {
-    const big = Array.from({ length: 1500 }, (_, i) => ({ id: `${i}@c.us` }));
+  it('caps an unbounded contacts list at the default limit (10000)', async () => {
+    const big = Array.from({ length: 12000 }, (_, i) => ({ id: `${i}@c.us` }));
     const getContacts = jest.fn().mockResolvedValue(big);
-    await expect(makeService({ getContacts }).getContacts('s1')).resolves.toHaveLength(1000);
+    await expect(makeService({ getContacts }).getContacts('s1')).resolves.toHaveLength(10000);
+  });
+
+  it('merges participants from lid_mappings when available', async () => {
+    const getContacts = jest.fn().mockResolvedValue([{ id: '111@c.us', name: 'Saved Contact' }]);
+    const mockLidRepo = {
+      find: jest.fn().mockResolvedValue([
+        { lid: '123@lid', phone: '222', sessionId: 's1' },
+        { lid: '456@lid', phone: '111', sessionId: 's1' },
+      ]),
+    };
+    const mockSessionService = {
+      findOne: jest.fn().mockResolvedValue({ id: 's1', name: 'pizzeria' }),
+    };
+    const engines = new EngineRegistry();
+    engines.set('s1', { getContacts, getChats: jest.fn().mockResolvedValue([]) } as any);
+    const svc = new ContactService(engines, mockLidRepo as any, mockSessionService as any);
+
+    const result = await svc.getContacts('s1');
+    expect(result).toHaveLength(2);
+    expect(result.find(c => c.id === '111@c.us')?.name).toBe('Saved Contact');
+    expect(result.find(c => c.id === '222@c.us')?.number).toBe('222');
   });
 
   it('applies limit/offset to the contacts list', async () => {
