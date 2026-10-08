@@ -486,23 +486,38 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
         continue;
       }
 
-      // 3. Check date range (startDate / endDate)
-      if (item.startDate && todayYMD < item.startDate) {
+      // 3. Extract target date and target HH:MM
+      let targetDate = item.startDate;
+      let rawTime = (item.scheduledTime || '00:00').trim();
+      if (rawTime.includes('T')) {
+        const parts = rawTime.split('T');
+        if (!targetDate) targetDate = parts[0];
+        rawTime = parts[1];
+      }
+
+      // Check date range (startDate / endDate)
+      const effectiveStartDate = targetDate || item.startDate;
+      if (effectiveStartDate && todayYMD < effectiveStartDate) {
         continue;
       }
       if (item.endDate && todayYMD > item.endDate) {
         continue;
       }
 
+      const timeParts = rawTime.split(':');
+      const targetH = parseInt(timeParts[0] || '0', 10);
+      const targetM = parseInt(timeParts[1] || '0', 10);
+      const targetHHMM = `${String(targetH).padStart(2, '0')}:${String(targetM).padStart(2, '0')}`;
+
       let isDue = false;
-      const targetHHMM = item.scheduledTime.padStart(5, '0');
 
       if (item.frequency === 'once') {
-        if (!item.lastRunAt && currentHHMM >= targetHHMM) {
+        const dateReached = !effectiveStartDate || todayYMD >= effectiveStartDate;
+        const timeReached = !effectiveStartDate || todayYMD > effectiveStartDate || currentHHMM >= targetHHMM;
+        if (!item.lastRunAt && dateReached && timeReached) {
           isDue = true;
         }
       } else {
-        const [targetH, targetM] = item.scheduledTime.split(':').map(Number);
         if (nowM === targetM) {
           if (nowH === targetH) {
             isDue = true;
@@ -567,8 +582,12 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
             await this.publishStatusForBroadcast(item);
           }
 
+          // 3. Mark completed one-time broadcasts as paused (completed) rather than deleting
+          // so the user can inspect the report, view execution history, and retry if needed.
           if (item.frequency === 'once') {
-            this.deleteBroadcast(item.sessionId, item.id);
+            item.status = 'paused';
+            this.saveToFile();
+            this.logger.log(`🏁 Completed one-time broadcast ${item.id} (${item.name}) - preserved in history.`);
           }
         }
       }

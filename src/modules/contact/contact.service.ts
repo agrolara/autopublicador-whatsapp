@@ -104,14 +104,31 @@ export class ContactService {
           const cleanPhone = row.phone.trim().replace(/^\+/, '').replace(/@.*$/, '');
           if (!cleanPhone) continue;
           const jid = `${cleanPhone}@c.us`;
-          if (!contactMap.has(jid)) {
+
+          // Cross-reference with existing @lid contact to preserve name/pushName and remove bare @lid entries
+          const cleanLid = (row.lid || '').trim().replace(/@.*$/, '');
+          const lidJid = cleanLid ? `${cleanLid}@lid` : undefined;
+          const existingLid = lidJid ? contactMap.get(lidJid) : undefined;
+          if (existingLid && lidJid) {
+            contactMap.delete(lidJid);
+          }
+
+          const existingJid = contactMap.get(jid);
+          if (existingJid) {
+            if (!existingJid.number) existingJid.number = cleanPhone;
+            if (existingLid) {
+              if (!existingJid.name && existingLid.name) existingJid.name = existingLid.name;
+              if (!existingJid.pushName && existingLid.pushName) existingJid.pushName = existingLid.pushName;
+              if (existingLid.isMyContact) existingJid.isMyContact = true;
+            }
+          } else {
             contactMap.set(jid, {
               id: jid,
               number: cleanPhone,
-              name: undefined,
-              pushName: undefined,
-              isMyContact: false,
-              isBlocked: false,
+              name: existingLid?.name,
+              pushName: existingLid?.pushName,
+              isMyContact: existingLid?.isMyContact ?? false,
+              isBlocked: existingLid?.isBlocked ?? false,
             });
           }
         }

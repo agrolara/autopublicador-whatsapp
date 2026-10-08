@@ -374,8 +374,11 @@ export function MessageTester() {
 
   const openEditScheduleModal = (item: ScheduledBroadcastItem) => {
     setEditingScheduleId(item.id);
-    setEditSchedName(item.name || `Envío Masivo (${item.scheduledTime})`);
-    setEditSchedTime(item.scheduledTime || '10:00');
+    const parsedTime = item.scheduledTime?.includes('T')
+      ? item.scheduledTime.split('T')[1].slice(0, 5)
+      : (item.scheduledTime?.slice(0, 5) || '10:00');
+    setEditSchedName(item.name || `Envío Masivo (${parsedTime})`);
+    setEditSchedTime(parsedTime);
     setEditSchedFrequency(item.frequency || 'daily');
     setEditSchedDaysOfWeek(Array.isArray(item.daysOfWeek) && item.daysOfWeek.length > 0 ? item.daysOfWeek : [0, 1, 2, 3, 4, 5, 6]);
     setEditSchedStatus(item.status || 'active');
@@ -2229,7 +2232,12 @@ export function MessageTester() {
                   return (
                     <tr key={item.id} style={{ borderBottom: '1px solid var(--border-color, #f1f5f9)', opacity: isPaused ? 0.75 : 1 }}>
                       <td style={{ padding: '10px 12px', fontWeight: 700, whiteSpace: 'nowrap' }}>
-                        ⏰ {item.scheduledTime} hrs
+                        ⏰ {item.scheduledTime?.includes('T') ? item.scheduledTime.split('T')[1].slice(0, 5) : item.scheduledTime?.slice(0, 5)} hrs
+                        {item.scheduledTime?.includes('T') && (
+                          <div style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--text-secondary, #64748b)' }}>
+                            📅 {item.scheduledTime.split('T')[0]}
+                          </div>
+                        )}
                       </td>
                       <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
                         {isPaused ? (
@@ -2295,7 +2303,7 @@ export function MessageTester() {
                         {item.endDate ? `📅 Hasta: ${item.endDate}` : '♾️ Indefinido'}
                       </td>
                       <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
-                        <div>{item.payload.messages.length} grupos</div>
+                        <div>{item.payload?.messages?.length ?? (item.payload as any)?.recipients?.length ?? 0} destinatarios</div>
                         {item.postToStatus && (
                           <div style={{ marginTop: '2px' }}>
                             <span style={{ background: '#dbeafe', color: '#1e40af', padding: '2px 6px', borderRadius: '10px', fontSize: '0.72rem', fontWeight: 600 }}>

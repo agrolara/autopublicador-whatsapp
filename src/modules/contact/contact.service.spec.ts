@@ -48,7 +48,30 @@ describe('ContactService', () => {
     const result = await svc.getContacts('s1');
     expect(result).toHaveLength(2);
     expect(result.find(c => c.id === '111@c.us')?.name).toBe('Saved Contact');
+    expect(result.find(c => c.id === '111@c.us')?.number).toBe('111');
     expect(result.find(c => c.id === '222@c.us')?.number).toBe('222');
+  });
+
+  it('transfers pushName from @lid contacts and removes bare @lid entries', async () => {
+    const getContacts = jest.fn().mockResolvedValue([
+      { id: '74122746937513@lid', pushName: 'Brayan', isMyContact: true },
+    ]);
+    const mockLidRepo = {
+      find: jest.fn().mockResolvedValue([
+        { lid: '74122746937513', phone: '56986176136', sessionId: 's1' },
+      ]),
+    };
+    const engines = new EngineRegistry();
+    engines.set('s1', { getContacts, getChats: jest.fn().mockResolvedValue([]) } as any);
+    const svc = new ContactService(engines, mockLidRepo as any);
+
+    const result = await svc.getContacts('s1');
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('56986176136@c.us');
+    expect(result[0].pushName).toBe('Brayan');
+    expect(result[0].number).toBe('56986176136');
+    expect(result[0].isMyContact).toBe(true);
+    expect(result.some(c => c.id.endsWith('@lid'))).toBe(false);
   });
 
   it('applies limit/offset to the contacts list', async () => {
