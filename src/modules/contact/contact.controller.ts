@@ -1,7 +1,8 @@
-import { Body, Controller, Get, Post, Put, Delete, Param, Query, HttpCode, HttpStatus } from '@nestjs/common';
+import { Body, Controller, Get, Post, Put, Delete, Param, Query, HttpCode, HttpStatus, Optional } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { ContactService } from './contact.service';
 import { GroupTagsService } from './group-tags.service';
+import { ContactCategoriesService } from './contact-categories.service';
 import { RequireRole } from '../auth/decorators/auth.decorators';
 import { ApiKeyRole } from '../auth/entities/api-key.entity';
 import { UpsertContactDto } from './dto/upsert-contact.dto';
@@ -21,7 +22,34 @@ export class ContactController {
   constructor(
     private readonly contactService: ContactService,
     private readonly groupTagsService: GroupTagsService,
+    @Optional()
+    private readonly contactCategoriesService?: ContactCategoriesService,
   ) {}
+
+  @Get('categories')
+  @ApiOperation({ summary: 'Get all contact categories' })
+  async getCategories(@Param('sessionId') sessionId: string) {
+    return this.contactCategoriesService?.getCategories(sessionId) ?? [];
+  }
+
+  @Post('categories')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Create or update a contact category' })
+  async saveCategory(
+    @Param('sessionId') sessionId: string,
+    @Body() dto: { name: string; color?: string; contactIds: string[]; id?: string },
+  ) {
+    if (!this.contactCategoriesService) return null;
+    return this.contactCategoriesService.saveCategory(sessionId, dto);
+  }
+
+  @Delete('categories/:id')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Delete a contact category' })
+  async deleteCategory(@Param('sessionId') sessionId: string, @Param('id') id: string) {
+    const deleted = this.contactCategoriesService?.deleteCategory(sessionId, id) ?? false;
+    return { success: deleted };
+  }
 
   @Get('group-tags')
   @ApiOperation({ summary: 'Get all group tags/categories for a session' })

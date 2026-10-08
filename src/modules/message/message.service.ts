@@ -1146,9 +1146,10 @@ export class MessageService {
   }
 
   /**
-   * Cleans up temporary media files older than the specified TTL (default 24h).
+   * Cleans up temporary media files older than the specified TTL (default 30 days).
+   * Generous retention ensures scheduled broadcasts and recurring campaigns never fail due to premature cleanup.
    */
-  async cleanupExpiredTempMedia(ttlMs = 24 * 60 * 60 * 1000): Promise<number> {
+  async cleanupExpiredTempMedia(ttlMs = positiveIntFromEnv('TEMP_MEDIA_TTL_MS', 30 * 24 * 60 * 60 * 1000)): Promise<number> {
     const uploadsDir = path.join(process.cwd(), 'data', 'uploads');
     if (!fs.existsSync(uploadsDir)) return 0;
     let deletedCount = 0;
@@ -1194,7 +1195,7 @@ export class MessageService {
     const now = Date.now();
     if (now - this.lastTempMediaCleanupAt > 15 * 60 * 1000) {
       this.lastTempMediaCleanupAt = now;
-      const ttlMs = positiveIntFromEnv('TEMP_MEDIA_TTL_MS', 24 * 60 * 60 * 1000);
+      const ttlMs = positiveIntFromEnv('TEMP_MEDIA_TTL_MS', 30 * 24 * 60 * 60 * 1000);
       void this.cleanupExpiredTempMedia(ttlMs);
     }
 

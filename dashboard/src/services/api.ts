@@ -1096,6 +1096,29 @@ export const groupTagsApi = {
     }),
 };
 
+export interface ContactCategoryItem {
+  id: string;
+  sessionId: string;
+  name: string;
+  color?: string;
+  contactIds: string[];
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export const contactCategoriesApi = {
+  list: (sessionId: string) => request<ContactCategoryItem[]>(`/sessions/${sessionId}/contacts/categories`),
+  save: (sessionId: string, data: { name: string; color?: string; contactIds: string[]; id?: string }) =>
+    request<ContactCategoryItem>(`/sessions/${sessionId}/contacts/categories`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  delete: (sessionId: string, id: string) =>
+    request<{ success: boolean }>(`/sessions/${sessionId}/contacts/categories/${id}`, {
+      method: 'DELETE',
+    }),
+};
+
 // =============================================================================
 // API Key API
 // =============================================================================

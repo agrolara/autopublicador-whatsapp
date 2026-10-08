@@ -91,8 +91,8 @@ if [ -n "$OPENWA_CONTAINERS" ]; then
             # 3. Blob Storage (notas de voz, audios Opus, stickers decodificados en memoria/disco)
             rm -rf /app/data/sessions/*/Default/blob_storage/* 2>/dev/null || true
 
-            # 4. Archivos temporales de subida y campañas (uploads)
-            rm -rf /app/data/uploads/* 2>/dev/null || true
+            # 4. Archivos temporales del sistema y transcodificación (NO borrar /app/data/uploads para proteger plantillas y difusiones activas)
+            # /app/data/uploads almacena las imágenes asignadas a campañas y plantillas. Se preservan intactas.
 
             # 5. Archivos temporales de Node/Puppeteer/ffmpeg
             rm -rf /tmp/puppeteer* /tmp/media-* /tmp/ffmpeg-* /tmp/core* 2>/dev/null || true
@@ -110,7 +110,7 @@ if [ -d "/var/lib/docker/volumes" ]; then
     find /var/lib/docker/volumes/ -wholename "*/_data/sessions/*/Default/Code Cache/*" -delete 2>/dev/null || true
     find /var/lib/docker/volumes/ -wholename "*/_data/sessions/*/Default/Service Worker/CacheStorage/*" -delete 2>/dev/null || true
     find /var/lib/docker/volumes/ -wholename "*/_data/sessions/*/Default/blob_storage/*" -delete 2>/dev/null || true
-    find /var/lib/docker/volumes/ -wholename "*/_data/uploads/*" -delete 2>/dev/null || true
+    # /_data/uploads se preserva intacto para no romper plantillas ni difusiones programadas
 fi
 
 # ------------------------------------------------------------------------------
