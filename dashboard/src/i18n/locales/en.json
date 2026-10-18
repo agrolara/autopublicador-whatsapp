@@ -794,7 +794,35 @@
     "toasts": {
       "saveFailed": "Save Failed"
     },
-    "statusLoadError": "Couldn't load the current infrastructure status. Refresh to try again."
+    "statusLoadError": "Couldn't load the current infrastructure status. Refresh to try again.",
+    "storageMaintenance": {
+      "title": "Storage & History Cleanup",
+      "description": "Monitor database and server disk usage. Safely purge accumulated message and status history at any time without affecting your sessions or campaigns.",
+      "messagesTitle": "Messages in Database",
+      "messagesRegistered": "{{count}} messages stored",
+      "statesTitle": "Statuses & Baileys Cache",
+      "statesRegistered": "{{count}} cached records",
+      "vpsStorageTitle": "Total Server Disk (VPS)",
+      "vpsStorageUsed": "{{used}} / {{total}}",
+      "safetyNote": "Guaranteed Safety: Purging this storage removes mass message payloads received from WhatsApp groups. Your QR sessions, scheduled campaigns, contacts, and templates remain 100% intact.",
+      "cleanButton": "Free Up Space Now",
+      "refreshButton": "Refresh",
+      "modalTitle": "Free Up Database Storage",
+      "modalConfirm": "Are you sure you want to purge message history?",
+      "modalFreeDesc": "Approximately {{size}} will be freed in PostgreSQL immediately.",
+      "modalWhatHappens": "What will happen:",
+      "modalItem1": "Accumulated group messages and status tables will be truncated.",
+      "modalItem2": "Your WhatsApp sessions remain 100% active and connected.",
+      "modalItem3": "Your scheduled campaigns and timetables will NOT be modified.",
+      "modalItem4": "Disk space will be reclaimed immediately.",
+      "modalBaileysOption": "Also clear Baileys message cache (recommended for maximum space reclaimed)",
+      "modalCancel": "Cancel",
+      "modalAction": "Yes, free up space now",
+      "cleaning": "Freeing up space...",
+      "successTitle": "Storage Freed",
+      "successDesc": "Accumulated message history in the database was purged successfully.",
+      "errorTitle": "Error Freeing Storage"
+    }
   },
   "plugins": {
     "title": "Plugins",

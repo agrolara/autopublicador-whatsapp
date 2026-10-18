@@ -12,11 +12,21 @@ import {
   AlertTriangle,
   Download,
   Upload,
+  Trash2,
+  RefreshCw,
 } from 'lucide-react';
-import { API_BASE_URL } from '../services/api';
+import { useQueryClient } from '@tanstack/react-query';
+import { API_BASE_URL, infraApi } from '../services/api';
 import { copyToClipboard } from '../utils/clipboard';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
-import { useInfraStatusQuery, useInfraConfigQuery, useEnginesQuery, useCurrentEngineQuery } from '../hooks/queries';
+import {
+  useInfraStatusQuery,
+  useInfraConfigQuery,
+  useEnginesQuery,
+  useCurrentEngineQuery,
+  useInfraStorageUsageQuery,
+  queryKeys,
+} from '../hooks/queries';
 import { useInfraConfigForm } from '../hooks/useInfraConfigForm';
 import { useConfigSave } from '../hooks/useConfigSave';
 import { useRestartFlow } from '../hooks/useRestartFlow';
@@ -51,6 +61,36 @@ export function Infrastructure() {
   const restartFlow = useRestartFlow();
   const dataBackup = useDataBackup();
   const [includeMessagesInBackup, setIncludeMessagesInBackup] = useState(false);
+
+  const queryClient = useQueryClient();
+  const {
+    data: storageUsage,
+    isLoading: usageLoading,
+    isFetching: isRefetchingUsage,
+    refetch: refetchUsage,
+  } = useInfraStorageUsageQuery();
+  const [showCleanModal, setShowCleanModal] = useState(false);
+  const [cleaning, setCleaning] = useState(false);
+  const [clearBaileys, setClearBaileys] = useState(true);
+
+  const handleCleanStorage = async () => {
+    setCleaning(true);
+    try {
+      const res = await infraApi.cleanStorage({ clearBaileysCache: clearBaileys });
+      toast.success(
+        'Almacenamiento liberado',
+        res.message || 'Se ha vaciado el historial de mensajes acumulados en la base de datos.',
+      );
+      setShowCleanModal(false);
+      void refetchUsage();
+      void queryClient.invalidateQueries({ queryKey: queryKeys.infraStorageUsage });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error('Error al liberar espacio', msg);
+    } finally {
+      setCleaning(false);
+    }
+  };
 
   // Reads dbConfig/storageConfig (from configForm) plus infraStatus/savedConfig to decide whether the
   // just-saved config crosses to a different backend, then hands the restart flow everything it needs
@@ -759,6 +799,173 @@ export function Infrastructure() {
             )}
           </div>
         </section>
+
+        {/* Storage Maintenance & History Cleanup */}
+        <section className="infra-card storage-purge-section" style={{ gridColumn: '1 / -1' }}>
+          <div className="card-header">
+            <div className="header-left">
+              <Trash2 size={20} style={{ color: '#ef4444' }} />
+              <h2>{t('infrastructure.storageMaintenance.title')}</h2>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <button
+                type="button"
+                className="btn-secondary btn-sm"
+                onClick={() => void refetchUsage()}
+                disabled={usageLoading || isRefetchingUsage}
+                title={t('infrastructure.storageMaintenance.refreshButton')}
+                style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}
+              >
+                <RefreshCw size={14} className={isRefetchingUsage ? 'animate-spin' : ''} />
+                <span>{t('infrastructure.storageMaintenance.refreshButton')}</span>
+              </button>
+              <span className={`status-indicator ${(storageUsage?.disk?.percentUsed || 0) > 85 ? 'disconnected' : 'connected'}`}>
+                ● {storageUsage ? `${storageUsage.totalDbSpacePretty} en BD (${storageUsage.disk?.used} / ${storageUsage.disk?.total})` : 'Calculando...'}
+              </span>
+            </div>
+          </div>
+
+          <p className="muted-hint" style={{ marginBottom: '1.25rem' }}>
+            {t('infrastructure.storageMaintenance.description')}
+          </p>
+
+          <div
+            className="storage-stats-grid"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+              gap: '1rem',
+              marginBottom: '1.5rem',
+            }}
+          >
+            <div
+              className="stat-card"
+              style={{
+                padding: '1.25rem',
+                background: 'var(--bg-muted, #f8fafc)',
+                borderRadius: '8px',
+                border: '1px solid var(--border)',
+              }}
+            >
+              <div style={{ fontSize: '0.8125rem', color: '#64748b', fontWeight: 500, marginBottom: '0.375rem' }}>
+                {t('infrastructure.storageMaintenance.messagesTitle')}
+              </div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#0f172a', marginBottom: '0.25rem' }}>
+                {storageUsage?.messages?.sizePretty ?? '0 B'}
+              </div>
+              <div style={{ fontSize: '0.8125rem', color: '#64748b' }}>
+                {t('infrastructure.storageMaintenance.messagesRegistered', {
+                  count: storageUsage?.messages?.count?.toLocaleString() ?? '0',
+                })}
+              </div>
+            </div>
+
+            <div
+              className="stat-card"
+              style={{
+                padding: '1.25rem',
+                background: 'var(--bg-muted, #f8fafc)',
+                borderRadius: '8px',
+                border: '1px solid var(--border)',
+              }}
+            >
+              <div style={{ fontSize: '0.8125rem', color: '#64748b', fontWeight: 500, marginBottom: '0.375rem' }}>
+                {t('infrastructure.storageMaintenance.statesTitle')}
+              </div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#0f172a', marginBottom: '0.25rem' }}>
+                {storageUsage?.baileysCache?.sizePretty ?? '0 B'}
+              </div>
+              <div style={{ fontSize: '0.8125rem', color: '#64748b' }}>
+                {t('infrastructure.storageMaintenance.statesRegistered', {
+                  count: storageUsage?.baileysCache?.count?.toLocaleString() ?? '0',
+                })}
+              </div>
+            </div>
+
+            <div
+              className="stat-card"
+              style={{
+                padding: '1.25rem',
+                background: 'var(--bg-muted, #f8fafc)',
+                borderRadius: '8px',
+                border: '1px solid var(--border)',
+              }}
+            >
+              <div style={{ fontSize: '0.8125rem', color: '#64748b', fontWeight: 500, marginBottom: '0.375rem' }}>
+                {t('infrastructure.storageMaintenance.vpsStorageTitle')}
+              </div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#0f172a', marginBottom: '0.25rem' }}>
+                {storageUsage?.disk?.used ?? '0 GB'}{' '}
+                <span style={{ fontSize: '0.875rem', fontWeight: 400, color: '#64748b' }}>
+                  / {storageUsage?.disk?.total ?? '0 GB'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
+                <div style={{ flex: 1, height: '6px', background: '#e2e8f0', borderRadius: '3px', overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      height: '100%',
+                      width: `${Math.min(storageUsage?.disk?.percentUsed || 0, 100)}%`,
+                      background:
+                        (storageUsage?.disk?.percentUsed || 0) > 85
+                          ? '#ef4444'
+                          : (storageUsage?.disk?.percentUsed || 0) > 70
+                            ? '#f59e0b'
+                            : '#10b981',
+                      borderRadius: '3px',
+                      transition: 'width 0.3s ease',
+                    }}
+                  />
+                </div>
+                <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569' }}>
+                  {storageUsage?.disk?.percentUsed ?? 0}%
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div
+            style={{
+              padding: '1rem',
+              backgroundColor: 'rgba(37, 211, 102, 0.06)',
+              border: '1px solid rgba(37, 211, 102, 0.25)',
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '0.75rem',
+              marginBottom: '1.5rem',
+            }}
+          >
+            <CheckCircle size={18} style={{ color: '#25d366', marginTop: '2px', flexShrink: 0 }} />
+            <div style={{ fontSize: '0.8125rem', color: '#1f2937', lineHeight: 1.5 }}>
+              {t('infrastructure.storageMaintenance.safetyNote')}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+            <button
+              type="button"
+              className="btn-danger"
+              onClick={() => setShowCleanModal(true)}
+              style={{
+                backgroundColor: '#ef4444',
+                color: '#fff',
+                border: 'none',
+                padding: '0.625rem 1.25rem',
+                borderRadius: '6px',
+                fontWeight: 600,
+                fontSize: '0.875rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                cursor: 'pointer',
+              }}
+            >
+              <Trash2 size={16} />
+              <span>{t('infrastructure.storageMaintenance.cleanButton')}</span>
+            </button>
+          </div>
+        </section>
       </div>
 
       {restartFlow.showRestartModal && (
@@ -854,6 +1061,106 @@ export function Infrastructure() {
               </button>
             </>
           )}
+        </Modal>
+      )}
+
+      {showCleanModal && (
+        <Modal
+          open
+          onClose={() => !cleaning && setShowCleanModal(false)}
+          title={t('infrastructure.storageMaintenance.modalTitle')}
+          className="clean-storage-modal"
+          closeLabel={t('infrastructure.storageMaintenance.modalCancel')}
+        >
+          <div style={{ padding: '0.5rem 0' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+              <AlertTriangle size={32} style={{ color: '#f59e0b', flexShrink: 0 }} />
+              <div>
+                <h4 style={{ margin: 0, fontSize: '1rem', color: '#1e293b' }}>
+                  {t('infrastructure.storageMaintenance.modalConfirm')}
+                </h4>
+                <p style={{ margin: '0.25rem 0 0', fontSize: '0.875rem', color: '#64748b' }}>
+                  {t('infrastructure.storageMaintenance.modalFreeDesc', {
+                    size: storageUsage?.totalDbSpacePretty ?? 'cientos de megabytes',
+                  })}
+                </p>
+              </div>
+            </div>
+
+            <div
+              style={{
+                background: '#f8fafc',
+                padding: '0.875rem',
+                borderRadius: '6px',
+                border: '1px solid #e2e8f0',
+                marginBottom: '1.25rem',
+                fontSize: '0.8125rem',
+                color: '#334155',
+              }}
+            >
+              <div style={{ fontWeight: 600, marginBottom: '0.375rem', color: '#0f172a' }}>
+                {t('infrastructure.storageMaintenance.modalWhatHappens')}
+              </div>
+              <ul style={{ margin: 0, paddingLeft: '1.25rem', lineHeight: 1.6 }}>
+                <li>{t('infrastructure.storageMaintenance.modalItem1')}</li>
+                <li>
+                  <strong>{t('infrastructure.storageMaintenance.modalItem2')}</strong>
+                </li>
+                <li>
+                  <strong>{t('infrastructure.storageMaintenance.modalItem3')}</strong>
+                </li>
+                <li>{t('infrastructure.storageMaintenance.modalItem4')}</li>
+              </ul>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.5rem' }}>
+              <input
+                type="checkbox"
+                id="clearBaileysCache"
+                checked={clearBaileys}
+                onChange={e => setClearBaileys(e.target.checked)}
+              />
+              <label htmlFor="clearBaileysCache" style={{ fontSize: '0.8125rem', color: '#475569', cursor: 'pointer' }}>
+                {t('infrastructure.storageMaintenance.modalBaileysOption')}
+              </label>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setShowCleanModal(false)}
+                disabled={cleaning}
+              >
+                {t('infrastructure.storageMaintenance.modalCancel')}
+              </button>
+              <button
+                type="button"
+                className="btn-danger"
+                onClick={handleCleanStorage}
+                disabled={cleaning}
+                style={{
+                  backgroundColor: '#ef4444',
+                  color: '#fff',
+                  border: 'none',
+                  padding: '0.5rem 1rem',
+                  borderRadius: '6px',
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  cursor: cleaning ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {cleaning ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                <span>
+                  {cleaning
+                    ? t('infrastructure.storageMaintenance.cleaning')
+                    : t('infrastructure.storageMaintenance.modalAction')}
+                </span>
+              </button>
+            </div>
+          </div>
         </Modal>
       )}
 

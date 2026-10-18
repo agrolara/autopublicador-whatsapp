@@ -514,3 +514,69 @@ export class StorageImportResponseDto {
   @ApiProperty({ enum: ['local', 's3'], example: 'local' })
   storageType!: string;
 }
+
+export class StorageTableStatDto {
+  @ApiProperty({ example: 150000 })
+  count!: number;
+
+  @ApiProperty({ example: '390 MB' })
+  sizePretty!: string;
+
+  @ApiProperty({ example: 409214976 })
+  sizeBytes!: number;
+}
+
+export class StorageDiskStatDto {
+  @ApiProperty({ example: '206.9 GB' })
+  total!: string;
+
+  @ApiProperty({ example: '133.8 GB' })
+  free!: string;
+
+  @ApiProperty({ example: '73.1 GB' })
+  used!: string;
+
+  @ApiProperty({ example: 35 })
+  percentUsed!: number;
+}
+
+export class InfraStorageUsageResponseDto {
+  @ApiProperty({ example: true })
+  success!: boolean;
+
+  @ApiProperty({ example: 'postgres' })
+  databaseType!: string;
+
+  @ApiProperty({ type: StorageTableStatDto })
+  messages!: StorageTableStatDto;
+
+  @ApiProperty({ type: StorageTableStatDto })
+  statusUpdates!: StorageTableStatDto;
+
+  @ApiProperty({ type: StorageTableStatDto })
+  baileysCache!: StorageTableStatDto;
+
+  @ApiProperty({ example: '451 MB' })
+  totalDbSpacePretty!: string;
+
+  @ApiProperty({ example: 473260032 })
+  totalDbSizeBytes!: number;
+
+  @ApiProperty({ type: StorageDiskStatDto })
+  disk!: StorageDiskStatDto;
+}
+
+export class InfraStorageCleanResponseDto {
+  @ApiProperty({ example: true })
+  success!: boolean;
+
+  @ApiProperty({ example: 'Historial de mensajes y almacenamiento depurado con éxito.' })
+  message!: string;
+
+  @ApiProperty({ example: { messages: true, statusUpdates: true, baileysCache: true } })
+  purged!: {
+    messages: boolean;
+    statusUpdates: boolean;
+    baileysCache: boolean;
+  };
+}

@@ -2,7 +2,12 @@ import { Controller, Get, Post, Body, Query, ConflictException, HttpCode, HttpSt
 import * as fs from 'fs';
 import * as path from 'path';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
-import { InfraExportDataResponseDto, InfraImportDataResponseDto } from './dto/infra-response.dto';
+import {
+  InfraExportDataResponseDto,
+  InfraImportDataResponseDto,
+  InfraStorageUsageResponseDto,
+  InfraStorageCleanResponseDto,
+} from './dto/infra-response.dto';
 import { ConfigService } from '@nestjs/config';
 import { DataSource, QueryRunner } from 'typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
@@ -983,5 +988,196 @@ export class InfraDataController {
       // Its own finally, so a throwing release() cannot strand the token either.
       resumeLossDetection?.();
     }
+  }
+
+  @Get('storage-usage')
+  @RequireRole(ApiKeyRole.ADMIN)
+  @ApiOperation({ summary: 'Get current storage and database message usage statistics' })
+  @ApiResponse({ status: 200, description: 'Storage usage statistics', type: InfraStorageUsageResponseDto })
+  async getStorageUsage(): Promise<InfraStorageUsageResponseDto> {
+    const isPostgres = this.dataDataSource.options.type === 'postgres';
+    const schema = (this.dataDataSource.options as { schema?: string }).schema || 'openwa';
+
+    let messagesCount = 0;
+    let messagesSizeBytes = 0;
+    let messagesSizePretty = '0 B';
+
+    let statusCount = 0;
+    let statusSizeBytes = 0;
+    let statusSizePretty = '0 B';
+
+    let baileysCacheCount = 0;
+    let baileysCacheSizeBytes = 0;
+    let baileysCacheSizePretty = '0 B';
+
+    if (isPostgres) {
+      try {
+        const statsRes = (await this.dataDataSource.query(
+          `SELECT 
+            c.relname,
+            COALESCE(s.n_live_tup, 0) AS count,
+            pg_total_relation_size(c.oid) AS total_bytes,
+            pg_size_pretty(pg_total_relation_size(c.oid)) AS pretty_size
+          FROM pg_class c
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          LEFT JOIN pg_stat_user_tables s ON s.relid = c.oid
+          WHERE n.nspname = $1 AND c.relname IN ('messages', 'status_updates', 'baileys_stored_messages');`,
+          [schema],
+        )) as Array<{ relname: string; count: string | number; total_bytes: string | number; pretty_size: string }>;
+
+        for (const row of statsRes) {
+          const rowCount = Number(row.count) || 0;
+          const bytes = Number(row.total_bytes) || 0;
+          const pretty = row.pretty_size || '0 B';
+
+          if (row.relname === 'messages') {
+            messagesCount = rowCount;
+            messagesSizeBytes = bytes;
+            messagesSizePretty = pretty;
+          } else if (row.relname === 'status_updates') {
+            statusCount = rowCount;
+            statusSizeBytes = bytes;
+            statusSizePretty = pretty;
+          } else if (row.relname === 'baileys_stored_messages') {
+            baileysCacheCount = rowCount;
+            baileysCacheSizeBytes = bytes;
+            baileysCacheSizePretty = pretty;
+          }
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Failed to query postgres table sizes: ${msg}`);
+      }
+    } else {
+      try {
+        const mCount = (await this.dataDataSource.query('SELECT COUNT(*) as c FROM messages')) as Array<{ c: number }>;
+        messagesCount = Number(mCount?.[0]?.c) || 0;
+        const sCount = (await this.dataDataSource.query('SELECT COUNT(*) as c FROM status_updates')) as Array<{ c: number }>;
+        statusCount = Number(sCount?.[0]?.c) || 0;
+        const bCount = (await this.dataDataSource.query('SELECT COUNT(*) as c FROM baileys_stored_messages')) as Array<{ c: number }>;
+        baileysCacheCount = Number(bCount?.[0]?.c) || 0;
+      } catch {
+        // Ignore fallback errors
+      }
+    }
+
+    let disk = {
+      total: 'N/A',
+      free: 'N/A',
+      used: 'N/A',
+      percentUsed: 0,
+    };
+
+    try {
+      if (typeof fs.statfsSync === 'function') {
+        const s = fs.statfsSync(process.cwd());
+        const totalB = s.bsize * s.blocks;
+        const freeB = s.bsize * s.bavail;
+        const usedB = totalB - freeB;
+        const pct = totalB > 0 ? Math.round((usedB / totalB) * 100) : 0;
+        disk = {
+          total: `${(totalB / 1e9).toFixed(1)} GB`,
+          free: `${(freeB / 1e9).toFixed(1)} GB`,
+          used: `${(usedB / 1e9).toFixed(1)} GB`,
+          percentUsed: pct,
+        };
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Failed to read filesystem stats: ${msg}`);
+    }
+
+    const totalDbSizeBytes = messagesSizeBytes + statusSizeBytes + baileysCacheSizeBytes;
+    const formatBytes = (bytes: number): string => {
+      if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(2)} GB`;
+      if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
+      if (bytes >= 1e3) return `${(bytes / 1e3).toFixed(1)} kB`;
+      return `${bytes} B`;
+    };
+
+    return {
+      success: true,
+      databaseType: String(this.dataDataSource.options.type),
+      messages: {
+        count: messagesCount,
+        sizePretty: messagesSizePretty,
+        sizeBytes: messagesSizeBytes,
+      },
+      statusUpdates: {
+        count: statusCount,
+        sizePretty: statusSizePretty,
+        sizeBytes: statusSizeBytes,
+      },
+      baileysCache: {
+        count: baileysCacheCount,
+        sizePretty: baileysCacheSizePretty,
+        sizeBytes: baileysCacheSizeBytes,
+      },
+      totalDbSpacePretty: formatBytes(totalDbSizeBytes),
+      totalDbSizeBytes,
+      disk,
+    };
+  }
+
+  @Post('storage/clean')
+  @HttpCode(HttpStatus.OK)
+  @RequireRole(ApiKeyRole.ADMIN)
+  @ApiOperation({ summary: 'Purge accumulated messages and status updates to reclaim disk space' })
+  @ApiResponse({ status: 200, description: 'Purge result', type: InfraStorageCleanResponseDto })
+  async cleanStorage(@Body() body?: { clearBaileysCache?: boolean }): Promise<InfraStorageCleanResponseDto> {
+    const isPostgres = this.dataDataSource.options.type === 'postgres';
+    const clearBaileys = body?.clearBaileysCache ?? true;
+    const schema = (this.dataDataSource.options as { schema?: string }).schema || 'openwa';
+
+    this.logger.log('Starting manual storage purge requested from dashboard...');
+
+    if (isPostgres) {
+      await this.dataDataSource.query(`TRUNCATE TABLE "${schema}"."messages";`);
+      await this.dataDataSource.query(`TRUNCATE TABLE "${schema}"."status_updates";`);
+      if (clearBaileys) {
+        await this.dataDataSource.query(`TRUNCATE TABLE "${schema}"."baileys_stored_messages";`);
+      }
+    } else {
+      await this.dataDataSource.query('DELETE FROM messages;');
+      await this.dataDataSource.query('DELETE FROM status_updates;');
+      if (clearBaileys) {
+        await this.dataDataSource.query('DELETE FROM baileys_stored_messages;');
+      }
+      try {
+        await this.dataDataSource.query('VACUUM;');
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`SQLite VACUUM warning: ${msg}`);
+      }
+    }
+
+    // Clean any stale export files in data/exports older than 5 minutes
+    try {
+      const exportDir = path.join(process.cwd(), 'data', 'exports');
+      if (fs.existsSync(exportDir)) {
+        const files = fs.readdirSync(exportDir);
+        for (const file of files) {
+          const filePath = path.join(exportDir, file);
+          const stat = fs.statSync(filePath);
+          if (Date.now() - stat.mtimeMs > 5 * 60 * 1000) {
+            fs.unlinkSync(filePath);
+          }
+        }
+      }
+    } catch {
+      // Ignore export sweep error
+    }
+
+    this.logger.log('Manual storage purge completed successfully');
+
+    return {
+      success: true,
+      message: 'Historial de mensajes y almacenamiento depurado con éxito.',
+      purged: {
+        messages: true,
+        statusUpdates: true,
+        baileysCache: clearBaileys,
+      },
+    };
   }
 }

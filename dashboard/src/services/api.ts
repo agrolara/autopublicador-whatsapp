@@ -600,6 +600,34 @@ export interface InfraStatus {
   envPinned?: string[];
 }
 
+export interface StorageUsageResponse {
+  success: boolean;
+  databaseType: string;
+  messages: {
+    count: number;
+    sizePretty: string;
+    sizeBytes: number;
+  };
+  statusUpdates: {
+    count: number;
+    sizePretty: string;
+    sizeBytes: number;
+  };
+  baileysCache: {
+    count: number;
+    sizePretty: string;
+    sizeBytes: number;
+  };
+  totalDbSpacePretty: string;
+  totalDbSizeBytes: number;
+  disk: {
+    total: string;
+    free: string;
+    used: string;
+    percentUsed: number;
+  };
+}
+
 // Saved infrastructure config (from data/.env.generated) used to hydrate the form.
 // Secrets are never returned — `*Set` flags indicate whether a value is stored.
 export interface SavedConfig {
@@ -1411,6 +1439,20 @@ export const infraApi = {
     }>('/infra/import-data', {
       method: 'POST',
       body: JSON.stringify({ tables, ...options }),
+    }),
+  getStorageUsage: () => request<StorageUsageResponse>('/infra/storage-usage'),
+  cleanStorage: (options?: { clearBaileysCache?: boolean }) =>
+    request<{
+      success: boolean;
+      message: string;
+      purged: {
+        messages: boolean;
+        statusUpdates: boolean;
+        baileysCache: boolean;
+      };
+    }>('/infra/storage/clean', {
+      method: 'POST',
+      body: JSON.stringify(options || { clearBaileysCache: true }),
     }),
 };
 

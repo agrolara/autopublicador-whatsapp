@@ -794,7 +794,35 @@
       "invalidFile": "Ese archivo no es una copia de seguridad de datos válida de OpenWA.",
       "importTooLarge": "La copia de seguridad supera el límite de la solicitud. Aumenta BODY_SIZE_LIMIT en el servidor e inténtalo de nuevo."
     },
-    "statusLoadError": "No se pudo cargar el estado actual de la infraestructura. Actualiza para reintentar."
+    "statusLoadError": "No se pudo cargar el estado actual de la infraestructura. Actualiza para reintentar.",
+    "storageMaintenance": {
+      "title": "Almacenamiento y Limpieza de Historial",
+      "description": "Monitorea el espacio ocupado en la base de datos y en el disco del servidor. Puedes depurar el historial acumulado de mensajes y estados en cualquier momento sin afectar tus sesiones ni campañas.",
+      "messagesTitle": "Mensajes en Base de Datos",
+      "messagesRegistered": "{{count}} mensajes registrados",
+      "statesTitle": "Estados y Caché Baileys",
+      "statesRegistered": "{{count}} registros temporales",
+      "vpsStorageTitle": "Almacenamiento Total Servidor (VPS)",
+      "vpsStorageUsed": "{{used}} / {{total}}",
+      "safetyNote": "Seguridad garantizada: Al liberar este espacio se eliminan los payloads de mensajes masivos recibidos de grupos de WhatsApp. Tus sesiones vinculadas por QR, campañas programadas, contactos y plantillas continuarán intactas.",
+      "cleanButton": "Liberar Espacio Ahora",
+      "refreshButton": "Actualizar",
+      "modalTitle": "Liberar Almacenamiento en Base de Datos",
+      "modalConfirm": "¿Confirmas que deseas vaciar el historial de mensajes?",
+      "modalFreeDesc": "Se liberarán aproximadamente {{size}} en PostgreSQL.",
+      "modalWhatHappens": "Qué sucederá:",
+      "modalItem1": "Se vaciará la tabla de mensajes y estados acumulados de grupos.",
+      "modalItem2": "Tus sesiones de WhatsApp seguirán 100% activas y conectadas.",
+      "modalItem3": "Tus campañas programadas y sus horarios NO se modificarán.",
+      "modalItem4": "El espacio en disco se recuperará de forma instantánea.",
+      "modalBaileysOption": "Vaciar también caché de mensajes de Baileys (recomendado para liberar el máximo de espacio)",
+      "modalCancel": "Cancelar",
+      "modalAction": "Sí, liberar espacio ahora",
+      "cleaning": "Liberando espacio...",
+      "successTitle": "Almacenamiento liberado",
+      "successDesc": "Se ha vaciado el historial de mensajes acumulados en la base de datos.",
+      "errorTitle": "Error al liberar espacio"
+    }
   },
   "plugins": {
     "title": "Plugins",
