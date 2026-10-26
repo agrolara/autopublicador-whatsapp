@@ -320,12 +320,29 @@ export function Contacts() {
     setMessageText(prev => `${prev} ${variableStr}`);
   };
 
-  // Helper function to resolve Spintax: {Hola|Buenas|Saludos}
+  // Helper function to resolve Spintax (supports nested spintax: {Hola {amigo|vecino}|Buenas {tardes|noches}})
   const parseSpintax = (text: string): string => {
-    return text.replace(/\{([^{}]+)\}/g, (_, choices: string) => {
-      const options = choices.split('|');
-      return options[Math.floor(Math.random() * options.length)];
-    });
+    let result = text;
+    while (/\{([^{}]+)\}/.test(result)) {
+      result = result.replace(/\{([^{}]+)\}/g, (_, choices: string) => {
+        const options = choices.split('|');
+        return options[Math.floor(Math.random() * options.length)];
+      });
+    }
+    return result;
+  };
+
+  // Helper to personalize dynamic variables ([[nombre]], {{nombre}}, [[número]], etc.)
+  const interpolateVariables = (template: string, target: Contact): string => {
+    const displayName = target.name || target.pushName || target.number || 'Amig@';
+    const numberStr = target.number || target.id?.replace(/@.*$/, '') || '';
+    return template
+      .replace(/\{\{nombre\}\}/gi, displayName)
+      .replace(/\{\{name\}\}/gi, displayName)
+      .replace(/\[\[nombre\]\]/gi, displayName)
+      .replace(/\[\[name\]\]/gi, displayName)
+      .replace(/\{\{n[uú]mero\}\}/gi, numberStr)
+      .replace(/\[\[n[uú]mero\]\]/gi, numberStr);
   };
 
   // Execute Live Broadcast
@@ -367,11 +384,7 @@ export function Contacts() {
       }));
 
       // Interpolate variables & resolve Spintax
-      let formattedMessage = messageText
-        .replace(/\{\{nombre\}\}/gi, displayName)
-        .replace(/\{\{name\}\}/gi, displayName)
-        .replace(/\{\{numero\}\}/gi, target.number || '');
-
+      let formattedMessage = interpolateVariables(messageText, target);
       formattedMessage = parseSpintax(formattedMessage);
 
       try {
@@ -424,8 +437,11 @@ export function Contacts() {
     if (!selectedSessionId || targetContacts.length === 0 || (!messageText.trim() && !attachedImage)) return;
 
     try {
-      const recipientIds = targetContacts.map(c => c.id);
-      const messages = recipientIds.map(chatId => {
+      const messages = targetContacts.map(target => {
+        const chatId = target.id;
+        let personalized = interpolateVariables(messageText, target);
+        personalized = parseSpintax(personalized);
+
         if (attachedImage && (attachedImage.base64 || attachedImage.url)) {
           const finalBase64 = attachedImage.base64 || (attachedImage.url?.startsWith('data:') ? attachedImage.url : undefined);
           const finalUrl = !attachedImage.url?.startsWith('data:') ? attachedImage.url : undefined;
@@ -440,7 +456,7 @@ export function Contacts() {
                 url: finalUrl,
                 mimetype: attachedImage.mimetype || 'image/jpeg',
               },
-              caption: messageText,
+              caption: personalized,
             },
             mediaUrl: finalUrl || finalBase64,
           };
@@ -449,8 +465,8 @@ export function Contacts() {
           chatId,
           to: chatId,
           type: 'text' as const,
-          content: { text: messageText },
-          message: { text: messageText },
+          content: { text: personalized },
+          message: { text: personalized },
         };
       });
 
