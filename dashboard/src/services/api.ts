@@ -1145,6 +1145,18 @@ export const contactCategoriesApi = {
     request<{ success: boolean }>(`/sessions/${sessionId}/contacts/categories/${id}`, {
       method: 'DELETE',
     }),
+  extractGroupBroadcasts: (sessionId: string, maxPerBatch: number = 100) =>
+    request<{
+      success: boolean;
+      totalGroups: number;
+      existingContactsSkipped: number;
+      newContactsFound: number;
+      createdCategories: Array<{ id: string; name: string; count: number }>;
+      message?: string;
+    }>(`/sessions/${sessionId}/contacts/extract-groups-broadcasts`, {
+      method: 'POST',
+      body: JSON.stringify({ maxPerBatch }),
+    }),
 };
 
 // =============================================================================

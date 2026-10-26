@@ -7,6 +7,7 @@ import { paginate, ListOptions } from '../../common/utils/paginate';
 import { parseWaId } from '../../engine/identity/wa-id';
 import { LidMapping } from '../../engine/identity/lid-mapping.entity';
 import { SessionService } from '../session/session.service';
+import { ContactCategoriesService } from './contact-categories.service';
 
 /**
  * Owns engine access for contact operations so the "session not started" guard and
@@ -22,6 +23,9 @@ export class ContactService {
     @Optional()
     @Inject(forwardRef(() => SessionService))
     private readonly sessionService?: SessionService,
+    @Optional()
+    @Inject(forwardRef(() => ContactCategoriesService))
+    private readonly contactCategoriesService?: ContactCategoriesService,
   ) {}
 
   private getEngine(sessionId: string): IWhatsAppEngine {
@@ -134,6 +138,32 @@ export class ContactService {
         }
       } catch {
         // Ignore DB query errors if any
+      }
+    }
+
+    // 4. Merge contacts that exist in contact categories (so custom categories and group broadcasts are always populated)
+    if (this.contactCategoriesService) {
+      try {
+        const categories = this.contactCategoriesService.getCategories(sessionId);
+        for (const cat of categories) {
+          if (Array.isArray(cat?.contactIds)) {
+            for (const contactId of cat.contactIds) {
+              if (contactId && !contactMap.has(contactId)) {
+                const cleanNumber = contactId.replace(/@.*$/, '').replace(/\D/g, '');
+                contactMap.set(contactId, {
+                  id: contactId,
+                  number: cleanNumber,
+                  name: undefined,
+                  pushName: undefined,
+                  isMyContact: false,
+                  isBlocked: false,
+                });
+              }
+            }
+          }
+        }
+      } catch {
+        // Ignore if categories lookup fails
       }
     }
 

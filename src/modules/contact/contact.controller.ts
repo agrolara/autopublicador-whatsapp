@@ -51,6 +51,20 @@ export class ContactController {
     return { success: deleted };
   }
 
+  @Post('extract-groups-broadcasts')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Extract unique contacts from WhatsApp groups and create 100-member broadcasts incrementally' })
+  async extractGroupsBroadcasts(
+    @Param('sessionId') sessionId: string,
+    @Body() body?: { maxPerBatch?: number },
+  ) {
+    if (!this.contactCategoriesService) {
+      return { success: false, message: 'Contact categories service is not available' };
+    }
+    const maxPerBatch = body?.maxPerBatch && body.maxPerBatch > 0 ? body.maxPerBatch : 100;
+    return this.contactCategoriesService.extractAndCreateGroupBroadcasts(sessionId, maxPerBatch);
+  }
+
   @Get('group-tags')
   @ApiOperation({ summary: 'Get all group tags/categories for a session' })
   async getGroupTags(@Param('sessionId') sessionId: string) {

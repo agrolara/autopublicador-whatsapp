@@ -67,6 +67,17 @@ export function Contacts() {
   const [categoryColorInput, setCategoryColorInput] = useState<string>('#10b981');
   const [existingCategoryIdToAppend, setExistingCategoryIdToAppend] = useState<string>('');
 
+  // Extract group broadcasts modal state
+  const [isExtractingBroadcasts, setIsExtractingBroadcasts] = useState<boolean>(false);
+  const [extractionResultModal, setExtractionResultModal] = useState<{
+    isOpen: boolean;
+    totalGroups: number;
+    existingContactsSkipped: number;
+    newContactsFound: number;
+    createdCategories: Array<{ id: string; name: string; count: number }>;
+    message?: string;
+  } | null>(null);
+
   // Tab 2: Create Broadcast state
   const [campaignName, setCampaignName] = useState<string>('');
   const [messageText, setMessageText] = useState<string>('');
@@ -469,6 +480,43 @@ export function Contacts() {
     }
   };
 
+  const handleExtractGroupBroadcasts = async () => {
+    if (!selectedSessionId) {
+      toast.error('Selecciona una sesión', 'Debes seleccionar una sesión activa primero.');
+      return;
+    }
+
+    setIsExtractingBroadcasts(true);
+    try {
+      const res = await contactCategoriesApi.extractGroupBroadcasts(selectedSessionId, 100);
+      if (res.success) {
+        await Promise.all([fetchContacts(), fetchCategories()]);
+        setExtractionResultModal({
+          isOpen: true,
+          totalGroups: res.totalGroups,
+          existingContactsSkipped: res.existingContactsSkipped,
+          newContactsFound: res.newContactsFound,
+          createdCategories: res.createdCategories,
+          message: res.message,
+        });
+        if (res.newContactsFound > 0) {
+          toast.success(
+            'Difusiones Creadas',
+            `Se crearon ${res.createdCategories.length} nuevas difusiones con ${res.newContactsFound} contactos únicos.`,
+          );
+        } else {
+          toast.info('Sin nuevos contactos', res.message || 'Todos los contactos de tus grupos ya estaban asignados.');
+        }
+      } else {
+        toast.error('Error en extracción', res.message || 'No se pudo completar la extracción');
+      }
+    } catch (err: any) {
+      toast.error('Error al extraer grupos', err?.message || 'Error desconocido');
+    } finally {
+      setIsExtractingBroadcasts(false);
+    }
+  };
+
   const handleSaveCategory = async () => {
     if (existingCategoryIdToAppend) {
       const cat = categories.find(c => c.id === existingCategoryIdToAppend);
@@ -540,7 +588,41 @@ export function Contacts() {
         title="Gestión de Contactos y Difusiones"
         subtitle="Filtra tu agenda de contactos y crea campañas de difusión masiva con protección anti-baneo"
         actions={
-          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn-extract-broadcasts"
+              onClick={handleExtractGroupBroadcasts}
+              disabled={isExtractingBroadcasts || !selectedSessionId}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                color: '#ffffff',
+                border: 'none',
+                padding: '0.5rem 1rem',
+                borderRadius: '8px',
+                fontWeight: 600,
+                fontSize: '0.85rem',
+                cursor: isExtractingBroadcasts ? 'not-allowed' : 'pointer',
+                boxShadow: '0 2px 8px rgba(16, 185, 129, 0.25)',
+                transition: 'all 0.2s ease',
+              }}
+              title="Escanear todos los grupos y crear difusiones de 100 contactos limpios"
+            >
+              {isExtractingBroadcasts ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  <span>Escaneando grupos...</span>
+                </>
+              ) : (
+                <>
+                  <FolderPlus size={16} />
+                  <span>📥 Extraer de Grupos a Difusiones (100 c/u)</span>
+                </>
+              )}
+            </button>
             <label style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>Sesión:</label>
             <select
               value={selectedSessionId}
@@ -859,9 +941,32 @@ export function Contacts() {
 
               {/* Target Audience */}
               <div>
-                <label className="form-section-title">
-                  <Users size={18} /> Audiencia Destino ({targetContacts.length} contactos seleccionados)
-                </label>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                  <label className="form-section-title" style={{ margin: 0 }}>
+                    <Users size={18} /> Audiencia Destino ({targetContacts.length} contactos seleccionados)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleExtractGroupBroadcasts}
+                    disabled={isExtractingBroadcasts || !selectedSessionId}
+                    style={{
+                      background: 'rgba(16, 185, 129, 0.1)',
+                      color: '#10b981',
+                      border: '1px solid #10b981',
+                      borderRadius: '6px',
+                      padding: '0.35rem 0.75rem',
+                      fontSize: '0.8rem',
+                      fontWeight: 600,
+                      cursor: isExtractingBroadcasts ? 'not-allowed' : 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                    }}
+                  >
+                    {isExtractingBroadcasts ? <Loader2 size={14} className="animate-spin" /> : <FolderPlus size={14} />}
+                    {isExtractingBroadcasts ? 'Escaneando...' : '📥 Extraer Nuevas Difusiones'}
+                  </button>
+                </div>
                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                   <button
                     className={`filter-btn ${targetAudience === 'selected' ? 'active' : ''}`}
@@ -1316,6 +1421,116 @@ export function Contacts() {
       )}
 
       {/* Category Creation / Management Modal */}
+      {/* Extraction Result Summary Modal */}
+      {extractionResultModal?.isOpen && (
+        <div className="modal-overlay" onClick={() => setExtractionResultModal(null)}>
+          <div className="modal-content" style={{ maxWidth: '540px' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+              <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1.25rem' }}>
+                <Sparkles style={{ color: '#10b981' }} size={22} /> Resumen de Extracción de Grupos
+              </h3>
+              <button
+                className="btn-secondary"
+                style={{ border: 'none', padding: '0.25rem 0.5rem' }}
+                onClick={() => setExtractionResultModal(null)}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1.25rem' }}>
+              <div style={{ background: 'var(--bg-secondary)', padding: '0.85rem', borderRadius: '10px', textAlign: 'center' }}>
+                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#3b82f6' }}>
+                  {extractionResultModal.totalGroups}
+                </div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Grupos Escaneados</div>
+              </div>
+
+              <div style={{ background: 'var(--bg-secondary)', padding: '0.85rem', borderRadius: '10px', textAlign: 'center' }}>
+                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#10b981' }}>
+                  {extractionResultModal.newContactsFound}
+                </div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Contactos Nuevos Únicos</div>
+              </div>
+
+              <div style={{ background: 'var(--bg-secondary)', padding: '0.85rem', borderRadius: '10px', textAlign: 'center' }}>
+                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#f59e0b' }}>
+                  {extractionResultModal.existingContactsSkipped}
+                </div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Omitidos (Ya en difusiones)</div>
+              </div>
+
+              <div style={{ background: 'var(--bg-secondary)', padding: '0.85rem', borderRadius: '10px', textAlign: 'center' }}>
+                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#8b5cf6' }}>
+                  {extractionResultModal.createdCategories.length}
+                </div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Nuevas Difusiones (100 c/u)</div>
+              </div>
+            </div>
+
+            {extractionResultModal.createdCategories.length > 0 ? (
+              <div style={{ marginBottom: '1.25rem' }}>
+                <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '0.5rem' }}>
+                  Listas Creadas ({extractionResultModal.createdCategories.length}):
+                </label>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', maxHeight: '140px', overflowY: 'auto' }}>
+                  {extractionResultModal.createdCategories.map(cat => (
+                    <span
+                      key={cat.id}
+                      style={{
+                        background: 'var(--bg-secondary)',
+                        border: '1px solid var(--border-color)',
+                        padding: '0.35rem 0.75rem',
+                        borderRadius: '20px',
+                        fontSize: '0.8rem',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                      }}
+                    >
+                      <strong>{cat.name}</strong> ({cat.count} contactos)
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div
+                style={{
+                  background: 'rgba(59, 130, 246, 0.1)',
+                  border: '1px solid #3b82f6',
+                  padding: '0.85rem',
+                  borderRadius: '8px',
+                  marginBottom: '1.25rem',
+                  fontSize: '0.85rem',
+                  color: 'var(--text-color)',
+                }}
+              >
+                ℹ {extractionResultModal.message || 'Todos los contactos de tus grupos ya están clasificados en difusiones existentes.'}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+              <button className="btn-secondary" onClick={() => setExtractionResultModal(null)}>
+                Cerrar
+              </button>
+              {extractionResultModal.createdCategories.length > 0 && (
+                <button
+                  className="btn-primary"
+                  onClick={() => {
+                    const firstCat = extractionResultModal.createdCategories[0];
+                    setExtractionResultModal(null);
+                    setTargetAudience(`category_${firstCat.id}`);
+                    setActiveTab('create_broadcast');
+                  }}
+                >
+                  🚀 Ir a Crear Difusión
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {showCategoryModal && (
         <div className="modal-overlay" onClick={() => setShowCategoryModal(false)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
