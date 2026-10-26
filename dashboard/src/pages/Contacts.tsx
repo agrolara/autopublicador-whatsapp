@@ -25,6 +25,10 @@ import {
   Calendar as CalendarIcon,
   Repeat,
   FolderPlus,
+  Eye,
+  RefreshCw,
+  Dices,
+  Wand2,
 } from 'lucide-react';
 import {
   contactApi,
@@ -95,6 +99,10 @@ export function Contacts() {
   const [batchRestInterval, setBatchRestInterval] = useState<number>(30); // Pause after N msgs
   const [batchRestDuration, setBatchRestDuration] = useState<number>(3); // Pause duration in mins
   const [maxCap, setMaxCap] = useState<number>(5000);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [showSpintaxSimulator, setShowSpintaxSimulator] = useState(false);
+  const [simulatorSamples, setSimulatorSamples] = useState<string[]>([]);
+  const [activeSpintaxCategory, setActiveSpintaxCategory] = useState<string>('all');
 
   // Schedule options (with Calendar date picker)
   const [isScheduled, setIsScheduled] = useState<boolean>(false);
@@ -269,16 +277,30 @@ export function Contacts() {
     }
   }, [contacts, selectedIds, targetAudience, categories, maxCap]);
 
+  
+  // Helper to sanitize WhatsApp JID
+  const sanitizeJid = (id: string, number?: string): string => {
+    if (!id) return '';
+    if (id.includes('@c.us') || id.includes('@s.whatsapp.net') || id.includes('@g.us')) {
+      return id.replace('@s.whatsapp.net', '@c.us');
+    }
+    const cleanNum = (number || id).replace(/\D/g, '');
+    return `${cleanNum}@c.us`;
+  };
+
   const handleTemplateChange = (templateId: string) => {
     setSelectedTemplateId(templateId);
-    if (!templateId) return;
+    if (!templateId) {
+      setAttachedImage(null);
+      return;
+    }
     const tpl = templates.find(t => t.id === templateId);
     if (tpl) {
       const fullText = [tpl.header, tpl.body, tpl.footer].filter(Boolean).join('\n\n') || (tpl as any).content || (tpl as any).text || '';
       setMessageText(fullText);
       const rawMedia = tpl.mediaUrl || (Array.isArray(tpl.mediaUrls) && tpl.mediaUrls.length > 0 ? tpl.mediaUrls[0] : undefined);
-      if (rawMedia) {
-        if (typeof rawMedia === 'string' && rawMedia.startsWith('data:')) {
+      if (rawMedia && typeof rawMedia === 'string' && rawMedia.trim().length > 0) {
+        if (rawMedia.startsWith('data:')) {
           const mimeMatch = rawMedia.match(/^data:([^;]+);base64,/);
           const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
           setAttachedImage({
@@ -286,38 +308,74 @@ export function Contacts() {
             mimetype: mime,
             name: tpl.name ? `Plantilla: ${tpl.name}` : 'Imagen de plantilla',
           });
-        } else {
+        } else if (rawMedia.startsWith('http://') || rawMedia.startsWith('https://')) {
           setAttachedImage({
             url: rawMedia,
             mimetype: 'image/jpeg',
             name: tpl.name ? `Plantilla: ${tpl.name}` : 'Imagen de plantilla',
           });
+        } else if (rawMedia.startsWith('/')) {
+          // Prepend origin for relative media file routes on the server
+          const fullUrl = `${window.location.origin}${rawMedia}`;
+          setAttachedImage({
+            url: fullUrl,
+            mimetype: 'image/jpeg',
+            name: tpl.name ? `Plantilla: ${tpl.name}` : 'Imagen de plantilla',
+          });
+        } else {
+          // Unrecognized media string (e.g. poll option name) -> clear
+          setAttachedImage(null);
         }
+      } else {
+        // If template doesn't have media, clear any previously attached image
+        setAttachedImage(null);
       }
     }
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      toast.error('Formato inválido', 'Selecciona una imagen en formato PNG, JPG o WEBP.');
-      return;
+  const insertVariable = (variableStr: string) => {
+    if (textareaRef.current) {
+      const textarea = textareaRef.current;
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const currentVal = textarea.value;
+      const before = currentVal.substring(0, start);
+      const after = currentVal.substring(end);
+      const padLeft = before.length > 0 && !before.endsWith(' ') && !before.endsWith('\n') ? ' ' : '';
+      const padRight = after.length > 0 && !after.startsWith(' ') && !after.startsWith('\n') ? ' ' : '';
+      const newVal = `${before}${padLeft}${variableStr}${padRight}${after}`;
+      setMessageText(newVal);
+      setTimeout(() => {
+        textarea.focus();
+        const cursorPosition = start + padLeft.length + variableStr.length;
+        textarea.setSelectionRange(cursorPosition, cursorPosition);
+      }, 50);
+    } else {
+      setMessageText(prev => `${prev} ${variableStr}`);
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      setAttachedImage({
-        base64: reader.result as string,
-        mimetype: file.type,
-        name: file.name,
-      });
-      toast.success('Imagen lista', `Se adjuntó "${file.name}" a la campaña.`);
-    };
-    reader.readAsDataURL(file);
   };
 
-  const insertVariable = (variableStr: string) => {
-    setMessageText(prev => `${prev} ${variableStr}`);
+  const handleGenerateSamples = () => {
+    if (!messageText.trim()) {
+      toast.info('Mensaje vacío', 'Escribe algo en el mensaje o carga una plantilla para simular las variaciones.');
+      return;
+    }
+    const sampleTargets: Contact[] = targetContacts.length >= 2
+      ? [targetContacts[0], targetContacts[1], targetContacts[2] || targetContacts[0]]
+      : [
+          { id: '56951782341@c.us', name: 'Carlos Morales', number: '56951782341' } as Contact,
+          { id: '56986176136@c.us', name: 'María González', pushName: 'María G.', number: '56986176136' } as Contact,
+          { id: '56994785210@c.us', name: '', pushName: 'Juan Pérez', number: '56994785210' } as Contact,
+        ];
+
+    const samples = sampleTargets.map((t, idx) => {
+      let personalized = interpolateVariables(messageText, t);
+      personalized = parseSpintax(personalized);
+      const name = t.name || t.pushName || t.number || `Destinatario ${idx + 1}`;
+      return `📌 Muestra ${idx + 1} para: ${name} (${t.number || t.id.replace('@c.us', '')})\n${personalized}`;
+    });
+    setSimulatorSamples(samples);
+    setShowSpintaxSimulator(true);
   };
 
   // Helper function to resolve Spintax (supports nested spintax: {Hola {amigo|vecino}|Buenas {tardes|noches}})
@@ -345,7 +403,7 @@ export function Contacts() {
       .replace(/\[\[n[uú]mero\]\]/gi, numberStr);
   };
 
-  // Execute Live Broadcast
+    // Execute Live Broadcast
   const handleExecuteLiveBroadcast = async () => {
     if (!selectedSessionId || targetContacts.length === 0 || (!messageText.trim() && !attachedImage)) return;
 
@@ -364,6 +422,7 @@ export function Contacts() {
 
     let successCount = 0;
     let failedCount = 0;
+    let lastErrorDetails = '';
 
     for (let i = 0; i < targetContacts.length; i++) {
       if (cancelRef.current) break;
@@ -376,6 +435,7 @@ export function Contacts() {
       if (cancelRef.current) break;
 
       const target = targetContacts[i];
+      const targetJid = sanitizeJid(target.id, target.number);
       const displayName = target.name || target.pushName || target.number || 'Contacto';
       setBroadcastProgress(prev => ({
         ...prev,
@@ -389,21 +449,30 @@ export function Contacts() {
 
       try {
         if (attachedImage && (attachedImage.base64 || attachedImage.url)) {
-          const finalBase64 = attachedImage.base64 || (attachedImage.url?.startsWith('data:') ? attachedImage.url : undefined);
-          const finalUrl = !attachedImage.url?.startsWith('data:') ? attachedImage.url : undefined;
+          let finalBase64 = attachedImage.base64;
+          let finalUrl = attachedImage.url;
 
-          await messageApi.sendMedia(selectedSessionId, target.id, 'image', {
+          if (finalUrl && finalUrl.startsWith('data:')) {
+            finalBase64 = finalUrl;
+            finalUrl = undefined;
+          } else if (finalUrl && finalUrl.startsWith('/')) {
+            finalUrl = `${window.location.origin}${finalUrl}`;
+          }
+
+          await messageApi.sendMedia(selectedSessionId, targetJid, 'image', {
             base64: finalBase64,
             url: finalUrl,
             mimetype: attachedImage.mimetype || 'image/jpeg',
             caption: formattedMessage,
           });
         } else {
-          await messageApi.sendText(selectedSessionId, target.id, formattedMessage);
+          await messageApi.sendText(selectedSessionId, targetJid, formattedMessage);
         }
         successCount++;
-      } catch (err) {
-        console.error(`Error sending broadcast to ${target.id}:`, err);
+      } catch (err: any) {
+        const errMsg = err?.response?.data?.message || err?.message || 'Error desconocido';
+        lastErrorDetails = typeof errMsg === 'object' ? JSON.stringify(errMsg) : String(errMsg);
+        console.error(`Error sending broadcast to ${targetJid}:`, lastErrorDetails, err);
         failedCount++;
       }
 
@@ -428,7 +497,14 @@ export function Contacts() {
     }
 
     setIsBroadcasting(false);
-    toast.success('Difusión Finalizada', `Éxito: ${successCount}, Fallidos: ${failedCount}`);
+    if (failedCount === 0) {
+      toast.success('Difusión Finalizada con Éxito', `Se enviaron ${successCount} mensajes correctamente.`);
+    } else {
+      toast.warning(
+        'Difusión Finalizada con Observaciones',
+        `Éxito: ${successCount}, Fallidos: ${failedCount}.${lastErrorDetails ? ` Razón: ${lastErrorDetails}` : ''}`
+      );
+    }
     setActiveTab('campaign_history');
   };
 
@@ -438,7 +514,7 @@ export function Contacts() {
 
     try {
       const messages = targetContacts.map(target => {
-        const chatId = target.id;
+        const chatId = sanitizeJid(target.id, target.number);
         let personalized = interpolateVariables(messageText, target);
         personalized = parseSpintax(personalized);
 
@@ -1044,6 +1120,7 @@ export function Contacts() {
                   <Send size={18} /> Redactar Mensaje
                 </label>
                 <textarea
+                  ref={textareaRef}
                   rows={5}
                   placeholder="Escribe tu mensaje aquí..."
                   value={messageText}
@@ -1152,18 +1229,98 @@ export function Contacts() {
                 )}
               </div>
 
-              {/* Variables & Spintax Helpers */}
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Variables dinámicas:</span>
-                <button className="variable-tag" onClick={() => insertVariable('{{nombre}}')}>
-                  <Sparkles size={12} /> {'{{nombre}}'}
-                </button>
-                <button className="variable-tag" onClick={() => insertVariable('{{numero}}')}>
-                  <Sparkles size={12} /> {'{{numero}}'}
-                </button>
-                <button className="variable-tag" onClick={() => insertVariable('{Hola|Buenas tardes|Saludos}')}>
-                  <Sparkles size={12} /> Spintax: {'{Hola|Buenas|Saludos}'}
-                </button>
+              {/* Variables & Spintax Control Center */}
+              <div className="spintax-control-box">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 600, fontSize: '0.85rem' }}>
+                    <Wand2 size={16} style={{ color: '#25d366' }} />
+                    <span>Personalización Inteligente y Spintax Anti-Baneo</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.4rem' }}>
+                    <button
+                      type="button"
+                      className="spintax-chip-btn"
+                      onClick={handleGenerateSamples}
+                      style={{ background: 'rgba(37, 211, 102, 0.15)', borderColor: '#25d366', color: '#25d366', fontWeight: 600 }}
+                    >
+                      <Dices size={13} />
+                      {showSpintaxSimulator ? 'Regenerar Muestra' : '🎲 Probar Variaciones en Vivo'}
+                    </button>
+                    {showSpintaxSimulator && (
+                      <button
+                        type="button"
+                        className="spintax-chip-btn"
+                        onClick={() => setShowSpintaxSimulator(false)}
+                        title="Ocultar simulador"
+                      >
+                        <X size={13} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Dynamic Variables row */}
+                <div style={{ marginBottom: '0.75rem', display: 'flex', flexWrap: 'wrap', gap: '0.4rem', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 500 }}>Variables del contacto:</span>
+                  <button type="button" className="variable-tag" onClick={() => insertVariable('{{nombre}}')} title="Inserta el nombre o 'Amig@'">
+                    <Sparkles size={11} /> {'{{nombre}}'}
+                  </button>
+                  <button type="button" className="variable-tag" onClick={() => insertVariable('[[nombre]]')} title="Formato alternativo [[nombre]]">
+                    <Sparkles size={11} /> {'[[nombre]]'}
+                  </button>
+                  <button type="button" className="variable-tag" onClick={() => insertVariable('{{numero}}')} title="Inserta el número de teléfono sin @c.us">
+                    <Sparkles size={11} /> {'{{numero}}'}
+                  </button>
+                </div>
+
+                {/* Spintax Presets Groups */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {SPINTAX_PRESETS.map((group, gIdx) => (
+                    <div key={gIdx} className="spintax-category-group">
+                      <div className="spintax-category-title">{group.category}</div>
+                      <div className="spintax-chips-container">
+                        {group.items.map((item, iIdx) => (
+                          <button
+                            key={iIdx}
+                            type="button"
+                            className="spintax-chip-btn"
+                            onClick={() => insertVariable(item.value)}
+                            title={`Clic para insertar: ${item.value}`}
+                          >
+                            <span style={{ color: 'var(--text-muted)' }}>+</span> {item.label}: <strong style={{ color: '#25d366', fontWeight: 500 }}>{item.value}</strong>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Live Simulator Accordion/Card */}
+                {showSpintaxSimulator && (
+                  <div className="spintax-simulator-box">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                      <strong style={{ fontSize: '0.8rem', color: '#10b981', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                        <Eye size={14} /> Simulador en Vivo: 3 Variaciones Aleatorias Reales
+                      </strong>
+                      <button
+                        type="button"
+                        onClick={handleGenerateSamples}
+                        className="spintax-chip-btn"
+                        style={{ fontSize: '0.7rem' }}
+                      >
+                        <RefreshCw size={11} /> Nueva Combinación
+                      </button>
+                    </div>
+                    {simulatorSamples.map((sample, sIdx) => (
+                      <div key={sIdx} className="spintax-sample-item">
+                        {sample}
+                      </div>
+                    ))}
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                      💡 Cada destinatario recibirá una combinación diferente generada al momento del envío.
+                    </div>
+                  </div>
+                )}
               </div>
 
               {templates.length > 0 && (

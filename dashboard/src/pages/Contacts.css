@@ -431,3 +431,78 @@ select optgroup {
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
 }
 
+/* Spintax Control Center & Presets */
+.spintax-control-box {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 0.875rem 1rem;
+  margin-top: 0.5rem;
+}
+
+.spintax-category-group {
+  margin-bottom: 0.65rem;
+}
+
+.spintax-category-group:last-child {
+  margin-bottom: 0;
+}
+
+.spintax-category-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 0.35rem;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.spintax-chips-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.spintax-chip-btn {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-color);
+  font-size: 0.75rem;
+  padding: 0.25rem 0.55rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-family: inherit;
+}
+
+.spintax-chip-btn:hover {
+  background: rgba(37, 211, 102, 0.15);
+  border-color: #25d366;
+  color: #25d366;
+}
+
+.spintax-simulator-box {
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 0.875rem 1rem;
+  margin-top: 0.75rem;
+}
+
+.spintax-sample-item {
+  background: #1e293b;
+  border: 1px solid #475569;
+  border-radius: 6px;
+  padding: 0.65rem 0.85rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  color: #f1f5f9;
+  line-height: 1.4;
+}
+
+
