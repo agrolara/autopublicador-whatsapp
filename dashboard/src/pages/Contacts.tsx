@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useDeferredValue } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Users,
@@ -47,6 +47,56 @@ import './Contacts.css';
 type MainTab = 'contacts' | 'create_broadcast' | 'campaign_history';
 type FilterType = 'all' | 'saved' | 'unsaved';
 
+interface SpintaxPresetGroup {
+  category: string;
+  items: { label: string; value: string }[];
+}
+
+const SPINTAX_PRESETS: SpintaxPresetGroup[] = [
+  {
+    category: '👋 Saludos y Aperturas',
+    items: [
+      { label: 'Básico', value: '{Hola|Buenas|Saludos|Qué tal}' },
+      { label: 'Formal / Día', value: '{Buenos días|Buenas tardes|Hola qué tal}' },
+      { label: 'Cercano / Amigo', value: '{Hola amigo/a|Estimad@|Hola vecino/a}' },
+      { label: 'Directo y Alegre', value: '{¡Hola! ¿Cómo estás?|¡Buenas! Un gusto|¡Saludos cordiales!}' },
+    ],
+  },
+  {
+    category: '🤝 Cortesía y Conexión',
+    items: [
+      { label: 'Deseo de bienestar', value: '{espero que tengas un excelente día|espero te encuentres muy bien|un gusto saludarte}' },
+      { label: 'Introducción de novedad', value: '{te escribo para contarte que|paso a avisarte que|quería compartir contigo que}' },
+      { label: 'Mensaje breve', value: '{te escribo brevemente porque|paso rápido a comentarte que}' },
+    ],
+  },
+  {
+    category: '🎯 Llamados a la Acción (CTA)',
+    items: [
+      { label: 'Pedir información', value: '{¿Te gustaría conocer más detalles?|¿Te interesa esta información?|¿Te gustaría que te enviemos la carta/catálogo?}' },
+      { label: 'Hacer pedido', value: '{¡Haz tu pedido respondiendo a este mensaje!|¡Escríbenos para pedir el tuyo!|¡Aprovecha antes de que se agote!}' },
+      { label: 'Consulta rápida', value: '{¿Me avisas si te tinca?|¿Qué opinas?|¿Te agendamos un pedido?}' },
+    ],
+  },
+  {
+    category: '🙌 Despedidas',
+    items: [
+      { label: 'Atenta y cálida', value: '{¡Que tengas un gran día!|¡Un abrazo grande!|¡Quedo atento a tus comentarios!}' },
+      { label: 'Agradecida', value: '{¡Saludos cordiales!|¡Muchas gracias por tu tiempo!|¡Que estés muy bien!}' },
+      { label: 'Cierre rápido', value: '{¡Hablamos pronto!|¡Cualquier duda me avisas!|¡Éxito en todo!}' },
+    ],
+  },
+  {
+    category: '✨ Emojis Anti-Detección',
+    items: [
+      { label: 'Comida / Negocio', value: '{🍕|🔥|✨|📦}' },
+      { label: 'Saludos / Amistad', value: '{👏|🤝|😊|⭐}' },
+      { label: 'Llamado de atención', value: '{👉|⚡|🔔|📢}' },
+    ],
+  },
+];
+
+
 export function Contacts() {
   useDocumentTitle('Gestión de Contactos y Difusiones');
   const toast = useToast();
@@ -61,6 +111,9 @@ export function Contacts() {
   const [loadingContacts, setLoadingContacts] = useState<boolean>(false);
   const [filterType, setFilterType] = useState<FilterType>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const deferredSearchQuery = useDeferredValue(searchQuery);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const pageSize = 50;
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   // Contact Categories state
@@ -195,19 +248,46 @@ export function Contacts() {
     }
   }, [activeTab, selectedSessionId]);
 
-  // Filter & Search logic
+    // Fast O(1) map for contact -> categories lookup
+  const contactCategoryMap = useMemo(() => {
+    const map = new Map<string, ContactCategoryItem[]>();
+    for (const cat of categories) {
+      if (Array.isArray(cat.contactIds)) {
+        for (const cid of cat.contactIds) {
+          const list = map.get(cid);
+          if (list) {
+            list.push(cat);
+          } else {
+            map.set(cid, [cat]);
+          }
+        }
+      }
+    }
+    return map;
+  }, [categories]);
+
+  // Fast O(1) set for selected category filter
+  const selectedCatSet = useMemo(() => {
+    if (selectedCategoryFilter === 'all') return null;
+    const cat = categories.find(k => k.id === selectedCategoryFilter);
+    return cat && Array.isArray(cat.contactIds) ? new Set(cat.contactIds) : null;
+  }, [categories, selectedCategoryFilter]);
+
+  // Reset pagination to page 1 on filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterType, selectedCategoryFilter, deferredSearchQuery, selectedSessionId]);
+
+  // Filter & Search logic (optimized with Set lookup and deferred query)
   const filteredContacts = useMemo(() => {
+    const q = deferredSearchQuery.toLowerCase().trim();
     return contacts.filter(c => {
       if (filterType === 'saved' && !c.isMyContact) return false;
       if (filterType === 'unsaved' && c.isMyContact) return false;
 
-      if (selectedCategoryFilter !== 'all') {
-        const cat = categories.find(k => k.id === selectedCategoryFilter);
-        if (cat && !cat.contactIds.includes(c.id)) return false;
-      }
+      if (selectedCatSet && !selectedCatSet.has(c.id)) return false;
 
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase().trim();
+      if (q) {
         const nameMatch = c.name?.toLowerCase().includes(q);
         const pushMatch = c.pushName?.toLowerCase().includes(q);
         const numberMatch = c.number?.includes(q) || c.id.includes(q);
@@ -215,7 +295,13 @@ export function Contacts() {
       }
       return true;
     });
-  }, [contacts, filterType, selectedCategoryFilter, searchQuery, categories]);
+  }, [contacts, filterType, selectedCatSet, deferredSearchQuery]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredContacts.length / pageSize));
+  const paginatedContacts = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredContacts.slice(start, start + pageSize);
+  }, [filteredContacts, currentPage, pageSize]);
 
   const savedCount = useMemo(() => contacts.filter(c => c.isMyContact).length, [contacts]);
   const unsavedCount = useMemo(() => contacts.filter(c => !c.isMyContact).length, [contacts]);
@@ -794,7 +880,7 @@ export function Contacts() {
 
               {/* Category Filter Pills */}
               {categories.map(cat => {
-                const count = contacts.filter(c => cat.contactIds.includes(c.id)).length;
+                const count = cat.contactIds?.length || 0;
                 const isActive = selectedCategoryFilter === cat.id;
                 return (
                   <button
@@ -873,7 +959,8 @@ export function Contacts() {
                 <p>Intenta cambiar los filtros de búsqueda o seleccionar otra sesión.</p>
               </div>
             ) : (
-              <table className="contacts-table">
+              <>
+                <table className="contacts-table">
                 <thead>
                   <tr>
                     <th style={{ width: '40px', textAlign: 'center' }}>
@@ -887,11 +974,11 @@ export function Contacts() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredContacts.map(c => {
+                  {paginatedContacts.map(c => {
                     const isSelected = selectedIds.has(c.id);
                     const displayName = c.name || c.pushName || c.number || 'Contacto';
                     const initial = displayName.charAt(0).toUpperCase();
-                    const contactCats = categories.filter(cat => cat.contactIds.includes(c.id));
+                    const contactCats = contactCategoryMap.get(c.id) || [];
 
                     return (
                       <tr key={c.id} style={{ background: isSelected ? 'rgba(37, 211, 102, 0.05)' : undefined }}>
@@ -949,6 +1036,50 @@ export function Contacts() {
                   })}
                 </tbody>
               </table>
+
+            {/* Pagination Controls */}
+            {filteredContacts.length > pageSize && (
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '0.85rem 1.25rem',
+                borderTop: '1px solid var(--border-color)',
+                backgroundColor: 'rgba(15, 23, 42, 0.4)',
+                flexWrap: 'wrap',
+                gap: '0.75rem',
+              }}>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  Mostrando <strong style={{ color: 'var(--text-color)' }}>{(currentPage - 1) * pageSize + 1}</strong> a{' '}
+                  <strong style={{ color: 'var(--text-color)' }}>{Math.min(currentPage * pageSize, filteredContacts.length)}</strong> de{' '}
+                  <strong style={{ color: '#25d366' }}>{filteredContacts.length}</strong> contactos filtrados
+                </span>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', cursor: currentPage === 1 ? 'not-allowed' : 'pointer' }}
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                  >
+                    « Anterior
+                  </button>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600, padding: '0 0.5rem' }}>
+                    Página {currentPage} de {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer' }}
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                  >
+                    Siguiente »
+                  </button>
+                </div>
+              </div>
+            )}
+              </>
             )}
           </div>
         </>
@@ -1087,7 +1218,7 @@ export function Contacts() {
 
                   {/* Custom Categories Buttons */}
                   {categories.map(cat => {
-                    const count = contacts.filter(c => cat.contactIds.includes(c.id)).length;
+                    const count = cat.contactIds?.length || 0;
                     const isActive = targetAudience === `category_${cat.id}`;
                     return (
                       <button
