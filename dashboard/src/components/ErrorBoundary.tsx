@@ -67,6 +67,31 @@ export class ErrorBoundary extends Component<Props, State> {
             <RefreshCw size={18} />
             {i18n.t('errorBoundary.reload')}
           </button>
+
+          {this.state.error && (
+            <div
+              style={{
+                marginTop: '1.5rem',
+                maxWidth: '750px',
+                width: '100%',
+                padding: '1rem',
+                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                borderRadius: '0.5rem',
+                color: '#ef4444',
+                textAlign: 'left',
+                overflowX: 'auto',
+                fontSize: '0.85rem',
+              }}
+            >
+              <div style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>
+                Detalles del error: {this.state.error.name}: {this.state.error.message}
+              </div>
+              <pre style={{ margin: 0, fontSize: '0.75rem', whiteSpace: 'pre-wrap', color: 'var(--text-muted)' }}>
+                {this.state.error.stack}
+              </pre>
+            </div>
+          )}
         </div>
       );
     }

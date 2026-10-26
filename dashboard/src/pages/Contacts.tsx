@@ -374,6 +374,23 @@ export function Contacts() {
     return `${cleanNum}@c.us`;
   };
 
+  // Upload and handle image for campaign attachment
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      setAttachedImage({
+        base64: result,
+        name: file.name,
+        mimetype: file.type || 'image/jpeg',
+      });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
   const handleTemplateChange = (templateId: string) => {
     setSelectedTemplateId(templateId);
     if (!templateId) {
@@ -988,7 +1005,7 @@ export function Contacts() {
                         <td>
                           <div className="avatar-cell">
                             <div className="contact-avatar">
-                              {c.profilePicUrl ? <img src={c.profilePicUrl} alt={displayName} /> : initial}
+                              {(c as any).profilePicUrl ? <img src={(c as any).profilePicUrl} alt={displayName} /> : initial}
                             </div>
                             <div>
                               <strong>{c.name || 'Sin nombre guardado'}</strong>
@@ -1454,7 +1471,7 @@ export function Contacts() {
                 )}
               </div>
 
-              {templates.length > 0 && (
+              {Array.isArray(templates) && templates.length > 0 && (
                 <div>
                   <label style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>Cargar desde Plantilla:</label>
                   <select
@@ -1709,13 +1726,13 @@ export function Contacts() {
                 <div style={{ fontSize: '0.875rem', color: 'var(--text-color)' }}>
                   <strong>Mensaje:</strong>
                   <p style={{ background: 'var(--bg-secondary)', padding: '0.5rem', borderRadius: '6px', margin: '0.25rem 0' }}>
-                    {c.payload?.messages?.[0]?.content?.caption || c.payload?.messages?.[0]?.content?.text || c.payload?.message?.text || '-'}
+                    {c.payload?.messages?.[0]?.content?.caption || c.payload?.messages?.[0]?.content?.text || (c.payload as any)?.message?.text || '-'}
                   </p>
                 </div>
 
                 <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  <span>Destinatarios: {c.payload?.messages?.length || c.payload?.recipients?.length || 0}</span>
-                  <span>Delay: {c.payload?.minDelaySeconds ?? 4}s - {c.payload?.maxDelaySeconds ?? 10}s</span>
+                  <span>Destinatarios: {c.payload?.messages?.length || (c.payload as any)?.recipients?.length || 0}</span>
+                  <span>Delay: {(c.payload as any)?.minDelaySeconds ?? 4}s - {(c.payload as any)?.maxDelaySeconds ?? 10}s</span>
                   {c.lastRunAt && <span>Último envío: {new Date(c.lastRunAt).toLocaleString()}</span>}
                 </div>
               </div>

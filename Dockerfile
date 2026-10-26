@@ -168,8 +168,7 @@ ENV PUPPETEER_EXECUTABLE_PATH=/usr/local/bin/puppeteer-chrome
 # Copy built application from builder stage
 COPY --from=builder /app/dist ./dist
 
-# Copy the bundled dashboard SPA; ServeStaticModule serves it from this same process/port
-# (app.module.ts resolves dashboard/dist relative to dist/). Single container, single port.
+# Bust BuildKit cache for dashboard dist bundle (v0.15.1-broadcast-hotfix-2026-10-26)
 COPY --from=builder /app/dashboard/dist ./dashboard/dist
 
 # Create data directories with correct ownership. Only ./data is chowned, NOT all of /app: the app
