@@ -5,6 +5,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Not, IsNull } from 'typeorm';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { SessionService } from '../session/session.service';
+import { GroupTagsService } from './group-tags.service';
 import { LidMapping } from '../../engine/identity/lid-mapping.entity';
 
 export interface ContactCategory {
@@ -42,6 +43,9 @@ export class ContactCategoriesService {
     @Optional()
     @Inject(forwardRef(() => SessionService))
     private readonly sessionService?: SessionService,
+    @Optional()
+    @Inject(forwardRef(() => GroupTagsService))
+    private readonly groupTagsService?: GroupTagsService,
   ) {
     this.loadFromFile();
   }
@@ -126,13 +130,79 @@ export class ContactCategoriesService {
   }
 
   /**
+   * Resolves the primary geographic zone for a WhatsApp group using:
+   * 1. Existing manual group tags (QUILICURA, RENCA, OTROS, NO PUBLICAR AQUI -> mapped to Otros)
+   * 2. Semantic matching against Santiago commune keywords from the group subject / name
+   */
+  resolveGroupZone(groupId: string, groupName: string = ''): string {
+    // 1. Check existing Group Tags
+    if (this.groupTagsService) {
+      try {
+        const tags = this.groupTagsService.getTags();
+        for (const t of tags) {
+          if (Array.isArray(t.groupIds) && t.groupIds.includes(groupId)) {
+            const tagNameUpper = (t.name || '').toUpperCase().trim();
+            if (tagNameUpper.includes('QUILICURA')) return 'Quilicura';
+            if (tagNameUpper.includes('RENCA')) return 'Renca';
+            // Numbers in "NO PUBLICAR AQUI" are categorized as "Otros" per user requirement
+            if (tagNameUpper.includes('NO PUBLICAR') || tagNameUpper.includes('NO_PUBLICAR')) return 'Otros';
+            if (tagNameUpper.includes('OTRO')) return 'Otros';
+            return t.name.charAt(0).toUpperCase() + t.name.slice(1).toLowerCase();
+          }
+        }
+      } catch (err: any) {
+        this.logger.debug(`Error checking group tags: ${err?.message}`);
+      }
+    }
+
+    // 2. Semantic matching from group title (Santiago communes)
+    const nameLower = (groupName || '').toLowerCase();
+    if (/quilicura|valle\s*lo\s*campino|valle\s*grande/i.test(nameLower)) return 'Quilicura';
+    if (/renca/i.test(nameLower)) return 'Renca';
+    if (/maip[uú]|pajaritos/i.test(nameLower)) return 'Maipú';
+    if (/pudahuel|ciudad\s*de\s*los\s*valles/i.test(nameLower)) return 'Pudahuel';
+    if (/lampa|batuco/i.test(nameLower)) return 'Lampa';
+    if (/santiago\s*centro|stgo\s*centro/i.test(nameLower)) return 'Santiago Centro';
+    if (/la\s*florida/i.test(nameLower)) return 'La Florida';
+    if (/puente\s*alto/i.test(nameLower)) return 'Puente Alto';
+    if (/san\s*bernardo/i.test(nameLower)) return 'San Bernardo';
+    if (/conchal[ií]/i.test(nameLower)) return 'Conchalí';
+    if (/recoleta/i.test(nameLower)) return 'Recoleta';
+    if (/colina|chicureo/i.test(nameLower)) return 'Colina';
+    if (/independencia/i.test(nameLower)) return 'Independencia';
+    if (/estaci[oó]n\s*central/i.test(nameLower)) return 'Estación Central';
+    if (/las\s*condes/i.test(nameLower)) return 'Las Condes';
+    if (/providencia/i.test(nameLower)) return 'Providencia';
+    if (/ñuñoa|nunoa/i.test(nameLower)) return 'Ñuñoa';
+    if (/peñalol[eé]n|penalolen/i.test(nameLower)) return 'Peñalolén';
+    if (/la\s*cisterna/i.test(nameLower)) return 'La Cisterna';
+    if (/el\s*bosque/i.test(nameLower)) return 'El Bosque';
+    if (/san\s*miguel/i.test(nameLower)) return 'San Miguel';
+    if (/quinta\s*normal/i.test(nameLower)) return 'Quinta Normal';
+    if (/cerro\s*navia/i.test(nameLower)) return 'Cerro Navia';
+    if (/lo\s*prado/i.test(nameLower)) return 'Lo Prado';
+    if (/macul/i.test(nameLower)) return 'Macul';
+    if (/san\s*joaqu[ií]n/i.test(nameLower)) return 'San Joaquín';
+    if (/lo\s*espejo/i.test(nameLower)) return 'Lo Espejo';
+    if (/pedro\s*aguirre\s*cerda/i.test(nameLower)) return 'PAC';
+    if (/cerrillos/i.test(nameLower)) return 'Cerrillos';
+    if (/huechuraba/i.test(nameLower)) return 'Huechuraba';
+    if (/lo\s*barnechea/i.test(nameLower)) return 'Lo Barnechea';
+    if (/vitacura/i.test(nameLower)) return 'Vitacura';
+    if (/la\s*reina/i.test(nameLower)) return 'La Reina';
+
+    return 'Otros';
+  }
+
+  /**
    * Scans all groups from the specified session, extracts all participants,
-   * excludes bot's own number and previously classified contacts,
-   * and creates clean broadcast categories of up to maxPerBatch contacts (default: 100).
+   * excludes bot's own number and previously classified contacts (unless purgeFirst is true),
+   * segmenting them by commune/zone into clean broadcast categories of up to maxPerBatch contacts (default: 100).
    */
   async extractAndCreateGroupBroadcasts(
     sessionId: string,
     maxPerBatch: number = 100,
+    purgeFirst: boolean = false,
   ): Promise<GroupBroadcastExtractionResult> {
     if (!this.engines) {
       throw new BadRequestException('EngineRegistry no está disponible en el servidor');
@@ -147,6 +217,14 @@ export class ContactCategoriesService {
 
     if (!engine) {
       throw new BadRequestException(`La sesión "${sessionId}" no está iniciada o no está lista.`);
+    }
+
+    // Optional purge of previous generic or existing broadcast categories before re-classifying
+    if (purgeFirst) {
+      const initialCount = this.categories.length;
+      this.categories = this.categories.filter(c => !/^difusi[oó]n/i.test(c.name.trim()));
+      this.saveToFile();
+      this.logger.log(`Purged ${initialCount - this.categories.length} previous broadcast categories before re-extracting`);
     }
 
     // 1. Identify bot's own numbers to exclude
@@ -172,20 +250,12 @@ export class ContactCategoriesService {
       }
     } catch {}
 
-    // 2. Identify all contacts already categorized in any existing Difusión
+    // 2. Identify all contacts already categorized in any existing Difusión (skipped when purgeFirst is false)
     const existingCategories = this.getCategories(sessionId);
     const existingContactJids = new Set<string>();
     const existingPhones = new Set<string>();
 
-    let maxIndex = 0;
-    const difusionRegex = /^difusi[oó]n\s+(\d+)$/i;
-
     for (const cat of existingCategories) {
-      const match = cat.name.trim().match(difusionRegex);
-      if (match) {
-        const num = parseInt(match[1], 10);
-        if (num > maxIndex) maxIndex = num;
-      }
       for (const cid of cat.contactIds) {
         existingContactJids.add(cid);
         const p = cid.split('@')[0].replace(/\D/g, '');
@@ -213,10 +283,11 @@ export class ContactCategoriesService {
       };
     }
 
-    this.logger.log(`Scanning participants from ${groups.length} groups in session ${sessionId}...`);
+    this.logger.log(`Scanning participants from ${groups.length} groups in session ${sessionId} (purgeFirst: ${purgeFirst})...`);
 
-    // 4. Extract participants from all groups
+    // 4. Extract participants from all groups tracking group context & zones
     const rawParticipantMap = new Map<string, { id: string; name?: string }>();
+    const participantZonesMap = new Map<string, Set<string>>();
     let fastLoaded = false;
 
     // Fast-path A: WWJS client.getChats()
@@ -227,12 +298,15 @@ export class ContactCategoriesService {
         if (Array.isArray(chats)) {
           const groupChats = chats.filter((c: any) => c.isGroup);
           for (const gc of groupChats) {
+            const groupZone = this.resolveGroupZone(gc.id?._serialized || gc.id, gc.name || gc.subject);
             if (Array.isArray(gc.participants) && gc.participants.length > 0) {
               fastLoaded = true;
               for (const p of gc.participants) {
                 const wid = p.id?._serialized || (typeof p.id === 'string' ? p.id : undefined);
                 if (wid) {
                   rawParticipantMap.set(wid, { id: wid, name: p.name });
+                  if (!participantZonesMap.has(wid)) participantZonesMap.set(wid, new Set());
+                  participantZonesMap.get(wid)!.add(groupZone);
                 }
               }
             }
@@ -254,12 +328,15 @@ export class ContactCategoriesService {
           const allMetadata = await sock.groupFetchAllParticipating();
           if (allMetadata && typeof allMetadata === 'object') {
             fastLoaded = true;
-            for (const [, meta] of Object.entries(allMetadata as Record<string, any>)) {
+            for (const [gid, meta] of Object.entries(allMetadata as Record<string, any>)) {
+              const groupZone = this.resolveGroupZone(gid, meta?.subject || meta?.name);
               if (Array.isArray(meta?.participants)) {
                 for (const p of meta.participants) {
                   const wid = p.id;
                   if (wid) {
                     rawParticipantMap.set(wid, { id: wid, name: p.name });
+                    if (!participantZonesMap.has(wid)) participantZonesMap.set(wid, new Set());
+                    participantZonesMap.get(wid)!.add(groupZone);
                   }
                 }
               }
@@ -281,10 +358,13 @@ export class ContactCategoriesService {
           slice.map(async g => {
             try {
               const info = await engine.getGroupInfo(g.id);
+              const groupZone = this.resolveGroupZone(g.id, info?.subject || info?.name || g.name);
               if (info && Array.isArray(info.participants)) {
                 for (const p of info.participants) {
                   if (p.id) {
                     rawParticipantMap.set(p.id, { id: p.id, name: p.name });
+                    if (!participantZonesMap.has(p.id)) participantZonesMap.set(p.id, new Set());
+                    participantZonesMap.get(p.id)!.add(groupZone);
                   }
                 }
               }
@@ -311,10 +391,11 @@ export class ContactCategoriesService {
       } catch {}
     }
 
-    // 6. Clean, filter and deduplicate
+    // 6. Clean, filter and deduplicate into Zone Buckets
     let existingContactsSkipped = 0;
     const newUniqueContactJids: string[] = [];
     const seenPhonesThisScan = new Set<string>();
+    const zoneBuckets = new Map<string, string[]>();
 
     for (const [rawId] of rawParticipantMap.entries()) {
       if (!rawId || typeof rawId !== 'string') continue;
@@ -349,10 +430,35 @@ export class ContactCategoriesService {
 
       seenPhonesThisScan.add(phone);
       newUniqueContactJids.push(jid);
+
+      // Determine primary zone for contact with business priority:
+      // Priority 1: Quilicura
+      // Priority 2: Renca
+      // Priority 3: Other specific commune
+      // Priority 4: Otros (includes "NO PUBLICAR AQUI" and miscellaneous groups)
+      const zones = participantZonesMap.get(rawId) || new Set(['Otros']);
+      let primaryZone = 'Otros';
+      if (zones.has('Quilicura')) {
+        primaryZone = 'Quilicura';
+      } else if (zones.has('Renca')) {
+        primaryZone = 'Renca';
+      } else {
+        for (const z of zones) {
+          if (z !== 'Otros') {
+            primaryZone = z;
+            break;
+          }
+        }
+      }
+
+      if (!zoneBuckets.has(primaryZone)) {
+        zoneBuckets.set(primaryZone, []);
+      }
+      zoneBuckets.get(primaryZone)!.push(jid);
     }
 
     this.logger.log(
-      `Extraction Summary: Total groups: ${groups.length}, Raw: ${rawParticipantMap.size}, Skipped existing: ${existingContactsSkipped}, New unique: ${newUniqueContactJids.length}`,
+      `Extraction Summary: Total groups: ${groups.length}, Raw: ${rawParticipantMap.size}, Skipped existing: ${existingContactsSkipped}, New unique: ${newUniqueContactJids.length}, Zones: ${Array.from(zoneBuckets.keys()).join(', ')}`,
     );
 
     if (newUniqueContactJids.length === 0) {
@@ -366,28 +472,67 @@ export class ContactCategoriesService {
       };
     }
 
-    // 7. Divide into clean batches of maxPerBatch (100) and create sequential categories
+    // 7. Divide into clean batches of maxPerBatch (100) per Zone and create sequential categories
     const createdCategories: Array<{ id: string; name: string; count: number }> = [];
-    const colorPalette = ['#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#06b6d4', '#6366f1', '#14b8a6', '#f97316'];
+    const zoneColorMap: Record<string, string> = {
+      'Quilicura': '#10b981',
+      'Renca': '#0284c7',
+      'Otros': '#f59e0b',
+      'Maipú': '#8b5cf6',
+      'Pudahuel': '#ec4899',
+      'Lampa': '#06b6d4',
+      'Santiago Centro': '#6366f1',
+      'La Florida': '#14b8a6',
+    };
 
-    let currentNum = maxIndex + 1;
-    for (let i = 0; i < newUniqueContactJids.length; i += maxPerBatch) {
-      const batch = newUniqueContactJids.slice(i, i + maxPerBatch);
-      const name = `Difusión ${currentNum}`;
-      const color = colorPalette[(currentNum - 1) % colorPalette.length];
+    const colorPalette = ['#10b981', '#0284c7', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#6366f1', '#14b8a6', '#f97316'];
 
-      const saved = this.saveCategory(sessionId, {
-        name,
-        color,
-        contactIds: batch,
-      });
+    // Prioritize zone order: Quilicura first, then Renca, then other communes, then Otros last
+    const sortedZones = Array.from(zoneBuckets.keys()).sort((a, b) => {
+      if (a === 'Quilicura') return -1;
+      if (b === 'Quilicura') return 1;
+      if (a === 'Renca') return -1;
+      if (b === 'Renca') return 1;
+      if (a === 'Otros') return 1;
+      if (b === 'Otros') return -1;
+      return a.localeCompare(b);
+    });
 
-      createdCategories.push({
-        id: saved.id,
-        name: saved.name,
-        count: saved.contactIds.length,
-      });
-      currentNum++;
+    for (const zone of sortedZones) {
+      const contactsForZone = zoneBuckets.get(zone) || [];
+      if (contactsForZone.length === 0) continue;
+
+      // Find highest index for this specific zone in remaining categories
+      let zoneMaxIndex = 0;
+      const zoneRegex = new RegExp(`^difusi[oó]n\\s+${zone}\\s+(\\d+)$`, 'i');
+      for (const cat of this.categories) {
+        const match = cat.name.trim().match(zoneRegex);
+        if (match) {
+          const num = parseInt(match[1], 10);
+          if (num > zoneMaxIndex) zoneMaxIndex = num;
+        }
+      }
+
+      let currentNum = zoneMaxIndex + 1;
+      const zoneColor = zoneColorMap[zone] || colorPalette[createdCategories.length % colorPalette.length];
+
+      for (let i = 0; i < contactsForZone.length; i += maxPerBatch) {
+        const batch = contactsForZone.slice(i, i + maxPerBatch);
+        const name = `Difusión ${zone} ${currentNum}`;
+
+        const saved = this.saveCategory(sessionId, {
+          name,
+          color: zoneColor,
+          contactIds: batch,
+        });
+
+        createdCategories.push({
+          id: saved.id,
+          name: saved.name,
+          count: saved.contactIds.length,
+        });
+        currentNum++;
+      }
     }
 
     return {
@@ -396,7 +541,7 @@ export class ContactCategoriesService {
       existingContactsSkipped,
       newContactsFound: newUniqueContactJids.length,
       createdCategories,
-      message: `Se crearon exitosamente ${createdCategories.length} difusiones con ${newUniqueContactJids.length} contactos nuevos.`,
+      message: `Se crearon exitosamente ${createdCategories.length} difusiones segmentadas por zona (${Array.from(zoneBuckets.entries()).map(([z, list]) => `${z}: ${list.length}`).join(', ')}).`,
     };
   }
 }

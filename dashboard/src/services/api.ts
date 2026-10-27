@@ -1145,7 +1145,7 @@ export const contactCategoriesApi = {
     request<{ success: boolean }>(`/sessions/${sessionId}/contacts/categories/${id}`, {
       method: 'DELETE',
     }),
-  extractGroupBroadcasts: (sessionId: string, maxPerBatch: number = 100) =>
+  extractGroupBroadcasts: (sessionId: string, maxPerBatch: number = 100, purgeFirst: boolean = false) =>
     request<{
       success: boolean;
       totalGroups: number;
@@ -1155,7 +1155,7 @@ export const contactCategoriesApi = {
       message?: string;
     }>(`/sessions/${sessionId}/contacts/extract-groups-broadcasts`, {
       method: 'POST',
-      body: JSON.stringify({ maxPerBatch }),
+      body: JSON.stringify({ maxPerBatch, purgeFirst }),
     }),
 };
 

@@ -56,13 +56,14 @@ export class ContactController {
   @ApiOperation({ summary: 'Extract unique contacts from WhatsApp groups and create 100-member broadcasts incrementally' })
   async extractGroupsBroadcasts(
     @Param('sessionId') sessionId: string,
-    @Body() body?: { maxPerBatch?: number },
+    @Body() body?: { maxPerBatch?: number; purgeFirst?: boolean },
   ) {
     if (!this.contactCategoriesService) {
       return { success: false, message: 'Contact categories service is not available' };
     }
     const maxPerBatch = body?.maxPerBatch && body.maxPerBatch > 0 ? body.maxPerBatch : 100;
-    return this.contactCategoriesService.extractAndCreateGroupBroadcasts(sessionId, maxPerBatch);
+    const purgeFirst = body?.purgeFirst === true;
+    return this.contactCategoriesService.extractAndCreateGroupBroadcasts(sessionId, maxPerBatch, purgeFirst);
   }
 
   @Get('group-tags')

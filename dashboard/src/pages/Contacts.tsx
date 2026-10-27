@@ -119,6 +119,7 @@ export function Contacts() {
   // Contact Categories state
   const [categories, setCategories] = useState<ContactCategoryItem[]>([]);
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
+  const [showZonePanel, setShowZonePanel] = useState<boolean>(true);
   const [showCategoryModal, setShowCategoryModal] = useState<boolean>(false);
   const [categoryNameInput, setCategoryNameInput] = useState<string>('');
   const [categoryColorInput, setCategoryColorInput] = useState<string>('#10b981');
@@ -271,6 +272,84 @@ export function Contacts() {
     if (selectedCategoryFilter === 'all') return null;
     const cat = categories.find(k => k.id === selectedCategoryFilter);
     return cat && Array.isArray(cat.contactIds) ? new Set(cat.contactIds) : null;
+  }, [categories, selectedCategoryFilter]);
+
+  // Segment categories into structured Commune / Geographic Zones
+  const zoneGroups = useMemo(() => {
+    const map: Record<string, { zone: string; label: string; color: string; icon: string; categories: ContactCategoryItem[]; totalContacts: number }> = {
+      Quilicura: {
+        zone: 'Quilicura',
+        label: 'Quilicura',
+        color: '#10b981',
+        icon: '🏛️',
+        categories: [],
+        totalContacts: 0,
+      },
+      Renca: {
+        zone: 'Renca',
+        label: 'Renca',
+        color: '#0284c7',
+        icon: '🏙️',
+        categories: [],
+        totalContacts: 0,
+      },
+      Otros: {
+        zone: 'Otros',
+        label: 'Otros / General',
+        color: '#f59e0b',
+        icon: '📦',
+        categories: [],
+        totalContacts: 0,
+      },
+    };
+
+    const dynamicZones: Record<string, { zone: string; label: string; color: string; icon: string; categories: ContactCategoryItem[]; totalContacts: number }> = {};
+    const palette = ['#8b5cf6', '#ec4899', '#06b6d4', '#6366f1', '#14b8a6', '#f97316'];
+
+    for (const cat of categories) {
+      const nameLower = (cat.name || '').toLowerCase();
+      const count = cat.contactIds?.length || 0;
+
+      if (nameLower.includes('quilicura')) {
+        map.Quilicura.categories.push(cat);
+        map.Quilicura.totalContacts += count;
+      } else if (nameLower.includes('renca')) {
+        map.Renca.categories.push(cat);
+        map.Renca.totalContacts += count;
+      } else if (nameLower.includes('otros') || nameLower.includes('no publicar')) {
+        map.Otros.categories.push(cat);
+        map.Otros.totalContacts += count;
+      } else {
+        const match = cat.name.match(/^difusi[oó]n\s+([A-Za-zÁ-ÿ\s]+?)\s+\d+$/i);
+        const zName = match ? match[1].trim() : (cat.name.startsWith('Difusión') ? 'Otros' : 'Personalizadas');
+
+        if (zName === 'Otros') {
+          map.Otros.categories.push(cat);
+          map.Otros.totalContacts += count;
+        } else {
+          if (!dynamicZones[zName]) {
+            const color = cat.color || palette[Object.keys(dynamicZones).length % palette.length];
+            dynamicZones[zName] = {
+              zone: zName,
+              label: zName,
+              color,
+              icon: '📍',
+              categories: [],
+              totalContacts: 0,
+            };
+          }
+          dynamicZones[zName].categories.push(cat);
+          dynamicZones[zName].totalContacts += count;
+        }
+      }
+    }
+
+    const result = [map.Quilicura, map.Renca, ...Object.values(dynamicZones), map.Otros];
+    return result.filter(g => g.categories.length > 0);
+  }, [categories]);
+
+  const currentSelectedCategory = useMemo(() => {
+    return categories.find(c => c.id === selectedCategoryFilter) || null;
   }, [categories, selectedCategoryFilter]);
 
   // Reset pagination to page 1 on filter changes
@@ -675,15 +754,19 @@ export function Contacts() {
     }
   };
 
-  const handleExtractGroupBroadcasts = async () => {
+  const handleExtractGroupBroadcasts = async (purgeFirst: boolean = false) => {
     if (!selectedSessionId) {
       toast.error('Selecciona una sesión', 'Debes seleccionar una sesión activa primero.');
       return;
     }
 
+    if (purgeFirst && !window.confirm('¿Deseas purgar todas las difusiones anteriores y reclasificar limpiamente por zona (Quilicura, Renca, Otros)?')) {
+      return;
+    }
+
     setIsExtractingBroadcasts(true);
     try {
-      const res = await contactCategoriesApi.extractGroupBroadcasts(selectedSessionId, 100);
+      const res = await contactCategoriesApi.extractGroupBroadcasts(selectedSessionId, 100, purgeFirst);
       if (res.success) {
         await Promise.all([fetchContacts(), fetchCategories()]);
         setExtractionResultModal({
@@ -936,6 +1019,127 @@ export function Contacts() {
               />
             </div>
           </div>
+
+          {/* ZONE SEGMENTATION DASHBOARD PANEL (3 COLUMNS) */}
+          {categories.length > 0 && showZonePanel && (
+            <div className="zone-segmentation-panel">
+              <div className="zone-panel-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                  <Tag size={18} style={{ color: '#10b981' }} />
+                  <strong style={{ fontSize: '0.95rem' }}>
+                    Difusiones Segmentadas por Zona y Comuna ({categories.length} listas en total)
+                  </strong>
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="btn-danger-outline"
+                    style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+                    onClick={() => handleExtractGroupBroadcasts(true)}
+                    disabled={isExtractingBroadcasts || !selectedSessionId}
+                    title="Elimina las listas genéricas y reclasifica automáticamente a todos los contactos en Quilicura, Renca y Otros"
+                  >
+                    <Trash2 size={13} />
+                    🧹 Purgar y Reclasificar por Zona
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
+                    onClick={() => setShowZonePanel(false)}
+                  >
+                    ▲ Contraer
+                  </button>
+                </div>
+              </div>
+
+              <div className="zone-columns-grid">
+                {zoneGroups.map(grp => (
+                  <div key={grp.zone} className="zone-column" style={{ borderColor: grp.color }}>
+                    <div className="zone-column-title-bar" style={{ backgroundColor: `${grp.color}15`, borderBottomColor: `${grp.color}30` }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <span style={{ fontSize: '1.1rem' }}>{grp.icon}</span>
+                        <strong style={{ color: grp.color, fontSize: '0.9rem' }}>{grp.label}</strong>
+                      </div>
+                      <span className="zone-column-badge" style={{ backgroundColor: grp.color }}>
+                        {grp.categories.length} listas · {grp.totalContacts} contactos
+                      </span>
+                    </div>
+
+                    <div className="zone-column-cards-container">
+                      {grp.categories.map(cat => {
+                        const count = cat.contactIds?.length || 0;
+                        const isSelected = selectedCategoryFilter === cat.id;
+                        return (
+                          <div
+                            key={cat.id}
+                            className={`zone-list-card ${isSelected ? 'active' : ''}`}
+                            onClick={() => {
+                              setSelectedCategoryFilter(isSelected ? 'all' : cat.id);
+                              setFilterType('all');
+                            }}
+                            style={{
+                              borderColor: isSelected ? grp.color : undefined,
+                              backgroundColor: isSelected ? `${grp.color}20` : undefined,
+                            }}
+                            title={`Clic para ver los ${count} contactos de esta lista`}
+                          >
+                            <div className="zone-list-card-name">
+                              <span
+                                style={{
+                                  width: '8px',
+                                  height: '8px',
+                                  borderRadius: '50%',
+                                  backgroundColor: cat.color || grp.color,
+                                  display: 'inline-block',
+                                }}
+                              />
+                              <span>{cat.name}</span>
+                            </div>
+                            <span className="zone-list-card-count" style={{ borderColor: grp.color }}>
+                              {count}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ACTIVE CATEGORY BANNER */}
+          {selectedCategoryFilter !== 'all' && currentSelectedCategory && (
+            <div className="active-category-banner" style={{ borderLeftColor: currentSelectedCategory.color || '#10b981' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <CheckCircle2 size={18} style={{ color: currentSelectedCategory.color || '#10b981' }} />
+                <div>
+                  Mostrando lista: <strong style={{ color: currentSelectedCategory.color || '#10b981' }}>{currentSelectedCategory.name}</strong> ({currentSelectedCategory.contactIds?.length || 0} destinatarios asignados)
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <button
+                  className="btn-primary"
+                  style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+                  onClick={() => {
+                    setTargetAudience(`category_${currentSelectedCategory.id}`);
+                    setActiveTab('create_broadcast');
+                  }}
+                >
+                  <Send size={14} />
+                  🚀 Crear Difusión con esta Lista
+                </button>
+                <button
+                  className="btn-secondary"
+                  style={{ fontSize: '0.8rem', padding: '0.35rem 0.6rem' }}
+                  onClick={() => setSelectedCategoryFilter('all')}
+                >
+                  ✕ Ver Todos
+                </button>
+              </div>
+            </div>
+          )}
 
           {selectedIds.size > 0 && (
             <div className="broadcast-bar">
