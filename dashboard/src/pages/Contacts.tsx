@@ -754,19 +754,20 @@ export function Contacts() {
     }
   };
 
-  const handleExtractGroupBroadcasts = async (purgeFirst: boolean = false) => {
+  const handleExtractGroupBroadcasts = async (shouldPurge: any = false) => {
+    const isPurge = shouldPurge === true;
     if (!selectedSessionId) {
       toast.error('Selecciona una sesión', 'Debes seleccionar una sesión activa primero.');
       return;
     }
 
-    if (purgeFirst && !window.confirm('¿Deseas purgar todas las difusiones anteriores y reclasificar limpiamente por zona (Quilicura, Renca, Otros)?')) {
+    if (isPurge && !window.confirm('¿Deseas purgar todas las difusiones anteriores y reclasificar limpiamente por zona (Quilicura, Renca, Otros)?')) {
       return;
     }
 
     setIsExtractingBroadcasts(true);
     try {
-      const res = await contactCategoriesApi.extractGroupBroadcasts(selectedSessionId, 100, purgeFirst);
+      const res = await contactCategoriesApi.extractGroupBroadcasts(selectedSessionId, 100, isPurge);
       if (res.success) {
         await Promise.all([fetchContacts(), fetchCategories()]);
         setExtractionResultModal({
@@ -870,7 +871,7 @@ export function Contacts() {
             <button
               type="button"
               className="btn-extract-broadcasts"
-              onClick={handleExtractGroupBroadcasts}
+              onClick={() => handleExtractGroupBroadcasts(false)}
               disabled={isExtractingBroadcasts || !selectedSessionId}
               style={{
                 display: 'inline-flex',
@@ -1391,7 +1392,7 @@ export function Contacts() {
                   </label>
                   <button
                     type="button"
-                    onClick={handleExtractGroupBroadcasts}
+                    onClick={() => handleExtractGroupBroadcasts(false)}
                     disabled={isExtractingBroadcasts || !selectedSessionId}
                     style={{
                       background: 'rgba(16, 185, 129, 0.1)',

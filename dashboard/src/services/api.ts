@@ -1155,7 +1155,7 @@ export const contactCategoriesApi = {
       message?: string;
     }>(`/sessions/${sessionId}/contacts/extract-groups-broadcasts`, {
       method: 'POST',
-      body: JSON.stringify({ maxPerBatch, purgeFirst }),
+      body: JSON.stringify({ maxPerBatch: Number(maxPerBatch) || 100, purgeFirst: purgeFirst === true }),
     }),
 };
 
