@@ -991,18 +991,15 @@ export function Contacts() {
                 No Guardados ({unsavedCount})
               </button>
 
-              {/* Category Filter Pills */}
-              {categories.map(cat => {
+              {/* Custom Non-Broadcast Categories (e.g. VIP, Clientes) */}
+              {categories.filter(c => !/^difusi[oó]n/i.test(c.name)).map(cat => {
                 const count = cat.contactIds?.length || 0;
-                const isActive = selectedCategoryFilter === cat.id;
+                const isActive = selectedCategoryFilters.includes(cat.id);
                 return (
                   <button
                     key={cat.id}
                     className={`filter-btn ${isActive ? 'active' : ''}`}
-                    onClick={() => {
-                      setSelectedCategoryFilter(isActive ? 'all' : cat.id);
-                      setFilterType('all');
-                    }}
+                    onClick={() => toggleCategoryFilter(cat.id)}
                     style={{
                       borderColor: isActive ? undefined : (cat.color || '#3b82f6'),
                     }}
