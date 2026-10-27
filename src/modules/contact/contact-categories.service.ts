@@ -199,8 +199,15 @@ export class ContactCategoriesService {
    * excludes bot's own number and previously classified contacts (unless purgeFirst is true),
    * segmenting them by commune/zone into clean broadcast categories of up to maxPerBatch contacts (default: 100).
    */
+  /**
+   * Scans all groups from the given session (or ALL active sessions if sessionId === 'all' or empty),
+   * extracts unique participant phone numbers, resolves their LID/JID, and categorizes them,
+   * segmenting them by commune/zone into clean broadcast categories of up to maxPerBatch contacts (default: 100).
+   *
+   * Automatically fills existing incomplete categories for each zone before creating new sequential blocks.
+   */
   async extractAndCreateGroupBroadcasts(
-    sessionId: string,
+    sessionId: string = 'all',
     maxPerBatch: number = 100,
     purgeFirst: boolean = false,
   ): Promise<GroupBroadcastExtractionResult> {
@@ -208,15 +215,27 @@ export class ContactCategoriesService {
       throw new BadRequestException('EngineRegistry no está disponible en el servidor');
     }
 
-    let engine: any;
-    try {
-      engine = this.engines.get(sessionId);
-    } catch {
-      engine = null;
-    }
+    const isAllSessions = !sessionId || sessionId === 'all' || sessionId === 'global';
+    const targetEngines: Array<{ sessionId: string; engine: any }> = [];
 
-    if (!engine) {
-      throw new BadRequestException(`La sesión "${sessionId}" no está iniciada o no está lista.`);
+    if (isAllSessions) {
+      for (const [id, eng] of this.engines.entries()) {
+        if (eng) targetEngines.push({ sessionId: id, engine: eng });
+      }
+      if (targetEngines.length === 0) {
+        throw new BadRequestException('No hay ninguna sesión de WhatsApp activa o conectada actualmente.');
+      }
+    } else {
+      let engine: any;
+      try {
+        engine = this.engines.get(sessionId);
+      } catch {
+        engine = null;
+      }
+      if (!engine) {
+        throw new BadRequestException(`La sesión "${sessionId}" no está iniciada o no está lista.`);
+      }
+      targetEngines.push({ sessionId, engine });
     }
 
     // Optional purge of previous generic or existing broadcast categories before re-classifying
@@ -227,31 +246,35 @@ export class ContactCategoriesService {
       this.logger.log(`Purged ${initialCount - this.categories.length} previous broadcast categories before re-extracting`);
     }
 
-    // 1. Identify bot's own numbers to exclude
+    // 1. Identify bot's own numbers across ALL sessions to exclude
     const excludedPhones = new Set<string>();
     try {
       if (this.sessionService) {
-        const session = await this.sessionService.findOne(sessionId);
-        if (session?.phone) {
-          const p = session.phone.replace(/\D/g, '');
-          if (p) excludedPhones.add(p);
+        const allSessions = await this.sessionService.findAll();
+        for (const s of allSessions) {
+          if (s?.phone) {
+            const p = s.phone.replace(/\D/g, '');
+            if (p) excludedPhones.add(p);
+          }
         }
       }
     } catch {}
 
-    try {
-      const info = engine.info || engine.client?.info;
-      if (info?.wid) {
-        const user = typeof info.wid === 'string' ? info.wid.split('@')[0] : info.wid?.user;
-        if (user) {
-          const p = String(user).replace(/\D/g, '');
-          if (p) excludedPhones.add(p);
+    for (const item of targetEngines) {
+      try {
+        const info = item.engine.info || item.engine.client?.info;
+        if (info?.wid) {
+          const user = typeof info.wid === 'string' ? info.wid.split('@')[0] : info.wid?.user;
+          if (user) {
+            const p = String(user).replace(/\D/g, '');
+            if (p) excludedPhones.add(p);
+          }
         }
-      }
-    } catch {}
+      } catch {}
+    }
 
     // 2. Identify all contacts already categorized in any existing Difusión (skipped when purgeFirst is false)
-    const existingCategories = this.getCategories(sessionId);
+    const existingCategories = this.getCategories();
     const existingContactJids = new Set<string>();
     const existingPhones = new Set<string>();
 
@@ -263,76 +286,44 @@ export class ContactCategoriesService {
       }
     }
 
-    // 3. Fetch all groups from the engine
-    let groups: any[] = [];
-    try {
-      groups = await engine.getGroups();
-    } catch (e: any) {
-      this.logger.error(`Error al obtener grupos de sesión ${sessionId}: ${e?.message}`);
-      throw new BadRequestException(`No se pudieron obtener los grupos de la sesión: ${e?.message || 'Error de WhatsApp'}`);
-    }
-
-    if (!Array.isArray(groups) || groups.length === 0) {
-      return {
-        success: true,
-        totalGroups: 0,
-        existingContactsSkipped: 0,
-        newContactsFound: 0,
-        createdCategories: [],
-        message: 'No se encontraron grupos activos en esta sesión de WhatsApp.',
-      };
-    }
-
-    this.logger.log(`Scanning participants from ${groups.length} groups in session ${sessionId} (purgeFirst: ${purgeFirst})...`);
-
-    // 4. Extract participants from all groups tracking group context & zones
+    // 3. Fetch all groups from target engines, deduplicating groups across sessions
+    let totalGroupsScanned = 0;
     const rawParticipantMap = new Map<string, { id: string; name?: string }>();
     const participantZonesMap = new Map<string, Set<string>>();
-    let fastLoaded = false;
+    const processedGroupIds = new Set<string>();
 
-    // Fast-path A: WWJS client.getChats()
-    try {
-      const client = engine.client || engine.groups?.client?.();
-      if (client && typeof client.getChats === 'function') {
-        const chats = await client.getChats();
-        if (Array.isArray(chats)) {
-          const groupChats = chats.filter((c: any) => c.isGroup);
-          for (const gc of groupChats) {
-            const groupZone = this.resolveGroupZone(gc.id?._serialized || gc.id, gc.name || gc.subject);
-            if (Array.isArray(gc.participants) && gc.participants.length > 0) {
-              fastLoaded = true;
-              for (const p of gc.participants) {
-                const wid = p.id?._serialized || (typeof p.id === 'string' ? p.id : undefined);
-                if (wid) {
-                  rawParticipantMap.set(wid, { id: wid, name: p.name });
-                  if (!participantZonesMap.has(wid)) participantZonesMap.set(wid, new Set());
-                  participantZonesMap.get(wid)!.add(groupZone);
-                }
-              }
-            }
-          }
-          if (fastLoaded) {
-            this.logger.log(`Fast-extracted ${rawParticipantMap.size} participants across WWJS group chats`);
-          }
-        }
-      }
-    } catch (e: any) {
-      this.logger.debug(`WWJS getChats fast-path skipped: ${e?.message}`);
-    }
-
-    // Fast-path B: Baileys sock.groupFetchAllParticipating()
-    if (!fastLoaded) {
+    for (const item of targetEngines) {
+      const eng = item.engine;
+      const sId = item.sessionId;
+      let sessionGroups: any[] = [];
       try {
-        const sock = engine.sock || engine.groups?.sock?.();
-        if (sock && typeof sock.groupFetchAllParticipating === 'function') {
-          const allMetadata = await sock.groupFetchAllParticipating();
-          if (allMetadata && typeof allMetadata === 'object') {
-            fastLoaded = true;
-            for (const [gid, meta] of Object.entries(allMetadata as Record<string, any>)) {
-              const groupZone = this.resolveGroupZone(gid, meta?.subject || meta?.name);
-              if (Array.isArray(meta?.participants)) {
-                for (const p of meta.participants) {
-                  const wid = p.id;
+        sessionGroups = await eng.getGroups();
+      } catch (e: any) {
+        this.logger.warn(`Error al obtener grupos de sesión ${sId}: ${e?.message}`);
+        continue;
+      }
+
+      if (!Array.isArray(sessionGroups)) continue;
+
+      let fastLoaded = false;
+      // Fast-path A: WWJS client.getChats()
+      try {
+        const client = eng.client || eng.groups?.client?.();
+        if (client && typeof client.getChats === 'function') {
+          const chats = await client.getChats();
+          if (Array.isArray(chats)) {
+            const groupChats = chats.filter((c: any) => c.isGroup);
+            for (const gc of groupChats) {
+              const gid = gc.id?._serialized || gc.id;
+              if (!gid || processedGroupIds.has(gid)) continue;
+              processedGroupIds.add(gid);
+              totalGroupsScanned++;
+
+              const groupZone = this.resolveGroupZone(gid, gc.name || gc.subject);
+              if (Array.isArray(gc.participants) && gc.participants.length > 0) {
+                fastLoaded = true;
+                for (const p of gc.participants) {
+                  const wid = p.id?._serialized || (typeof p.id === 'string' ? p.id : undefined);
                   if (wid) {
                     rawParticipantMap.set(wid, { id: wid, name: p.name });
                     if (!participantZonesMap.has(wid)) participantZonesMap.set(wid, new Set());
@@ -341,40 +332,94 @@ export class ContactCategoriesService {
                 }
               }
             }
-            this.logger.log(`Fast-extracted ${rawParticipantMap.size} participants across Baileys socket metadata`);
           }
         }
       } catch (e: any) {
-        this.logger.debug(`Baileys groupFetchAllParticipating fast-path skipped: ${e?.message}`);
+        this.logger.debug(`WWJS getChats fast-path skipped for ${sId}: ${e?.message}`);
       }
-    }
 
-    // Standard Fallback: Query each group's metadata via engine.getGroupInfo
-    if (!fastLoaded || rawParticipantMap.size === 0) {
-      const batchSize = 6;
-      for (let i = 0; i < groups.length; i += batchSize) {
-        const slice = groups.slice(i, i + batchSize);
-        await Promise.allSettled(
-          slice.map(async g => {
-            try {
-              const info = await engine.getGroupInfo(g.id);
-              const groupZone = this.resolveGroupZone(g.id, info?.subject || info?.name || g.name);
-              if (info && Array.isArray(info.participants)) {
-                for (const p of info.participants) {
-                  if (p.id) {
-                    rawParticipantMap.set(p.id, { id: p.id, name: p.name });
-                    if (!participantZonesMap.has(p.id)) participantZonesMap.set(p.id, new Set());
-                    participantZonesMap.get(p.id)!.add(groupZone);
+      // Fast-path B: Baileys sock.groupFetchAllParticipating()
+      if (!fastLoaded) {
+        try {
+          const sock = eng.sock || eng.groups?.sock?.();
+          if (sock && typeof sock.groupFetchAllParticipating === 'function') {
+            const allMetadata = await sock.groupFetchAllParticipating();
+            if (allMetadata && typeof allMetadata === 'object') {
+              fastLoaded = true;
+              for (const [gid, meta] of Object.entries(allMetadata as Record<string, any>)) {
+                if (!gid || processedGroupIds.has(gid)) continue;
+                processedGroupIds.add(gid);
+                totalGroupsScanned++;
+
+                const groupZone = this.resolveGroupZone(gid, meta?.subject || meta?.name);
+                if (Array.isArray(meta?.participants)) {
+                  for (const p of meta.participants) {
+                    const wid = p.id;
+                    if (wid) {
+                      rawParticipantMap.set(wid, { id: wid, name: p.name });
+                      if (!participantZonesMap.has(wid)) participantZonesMap.set(wid, new Set());
+                      participantZonesMap.get(wid)!.add(groupZone);
+                    }
                   }
                 }
               }
-            } catch (err: any) {
-              this.logger.warn(`Could not fetch group info for ${g.id}: ${err?.message}`);
             }
-          }),
-        );
+          }
+        } catch (e: any) {
+          this.logger.debug(`Baileys groupFetchAllParticipating fast-path skipped for ${sId}: ${e?.message}`);
+        }
+      }
+
+      // Fallback: Query remaining groups via eng.getGroupInfo
+      const groupsToQuery = sessionGroups.filter(g => {
+        const gid = g?.id?._serialized || g?.id;
+        return gid && !processedGroupIds.has(gid);
+      });
+
+      if (groupsToQuery.length > 0) {
+        const batchSize = 6;
+        for (let i = 0; i < groupsToQuery.length; i += batchSize) {
+          const slice = groupsToQuery.slice(i, i + batchSize);
+          await Promise.allSettled(
+            slice.map(async g => {
+              const gid = g?.id?._serialized || g?.id;
+              if (!gid || processedGroupIds.has(gid)) return;
+              processedGroupIds.add(gid);
+              totalGroupsScanned++;
+
+              try {
+                const info = await eng.getGroupInfo(gid);
+                const groupZone = this.resolveGroupZone(gid, info?.subject || info?.name || g.name);
+                if (info && Array.isArray(info.participants)) {
+                  for (const p of info.participants) {
+                    if (p.id) {
+                      rawParticipantMap.set(p.id, { id: p.id, name: p.name });
+                      if (!participantZonesMap.has(p.id)) participantZonesMap.set(p.id, new Set());
+                      participantZonesMap.get(p.id)!.add(groupZone);
+                    }
+                  }
+                }
+              } catch (err: any) {
+                this.logger.warn(`Could not fetch group info for ${gid}: ${err?.message}`);
+              }
+            }),
+          );
+        }
       }
     }
+
+    if (totalGroupsScanned === 0) {
+      return {
+        success: true,
+        totalGroups: 0,
+        existingContactsSkipped: 0,
+        newContactsFound: 0,
+        createdCategories: [],
+        message: 'No se encontraron grupos activos en las sesiones seleccionadas de WhatsApp.',
+      };
+    }
+
+    this.logger.log(`Scanning participants from ${totalGroupsScanned} unique groups across ${targetEngines.length} session(s) (purgeFirst: ${purgeFirst})...`);
 
     // 5. Pre-load LID mappings if available
     const lidPhoneMap = new Map<string, string>();
@@ -412,7 +457,7 @@ export class ContactCategoriesService {
       // Check valid phone length
       if (!phone || phone.length < 7 || phone.length > 15) continue;
 
-      // Exclude bot's own phone
+      // Exclude bot's own phone across any session
       if (excludedPhones.has(phone)) continue;
 
       const jid = `${phone}@c.us`;
@@ -423,7 +468,7 @@ export class ContactCategoriesService {
         continue;
       }
 
-      // Skip internal duplicates within this current scan
+      // Skip internal duplicates within this scan
       if (seenPhonesThisScan.has(phone)) {
         continue;
       }
@@ -458,21 +503,22 @@ export class ContactCategoriesService {
     }
 
     this.logger.log(
-      `Extraction Summary: Total groups: ${groups.length}, Raw: ${rawParticipantMap.size}, Skipped existing: ${existingContactsSkipped}, New unique: ${newUniqueContactJids.length}, Zones: ${Array.from(zoneBuckets.keys()).join(', ')}`,
+      `Extraction Summary: Total groups: ${totalGroupsScanned}, Raw: ${rawParticipantMap.size}, Skipped existing: ${existingContactsSkipped}, New unique: ${newUniqueContactJids.length}, Zones: ${Array.from(zoneBuckets.keys()).join(', ')}`,
     );
 
     if (newUniqueContactJids.length === 0) {
       return {
         success: true,
-        totalGroups: groups.length,
+        totalGroups: totalGroupsScanned,
         existingContactsSkipped,
         newContactsFound: 0,
         createdCategories: [],
-        message: 'Todos los contactos de tus grupos ya están clasificados en difusiones existentes.',
+        message: 'Todos los contactos de tus grupos ya están clasificados en difusiones existentes de la base de datos.',
       };
     }
 
     // 7. Divide into clean batches of maxPerBatch (100) per Zone and create sequential categories
+    // If the last category for a zone is incomplete (< maxPerBatch), fill it up first!
     const createdCategories: Array<{ id: string; name: string; count: number }> = [];
     const zoneColorMap: Record<string, string> = {
       'Quilicura': '#10b981',
@@ -499,18 +545,39 @@ export class ContactCategoriesService {
     });
 
     for (const zone of sortedZones) {
-      const contactsForZone = zoneBuckets.get(zone) || [];
+      let contactsForZone = zoneBuckets.get(zone) || [];
       if (contactsForZone.length === 0) continue;
 
-      // Find highest index for this specific zone in remaining categories
+      // Find highest index and last category for this specific zone
       let zoneMaxIndex = 0;
+      let lastCategoryForZone: ContactCategory | null = null;
       const zoneRegex = new RegExp(`^difusi[oó]n\\s+${zone}\\s+(\\d+)$`, 'i');
       for (const cat of this.categories) {
         const match = cat.name.trim().match(zoneRegex);
         if (match) {
           const num = parseInt(match[1], 10);
-          if (num > zoneMaxIndex) zoneMaxIndex = num;
+          if (num > zoneMaxIndex) {
+            zoneMaxIndex = num;
+            lastCategoryForZone = cat;
+          }
         }
+      }
+
+      // If the last category for this zone has room (< maxPerBatch), fill it first!
+      if (lastCategoryForZone && Array.isArray(lastCategoryForZone.contactIds) && lastCategoryForZone.contactIds.length < maxPerBatch) {
+        const room = maxPerBatch - lastCategoryForZone.contactIds.length;
+        const toAdd = contactsForZone.slice(0, room);
+        lastCategoryForZone.contactIds = Array.from(new Set([...lastCategoryForZone.contactIds, ...toAdd]));
+        lastCategoryForZone.updatedAt = new Date().toISOString();
+        contactsForZone = contactsForZone.slice(room);
+
+        createdCategories.push({
+          id: lastCategoryForZone.id,
+          name: `${lastCategoryForZone.name} (Completada a ${lastCategoryForZone.contactIds.length})`,
+          count: lastCategoryForZone.contactIds.length,
+        });
+        this.saveToFile();
+        this.logger.log(`Completed existing category ${lastCategoryForZone.name} to ${lastCategoryForZone.contactIds.length} contacts`);
       }
 
       let currentNum = zoneMaxIndex + 1;
@@ -520,7 +587,7 @@ export class ContactCategoriesService {
         const batch = contactsForZone.slice(i, i + maxPerBatch);
         const name = `Difusión ${zone} ${currentNum}`;
 
-        const saved = this.saveCategory(sessionId, {
+        const saved = this.saveCategory(isAllSessions ? 'global' : sessionId, {
           name,
           color: zoneColor,
           contactIds: batch,
@@ -537,7 +604,7 @@ export class ContactCategoriesService {
 
     return {
       success: true,
-      totalGroups: groups.length,
+      totalGroups: totalGroupsScanned,
       existingContactsSkipped,
       newContactsFound: newUniqueContactJids.length,
       createdCategories,

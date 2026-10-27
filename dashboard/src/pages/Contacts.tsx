@@ -8,6 +8,10 @@ import {
   Send,
   Loader2,
   CheckCircle2,
+  CheckSquare,
+  Square,
+  Globe,
+  Layers,
   AlertCircle,
   Pause,
   Play,
@@ -118,7 +122,8 @@ export function Contacts() {
 
   // Contact Categories state
   const [categories, setCategories] = useState<ContactCategoryItem[]>([]);
-  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
+  const [selectedCategoryFilters, setSelectedCategoryFilters] = useState<string[]>([]);
+  const [targetCategoryIds, setTargetCategoryIds] = useState<string[]>([]);
   const [showZonePanel, setShowZonePanel] = useState<boolean>(true);
   const [showCategoryModal, setShowCategoryModal] = useState<boolean>(false);
   const [categoryNameInput, setCategoryNameInput] = useState<string>('');
@@ -267,12 +272,18 @@ export function Contacts() {
     return map;
   }, [categories]);
 
-  // Fast O(1) set for selected category filter
+  // Fast O(1) set for selected category filters (multi-block support)
   const selectedCatSet = useMemo(() => {
-    if (selectedCategoryFilter === 'all') return null;
-    const cat = categories.find(k => k.id === selectedCategoryFilter);
-    return cat && Array.isArray(cat.contactIds) ? new Set(cat.contactIds) : null;
-  }, [categories, selectedCategoryFilter]);
+    if (selectedCategoryFilters.length === 0) return null;
+    const ids = new Set<string>();
+    for (const cId of selectedCategoryFilters) {
+      const cat = categories.find(k => k.id === cId);
+      if (cat && Array.isArray(cat.contactIds)) {
+        for (const id of cat.contactIds) ids.add(id);
+      }
+    }
+    return ids;
+  }, [categories, selectedCategoryFilters]);
 
   // Segment categories into structured Commune / Geographic Zones
   const zoneGroups = useMemo(() => {
@@ -348,14 +359,14 @@ export function Contacts() {
     return result.filter(g => g.categories.length > 0);
   }, [categories]);
 
-  const currentSelectedCategory = useMemo(() => {
-    return categories.find(c => c.id === selectedCategoryFilter) || null;
-  }, [categories, selectedCategoryFilter]);
+  const selectedCategoriesList = useMemo(() => {
+    return categories.filter(c => selectedCategoryFilters.includes(c.id));
+  }, [categories, selectedCategoryFilters]);
 
   // Reset pagination to page 1 on filter changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [filterType, selectedCategoryFilter, deferredSearchQuery, selectedSessionId]);
+  }, [filterType, selectedCategoryFilters, deferredSearchQuery, selectedSessionId]);
 
   // Filter & Search logic (optimized with Set lookup and deferred query)
   const filteredContacts = useMemo(() => {
@@ -842,7 +853,8 @@ export function Contacts() {
     try {
       await contactCategoriesApi.delete(selectedSessionId, catId);
       toast.success('Categoría eliminada');
-      if (selectedCategoryFilter === catId) setSelectedCategoryFilter('all');
+      setSelectedCategoryFilters(prev => prev.filter(id => id !== catId));
+      setTargetCategoryIds(prev => prev.filter(id => id !== catId));
       if (targetAudience === `category_${catId}`) setTargetAudience('all');
       void fetchCategories();
     } catch (err: any) {
@@ -955,10 +967,10 @@ export function Contacts() {
           <div className="contacts-toolbar">
             <div className="contacts-filters">
               <button
-                className={`filter-btn ${filterType === 'all' && selectedCategoryFilter === 'all' ? 'active' : ''}`}
+                className={`filter-btn ${filterType === 'all' && selectedCategoryFilters.length === 0 ? 'active' : ''}`}
                 onClick={() => {
                   setFilterType('all');
-                  setSelectedCategoryFilter('all');
+                  setSelectedCategoryFilters([]);
                 }}
               >
                 <Users size={16} />
@@ -1062,40 +1074,47 @@ export function Contacts() {
                         <span style={{ fontSize: '1.1rem' }}>{grp.icon}</span>
                         <strong style={{ color: grp.color, fontSize: '0.9rem' }}>{grp.label}</strong>
                       </div>
-                      <span className="zone-column-badge" style={{ backgroundColor: grp.color }}>
-                        {grp.categories.length} listas · {grp.totalContacts} contactos
-                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <button
+                          type="button"
+                          className="zone-title-btn"
+                          onClick={() => toggleAllZoneCategories(grp.categories.map(c => c.id))}
+                          title="Seleccionar o desmarcar todas las listas de esta zona"
+                        >
+                          {grp.categories.length > 0 && grp.categories.every(c => selectedCategoryFilters.includes(c.id)) ? '☐ Desmarcar' : '☑ Todo'}
+                        </button>
+                        <span className="zone-column-badge" style={{ backgroundColor: grp.color }}>
+                          {grp.categories.length} listas · {grp.totalContacts}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="zone-column-cards-container">
                       {grp.categories.map(cat => {
                         const count = cat.contactIds?.length || 0;
-                        const isSelected = selectedCategoryFilter === cat.id;
+                        const isSelected = selectedCategoryFilters.includes(cat.id);
                         return (
                           <div
                             key={cat.id}
                             className={`zone-list-card ${isSelected ? 'active' : ''}`}
-                            onClick={() => {
-                              setSelectedCategoryFilter(isSelected ? 'all' : cat.id);
-                              setFilterType('all');
-                            }}
+                            onClick={() => toggleCategoryFilter(cat.id)}
                             style={{
                               borderColor: isSelected ? grp.color : undefined,
-                              backgroundColor: isSelected ? `${grp.color}20` : undefined,
+                              backgroundColor: isSelected ? `${grp.color}25` : undefined,
                             }}
-                            title={`Clic para ver los ${count} contactos de esta lista`}
+                            title={`Clic para seleccionar o deseleccionar este bloque de ${count} contactos`}
                           >
                             <div className="zone-list-card-name">
                               <span
                                 style={{
-                                  width: '8px',
-                                  height: '8px',
-                                  borderRadius: '50%',
-                                  backgroundColor: cat.color || grp.color,
-                                  display: 'inline-block',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  color: isSelected ? grp.color : 'var(--text-muted)',
                                 }}
-                              />
-                              <span>{cat.name}</span>
+                              >
+                                {isSelected ? <CheckSquare size={15} /> : <Square size={15} />}
+                              </span>
+                              <span style={{ fontWeight: isSelected ? 600 : 400 }}>{cat.name}</span>
                             </div>
                             <span className="zone-list-card-count" style={{ borderColor: grp.color }}>
                               {count}
@@ -1110,33 +1129,34 @@ export function Contacts() {
             </div>
           )}
 
-          {/* ACTIVE CATEGORY BANNER */}
-          {selectedCategoryFilter !== 'all' && currentSelectedCategory && (
-            <div className="active-category-banner" style={{ borderLeftColor: currentSelectedCategory.color || '#10b981' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                <CheckCircle2 size={18} style={{ color: currentSelectedCategory.color || '#10b981' }} />
+          {/* ACTIVE MULTI-BLOCK CATEGORY BANNER */}
+          {selectedCategoryFilters.length > 0 && (
+            <div className="active-category-banner" style={{ borderLeftColor: '#10b981' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                <CheckCircle2 size={18} style={{ color: '#10b981' }} />
                 <div>
-                  Mostrando lista: <strong style={{ color: currentSelectedCategory.color || '#10b981' }}>{currentSelectedCategory.name}</strong> ({currentSelectedCategory.contactIds?.length || 0} destinatarios asignados)
+                  Mostrando <strong>{selectedCategoryFilters.length} listas seleccionadas</strong> ({selectedCatSet?.size || 0} destinatarios únicos acumulados)
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
                 <button
                   className="btn-primary"
                   style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
                   onClick={() => {
-                    setTargetAudience(`category_${currentSelectedCategory.id}`);
+                    setTargetCategoryIds([...selectedCategoryFilters]);
+                    setTargetAudience('categories');
                     setActiveTab('create_broadcast');
                   }}
                 >
                   <Send size={14} />
-                  🚀 Crear Difusión con esta Lista
+                  🚀 Crear Difusión con estas {selectedCategoryFilters.length} Listas ({selectedCatSet?.size || 0} contactos)
                 </button>
                 <button
                   className="btn-secondary"
                   style={{ fontSize: '0.8rem', padding: '0.35rem 0.6rem' }}
-                  onClick={() => setSelectedCategoryFilter('all')}
+                  onClick={() => setSelectedCategoryFilters([])}
                 >
-                  ✕ Ver Todos
+                  ✕ Desmarcar todas
                 </button>
               </div>
             </div>
