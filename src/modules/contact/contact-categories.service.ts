@@ -611,4 +611,299 @@ export class ContactCategoriesService {
       message: `Se crearon exitosamente ${createdCategories.length} difusiones segmentadas por zona (${Array.from(zoneBuckets.entries()).map(([z, list]) => `${z}: ${list.length}`).join(', ')}).`,
     };
   }
+
+  /**
+   * Scans 1-on-1 private conversations and phone address book from the specified session
+   * (or ALL active sessions if sessionId === 'all' or empty),
+   * excludes bot numbers and contacts already categorized in any diffusion list,
+   * segmenting unclassified direct clients into clean broadcast categories of up to maxPerBatch contacts (default: 100)
+   * under "Difusión Clientes Directos 1, 2, 3...".
+   *
+   * Automatically fills existing incomplete categories for Clientes Directos before creating new sequential blocks.
+   */
+  async extractAndCreateDirectChatsBroadcasts(
+    sessionId: string = 'all',
+    maxPerBatch: number = 100,
+  ): Promise<{
+    success: boolean;
+    totalChats: number;
+    existingContactsSkipped: number;
+    newContactsFound: number;
+    createdCategories: Array<{ id: string; name: string; count: number }>;
+    message?: string;
+  }> {
+    if (!this.engines) {
+      throw new BadRequestException('EngineRegistry no está disponible en el servidor');
+    }
+
+    const isAllSessions = !sessionId || sessionId === 'all' || sessionId === 'global';
+    const targetEngines: Array<{ sessionId: string; engine: any }> = [];
+
+    if (isAllSessions) {
+      for (const [id, eng] of this.engines.entries()) {
+        if (eng) targetEngines.push({ sessionId: id, engine: eng });
+      }
+      if (targetEngines.length === 0) {
+        throw new BadRequestException('No hay ninguna sesión de WhatsApp activa o conectada actualmente.');
+      }
+    } else {
+      let engine: any;
+      try {
+        engine = this.engines.get(sessionId);
+      } catch {
+        engine = null;
+      }
+      if (!engine) {
+        throw new BadRequestException(`La sesión "${sessionId}" no está iniciada o no está lista.`);
+      }
+      targetEngines.push({ sessionId, engine });
+    }
+
+    // 1. Identify bot's own numbers across ALL sessions to exclude
+    const excludedPhones = new Set<string>();
+    try {
+      if (this.sessionService) {
+        const allSessions = await this.sessionService.findAll();
+        for (const s of allSessions) {
+          if (s?.phone) {
+            const p = s.phone.replace(/\D/g, '');
+            if (p) excludedPhones.add(p);
+          }
+        }
+      }
+    } catch {}
+
+    for (const item of targetEngines) {
+      try {
+        const info = item.engine.info || item.engine.client?.info;
+        if (info?.wid) {
+          const user = typeof info.wid === 'string' ? info.wid.split('@')[0] : info.wid?.user;
+          if (user) {
+            const p = String(user).replace(/\D/g, '');
+            if (p) excludedPhones.add(p);
+          }
+        }
+      } catch {}
+    }
+
+    // 2. Identify all contacts already categorized in any existing Difusión
+    const existingCategories = this.getCategories();
+    const existingContactJids = new Set<string>();
+    const existingPhones = new Set<string>();
+
+    for (const cat of existingCategories) {
+      for (const cid of cat.contactIds) {
+        existingContactJids.add(cid);
+        const p = cid.split('@')[0].replace(/\D/g, '');
+        if (p) existingPhones.add(p);
+      }
+    }
+
+    // 3. Pre-load LID mappings if available
+    const lidPhoneMap = new Map<string, string>();
+    if (this.lidRepo) {
+      try {
+        const rows = await this.lidRepo.find({ where: { phone: Not(IsNull()) } });
+        for (const r of rows) {
+          if (r.lid && r.phone) {
+            const cleanLid = r.lid.replace(/\D/g, '');
+            const cleanPhone = r.phone.replace(/\D/g, '');
+            if (cleanLid && cleanPhone) lidPhoneMap.set(cleanLid, cleanPhone);
+          }
+        }
+      } catch {}
+    }
+
+    // 4. Fetch private 1-on-1 chats and contacts from target engines
+    let totalChatsScanned = 0;
+    const candidatePhones = new Map<string, { phone: string; jid: string; name?: string }>();
+
+    for (const item of targetEngines) {
+      const eng = item.engine;
+      const sId = item.sessionId;
+
+      // 4a. 1-on-1 private chats
+      try {
+        const chats = await eng.getChats();
+        if (Array.isArray(chats)) {
+          for (const ch of chats) {
+            if (!ch || ch.isGroup) continue;
+            const rawId = ch.id?._serialized || (typeof ch.id === 'string' ? ch.id : '');
+            if (!rawId || rawId.endsWith('@g.us') || rawId === 'status@broadcast' || rawId.includes('@newsletter')) continue;
+
+            totalChatsScanned++;
+            let phone = '';
+            if (rawId.endsWith('@lid')) {
+              const cleanLid = rawId.split('@')[0].replace(/\D/g, '');
+              phone = lidPhoneMap.get(cleanLid) || '';
+            } else {
+              phone = rawId.split('@')[0].replace(/\D/g, '');
+            }
+
+            if (!phone || phone.length < 7 || phone.length > 15) continue;
+            if (excludedPhones.has(phone)) continue;
+
+            const jid = `${phone}@c.us`;
+            if (!candidatePhones.has(phone)) {
+              candidatePhones.set(phone, { phone, jid, name: ch.name });
+            }
+          }
+        }
+      } catch (e: any) {
+        this.logger.debug(`Could not fetch chats for direct extraction in ${sId}: ${e?.message}`);
+      }
+
+      // 4b. Address book contacts
+      try {
+        const contacts = await eng.getContacts();
+        if (Array.isArray(contacts)) {
+          for (const c of contacts) {
+            if (!c) continue;
+            const rawId = c.id?._serialized || (typeof c.id === 'string' ? c.id : '');
+            if (!rawId || rawId.endsWith('@g.us') || rawId === 'status@broadcast' || rawId.includes('@newsletter')) continue;
+
+            let phone = '';
+            if (rawId.endsWith('@lid')) {
+              const cleanLid = rawId.split('@')[0].replace(/\D/g, '');
+              phone = lidPhoneMap.get(cleanLid) || '';
+            } else {
+              phone = rawId.split('@')[0].replace(/\D/g, '');
+            }
+
+            if (!phone || phone.length < 7 || phone.length > 15) continue;
+            if (excludedPhones.has(phone)) continue;
+
+            const jid = `${phone}@c.us`;
+            if (!candidatePhones.has(phone)) {
+              candidatePhones.set(phone, { phone, jid, name: c.name || c.pushName });
+            }
+          }
+        }
+      } catch (e: any) {
+        this.logger.debug(`Could not fetch contacts for direct extraction in ${sId}: ${e?.message}`);
+      }
+    }
+
+    // 4c. LID repository entries that might not be in memory
+    if (this.lidRepo) {
+      try {
+        const lidRows = await this.lidRepo.find({ where: { phone: Not(IsNull()) } });
+        for (const row of lidRows) {
+          if (!row.phone) continue;
+          const phone = row.phone.trim().replace(/\D/g, '');
+          if (!phone || phone.length < 7 || phone.length > 15) continue;
+          if (excludedPhones.has(phone)) continue;
+
+          const jid = `${phone}@c.us`;
+          if (!candidatePhones.has(phone)) {
+            candidatePhones.set(phone, { phone, jid });
+          }
+        }
+      } catch {}
+    }
+
+    if (candidatePhones.size === 0) {
+      return {
+        success: true,
+        totalChats: 0,
+        existingContactsSkipped: 0,
+        newContactsFound: 0,
+        createdCategories: [],
+        message: 'No se encontraron contactos en chats directos o libreta para procesar.',
+      };
+    }
+
+    // 5. Deduplicate and filter out contacts already in any diffusion category
+    let existingContactsSkipped = 0;
+    const newDirectContactJids: string[] = [];
+
+    for (const [phone, item] of candidatePhones.entries()) {
+      if (existingPhones.has(phone) || existingContactJids.has(item.jid)) {
+        existingContactsSkipped++;
+        continue;
+      }
+      newDirectContactJids.push(item.jid);
+    }
+
+    this.logger.log(
+      `Direct Chats Extraction Summary: Scanned chats/contacts: ${candidatePhones.size}, Skipped existing: ${existingContactsSkipped}, New unique direct: ${newDirectContactJids.length}`,
+    );
+
+    if (newDirectContactJids.length === 0) {
+      return {
+        success: true,
+        totalChats: candidatePhones.size,
+        existingContactsSkipped,
+        newContactsFound: 0,
+        createdCategories: [],
+        message: 'Todos tus contactos de chats directos ya están incluidos en listas de difusión existentes.',
+      };
+    }
+
+    // 6. Divide into clean batches of maxPerBatch (100) under "Difusión Clientes Directos"
+    const zone = 'Clientes Directos';
+    const zoneColor = '#0ea5e9';
+    const zoneRegex = /^difusi[oó]n\s+clientes\s+directos\s+(\d+)$/i;
+
+    let zoneMaxIndex = 0;
+    let lastCategoryForZone: ContactCategory | null = null;
+    for (const cat of this.categories) {
+      const match = cat.name.trim().match(zoneRegex);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (num > zoneMaxIndex) {
+          zoneMaxIndex = num;
+          lastCategoryForZone = cat;
+        }
+      }
+    }
+
+    const createdCategories: Array<{ id: string; name: string; count: number }> = [];
+    let remainingContacts = [...newDirectContactJids];
+
+    // Smart packing: fill last category if it has room (< maxPerBatch)
+    if (lastCategoryForZone && Array.isArray(lastCategoryForZone.contactIds) && lastCategoryForZone.contactIds.length < maxPerBatch) {
+      const room = maxPerBatch - lastCategoryForZone.contactIds.length;
+      const toAdd = remainingContacts.slice(0, room);
+      lastCategoryForZone.contactIds = Array.from(new Set([...lastCategoryForZone.contactIds, ...toAdd]));
+      lastCategoryForZone.updatedAt = new Date().toISOString();
+      remainingContacts = remainingContacts.slice(room);
+
+      createdCategories.push({
+        id: lastCategoryForZone.id,
+        name: `${lastCategoryForZone.name} (Completada a ${lastCategoryForZone.contactIds.length})`,
+        count: lastCategoryForZone.contactIds.length,
+      });
+      this.saveToFile();
+      this.logger.log(`Completed existing category ${lastCategoryForZone.name} to ${lastCategoryForZone.contactIds.length} contacts`);
+    }
+
+    let currentNum = zoneMaxIndex + 1;
+    for (let i = 0; i < remainingContacts.length; i += maxPerBatch) {
+      const batch = remainingContacts.slice(i, i + maxPerBatch);
+      const name = `Difusión ${zone} ${currentNum}`;
+
+      const saved = this.saveCategory(isAllSessions ? 'global' : sessionId, {
+        name,
+        color: zoneColor,
+        contactIds: batch,
+      });
+
+      createdCategories.push({
+        id: saved.id,
+        name: saved.name,
+        count: saved.contactIds.length,
+      });
+      currentNum++;
+    }
+
+    return {
+      success: true,
+      totalChats: candidatePhones.size,
+      existingContactsSkipped,
+      newContactsFound: newDirectContactJids.length,
+      createdCategories,
+      message: `Se crearon exitosamente ${createdCategories.length} difusiones de Clientes Directos (${newDirectContactJids.length} contactos).`,
+    };
+  }
 }

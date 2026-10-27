@@ -67,6 +67,21 @@ export class ContactController {
     return this.contactCategoriesService.extractAndCreateGroupBroadcasts(targetSessionId, maxPerBatch, purgeFirst);
   }
 
+  @Post('extract-direct-broadcasts')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Extract contacts from 1-on-1 private chats and create 100-member broadcasts' })
+  async extractDirectChatsBroadcasts(
+    @Param('sessionId') sessionId: string,
+    @Body() body?: { maxPerBatch?: number; allSessions?: boolean },
+  ) {
+    if (!this.contactCategoriesService) {
+      return { success: false, message: 'Contact categories service is not available' };
+    }
+    const maxPerBatch = body?.maxPerBatch && body.maxPerBatch > 0 ? body.maxPerBatch : 100;
+    const targetSessionId = body?.allSessions === true ? 'all' : sessionId;
+    return this.contactCategoriesService.extractAndCreateDirectChatsBroadcasts(targetSessionId, maxPerBatch);
+  }
+
   @Get('group-tags')
   @ApiOperation({ summary: 'Get all group tags/categories for a session' })
   async getGroupTags(@Param('sessionId') sessionId: string) {

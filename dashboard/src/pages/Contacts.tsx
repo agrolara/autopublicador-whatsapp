@@ -29,6 +29,7 @@ import {
   Calendar as CalendarIcon,
   Repeat,
   FolderPlus,
+  MessageSquarePlus,
   Eye,
   RefreshCw,
   Dices,
@@ -132,6 +133,7 @@ export function Contacts() {
 
   // Extract group broadcasts modal state
   const [isExtractingBroadcasts, setIsExtractingBroadcasts] = useState<boolean>(false);
+  const [isExtractingDirect, setIsExtractingDirect] = useState<boolean>(false);
   const [extractionResultModal, setExtractionResultModal] = useState<{
     isOpen: boolean;
     totalGroups: number;
@@ -304,6 +306,14 @@ export function Contacts() {
         categories: [],
         totalContacts: 0,
       },
+      'Clientes Directos': {
+        zone: 'Clientes Directos',
+        label: 'Clientes Directos (1 a 1)',
+        color: '#0ea5e9',
+        icon: '💬',
+        categories: [],
+        totalContacts: 0,
+      },
       Otros: {
         zone: 'Otros',
         label: 'Otros / General',
@@ -327,6 +337,9 @@ export function Contacts() {
       } else if (nameLower.includes('renca')) {
         map.Renca.categories.push(cat);
         map.Renca.totalContacts += count;
+      } else if (nameLower.includes('directos') || nameLower.includes('directo')) {
+        map['Clientes Directos'].categories.push(cat);
+        map['Clientes Directos'].totalContacts += count;
       } else if (nameLower.includes('otros') || nameLower.includes('no publicar')) {
         map.Otros.categories.push(cat);
         map.Otros.totalContacts += count;
@@ -337,6 +350,9 @@ export function Contacts() {
         if (zName === 'Otros') {
           map.Otros.categories.push(cat);
           map.Otros.totalContacts += count;
+        } else if (zName.toLowerCase().includes('directo')) {
+          map['Clientes Directos'].categories.push(cat);
+          map['Clientes Directos'].totalContacts += count;
         } else {
           if (!dynamicZones[zName]) {
             const color = cat.color || palette[Object.keys(dynamicZones).length % palette.length];
@@ -355,7 +371,7 @@ export function Contacts() {
       }
     }
 
-    const result = [map.Quilicura, map.Renca, ...Object.values(dynamicZones), map.Otros];
+    const result = [map.Quilicura, map.Renca, map['Clientes Directos'], ...Object.values(dynamicZones), map.Otros];
     return result.filter(g => g.categories.length > 0);
   }, [categories]);
 
@@ -765,9 +781,9 @@ export function Contacts() {
     }
   };
 
-  const handleExtractGroupBroadcasts = async (shouldPurge: any = false) => {
+  const handleExtractGroupBroadcasts = async (shouldPurge: any = false, allSessions: boolean = false) => {
     const isPurge = shouldPurge === true;
-    if (!selectedSessionId) {
+    if (!selectedSessionId && !allSessions) {
       toast.error('Selecciona una sesión', 'Debes seleccionar una sesión activa primero.');
       return;
     }
@@ -778,7 +794,7 @@ export function Contacts() {
 
     setIsExtractingBroadcasts(true);
     try {
-      const res = await contactCategoriesApi.extractGroupBroadcasts(selectedSessionId, 100, isPurge);
+      const res = await contactCategoriesApi.extractGroupBroadcasts(selectedSessionId, 100, isPurge, allSessions);
       if (res.success) {
         await Promise.all([fetchContacts(), fetchCategories()]);
         setExtractionResultModal({
@@ -804,6 +820,43 @@ export function Contacts() {
       toast.error('Error al extraer grupos', err?.message || 'Error desconocido');
     } finally {
       setIsExtractingBroadcasts(false);
+    }
+  };
+
+  const handleExtractDirectBroadcasts = async (allSessions: boolean = false) => {
+    if (!selectedSessionId && !allSessions) {
+      toast.error('Selecciona una sesión', 'Debes seleccionar una sesión activa primero.');
+      return;
+    }
+
+    setIsExtractingDirect(true);
+    try {
+      const res = await contactCategoriesApi.extractDirectChatsBroadcasts(selectedSessionId, 100, allSessions);
+      if (res.success) {
+        await Promise.all([fetchContacts(), fetchCategories()]);
+        setExtractionResultModal({
+          isOpen: true,
+          totalGroups: res.totalChats || 0,
+          existingContactsSkipped: res.existingContactsSkipped,
+          newContactsFound: res.newContactsFound,
+          createdCategories: res.createdCategories,
+          message: res.message,
+        });
+        if (res.newContactsFound > 0) {
+          toast.success(
+            'Clientes Directos Empaquetados',
+            `Se crearon ${res.createdCategories.length} difusiones de Clientes Directos con ${res.newContactsFound} contactos únicos.`,
+          );
+        } else {
+          toast.info('Sin nuevos contactos', res.message || 'Todos tus clientes directos ya estaban incluidos en difusiones.');
+        }
+      } else {
+        toast.error('Error al empaquetar', res.message || 'No se pudo completar el proceso');
+      }
+    } catch (err: any) {
+      toast.error('Error al empaquetar directos', err?.message || 'Error desconocido');
+    } finally {
+      setIsExtractingDirect(false);
     }
   };
 
@@ -879,20 +932,20 @@ export function Contacts() {
         title="Gestión de Contactos y Difusiones"
         subtitle="Filtra tu agenda de contactos y crea campañas de difusión masiva con protección anti-baneo"
         actions={
-          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
             <button
               type="button"
               className="btn-extract-broadcasts"
-              onClick={() => handleExtractGroupBroadcasts(false)}
-              disabled={isExtractingBroadcasts || !selectedSessionId}
+              onClick={() => handleExtractGroupBroadcasts(false, false)}
+              disabled={isExtractingBroadcasts || isExtractingDirect || !selectedSessionId}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: '0.5rem',
+                gap: '0.4rem',
                 background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
                 color: '#ffffff',
                 border: 'none',
-                padding: '0.5rem 1rem',
+                padding: '0.5rem 0.85rem',
                 borderRadius: '8px',
                 fontWeight: 600,
                 fontSize: '0.85rem',
@@ -900,7 +953,7 @@ export function Contacts() {
                 boxShadow: '0 2px 8px rgba(16, 185, 129, 0.25)',
                 transition: 'all 0.2s ease',
               }}
-              title="Escanear todos los grupos y crear difusiones de 100 contactos limpios"
+              title="Escanear todos los grupos de la sesión y crear difusiones de 100 contactos limpios"
             >
               {isExtractingBroadcasts ? (
                 <>
@@ -910,10 +963,72 @@ export function Contacts() {
               ) : (
                 <>
                   <FolderPlus size={16} />
-                  <span>📥 Extraer de Grupos a Difusiones (100 c/u)</span>
+                  <span>📥 Extraer Grupos (100 c/u)</span>
                 </>
               )}
             </button>
+
+            <button
+              type="button"
+              className="btn-extract-all-sessions"
+              onClick={() => handleExtractGroupBroadcasts(false, true)}
+              disabled={isExtractingBroadcasts || isExtractingDirect}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                color: '#ffffff',
+                border: 'none',
+                padding: '0.5rem 0.85rem',
+                borderRadius: '8px',
+                fontWeight: 600,
+                fontSize: '0.85rem',
+                cursor: isExtractingBroadcasts ? 'not-allowed' : 'pointer',
+                boxShadow: '0 2px 8px rgba(99, 102, 241, 0.25)',
+                transition: 'all 0.2s ease',
+              }}
+              title="Escanear todos los grupos de todas las sesiones simultáneamente y unificar difusiones"
+            >
+              <Globe size={15} />
+              <span>🌐 Extraer Grupos (Todas las Sesiones)</span>
+            </button>
+
+            <button
+              type="button"
+              className="btn-extract-direct"
+              onClick={() => handleExtractDirectBroadcasts(false)}
+              disabled={isExtractingDirect || isExtractingBroadcasts || !selectedSessionId}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                background: 'linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%)',
+                color: '#ffffff',
+                border: 'none',
+                padding: '0.5rem 0.85rem',
+                borderRadius: '8px',
+                fontWeight: 600,
+                fontSize: '0.85rem',
+                cursor: isExtractingDirect ? 'not-allowed' : 'pointer',
+                boxShadow: '0 2px 8px rgba(14, 165, 233, 0.25)',
+                transition: 'all 0.2s ease',
+              }}
+              title="Empaquetar todos los contactos de conversaciones privadas (1 a 1) en listas de 100 bajo 'Difusión Clientes Directos'"
+            >
+              {isExtractingDirect ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  <span>Empaquetando directos...</span>
+                </>
+              ) : (
+                <>
+                  <MessageSquarePlus size={16} />
+                  <span>💬 Empaquetar Clientes Directos (100 c/u)</span>
+                </>
+              )}
+            </button>
+
             <label style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>Sesión:</label>
             <select
               value={selectedSessionId}
@@ -1986,7 +2101,7 @@ export function Contacts() {
                 <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#3b82f6' }}>
                   {extractionResultModal.totalGroups}
                 </div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Grupos Escaneados</div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Grupos / Chats Escaneados</div>
               </div>
 
               <div style={{ background: 'var(--bg-secondary)', padding: '0.85rem', borderRadius: '10px', textAlign: 'center' }}>

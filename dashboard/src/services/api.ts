@@ -1157,6 +1157,18 @@ export const contactCategoriesApi = {
       method: 'POST',
       body: JSON.stringify({ maxPerBatch: Number(maxPerBatch) || 100, purgeFirst: purgeFirst === true, allSessions: allSessions === true }),
     }),
+  extractDirectChatsBroadcasts: (sessionId: string, maxPerBatch: number = 100, allSessions: boolean = false) =>
+    request<{
+      success: boolean;
+      totalChats: number;
+      existingContactsSkipped: number;
+      newContactsFound: number;
+      createdCategories: Array<{ id: string; name: string; count: number }>;
+      message?: string;
+    }>(`/sessions/${allSessions ? 'all' : sessionId}/contacts/extract-direct-broadcasts`, {
+      method: 'POST',
+      body: JSON.stringify({ maxPerBatch: Number(maxPerBatch) || 100, allSessions: allSessions === true }),
+    }),
 };
 
 // =============================================================================
