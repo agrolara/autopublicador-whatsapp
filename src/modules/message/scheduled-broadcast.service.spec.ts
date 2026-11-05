@@ -76,4 +76,48 @@ describe('ScheduledBroadcastService', () => {
 
     service.deleteBroadcast('s1', created.id);
   });
+
+  it('isolates campaigns by session and returns empty list for sessions with no campaigns', () => {
+    const s1Campaign = service.addBroadcast('session-alpha', {
+      scheduledTime: '11:00',
+      frequency: 'daily',
+      payload: { messages: [{ chatId: '123@g.us', type: 'text', content: { text: 'Alpha' } }] } as any,
+      name: 'Alpha Campaign',
+    });
+
+    const s2Campaign = service.addBroadcast('session-beta', {
+      scheduledTime: '12:00',
+      frequency: 'daily',
+      payload: { messages: [{ chatId: '456@g.us', type: 'text', content: { text: 'Beta' } }] } as any,
+      name: 'Beta Campaign',
+    });
+
+    // session-alpha should only see its own campaign
+    const alphaList = service.getBroadcasts('session-alpha');
+    expect(alphaList.length).toBe(1);
+    expect(alphaList[0].id).toBe(s1Campaign.id);
+
+    // session-beta should only see its own campaign
+    const betaList = service.getBroadcasts('session-beta');
+    expect(betaList.length).toBe(1);
+    expect(betaList[0].id).toBe(s2Campaign.id);
+
+    // session-gamma (has 0 campaigns) MUST return empty array, NOT leak alpha or beta
+    const gammaList = service.getBroadcasts('session-gamma');
+    expect(gammaList.length).toBe(0);
+
+    // Security: cross-session update/toggle/delete must be rejected
+    const updateResult = service.updateBroadcast('session-gamma', s1Campaign.id, { name: 'Hacked' });
+    expect(updateResult).toBeNull();
+
+    const toggleResult = service.toggleBroadcastStatus('session-gamma', s1Campaign.id);
+    expect(toggleResult).toBeNull();
+
+    const deleteResult = service.deleteBroadcast('session-gamma', s1Campaign.id);
+    expect(deleteResult).toBe(false);
+
+    // Cleanup
+    service.deleteBroadcast('session-alpha', s1Campaign.id);
+    service.deleteBroadcast('session-beta', s2Campaign.id);
+  });
 });

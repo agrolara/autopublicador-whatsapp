@@ -221,16 +221,12 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
 
   getBroadcasts(sessionId: string): ScheduledBroadcast[] {
     const filtered = this.items.filter(item => {
-      if (!sessionId) return true;
+      if (!sessionId || sessionId === 'all' || sessionId === 'global') return true;
       if (!item.sessionId || item.sessionId === 'default' || item.sessionId === 'global') return true;
       return item.sessionId === sessionId;
     });
 
-    // Fallback: if no broadcasts match this specific sessionId, return all broadcasts
-    // so campaigns are never hidden when the user switches sessions or reconnects
-    const targetItems = (filtered.length === 0 && this.items.length > 0) ? this.items : filtered;
-
-    return targetItems
+    return filtered
       .sort((a, b) => (a.scheduledTime || '').localeCompare(b.scheduledTime || ''))
       .map(item => {
         const mediaUrls = this.extractMediaUrls(item);
@@ -273,9 +269,10 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
       return null;
     }
 
+    const effectiveSessionId = broadcast.sessionId || sessionId;
     if (broadcast.lastBatchId) {
       try {
-        const batch = await this.bulkMessageService.getBatchStatus(sessionId, broadcast.lastBatchId);
+        const batch = await this.bulkMessageService.getBatchStatus(effectiveSessionId, broadcast.lastBatchId);
         if (batch) {
           const isFinished = batch.status === 'completed' || batch.status === 'failed' || batch.status === 'cancelled';
           const durationSeconds = batch.completedAt && batch.startedAt
@@ -369,6 +366,10 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
   deleteBroadcast(sessionId: string, id: string): boolean {
     const idx = this.items.findIndex(item => item.id === id);
     if (idx !== -1) {
+      if (sessionId && this.items[idx].sessionId && this.items[idx].sessionId !== sessionId) {
+        this.logger.warn(`Rejected delete of broadcast ${id}: session mismatch (requested by ${sessionId}, owned by ${this.items[idx].sessionId})`);
+        return false;
+      }
       this.items.splice(idx, 1);
       this.saveToFile();
       this.logger.log(`Deleted scheduled broadcast ${id}`);
@@ -391,7 +392,11 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
   }): ScheduledBroadcast | null {
     const item = this.items.find(i => i.id === id);
     if (!item) return null;
-    if (sessionId) item.sessionId = sessionId;
+    if (sessionId && item.sessionId && item.sessionId !== sessionId) {
+      this.logger.warn(`Rejected update of broadcast ${id}: session mismatch (requested by ${sessionId}, owned by ${item.sessionId})`);
+      return null;
+    }
+    if (!item.sessionId && sessionId) item.sessionId = sessionId;
     if (dto.name !== undefined) item.name = dto.name;
     if (dto.scheduledTime !== undefined) item.scheduledTime = dto.scheduledTime;
     if (dto.frequency !== undefined) item.frequency = dto.frequency;
@@ -418,7 +423,11 @@ export class ScheduledBroadcastService implements OnModuleInit, OnModuleDestroy 
   toggleBroadcastStatus(sessionId: string, id: string): ScheduledBroadcast | null {
     const item = this.items.find(i => i.id === id);
     if (!item) return null;
-    if (sessionId) item.sessionId = sessionId;
+    if (sessionId && item.sessionId && item.sessionId !== sessionId) {
+      this.logger.warn(`Rejected toggle of broadcast ${id}: session mismatch (requested by ${sessionId}, owned by ${item.sessionId})`);
+      return null;
+    }
+    if (!item.sessionId && sessionId) item.sessionId = sessionId;
     item.status = item.status === 'paused' ? 'active' : 'paused';
     this.saveToFile();
     this.logger.log(`Toggled broadcast ${id} status to: ${item.status}`);

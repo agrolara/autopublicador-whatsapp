@@ -192,6 +192,7 @@ ENV XDG_CACHE_HOME=/tmp/.cache
 ENV TZ=America/Santiago
 ENV TIMEZONE=America/Santiago
 ENV NODE_OPTIONS="--max-old-space-size=4096"
+ENV BAILEYS_MARK_ONLINE_ON_CONNECT="false"
 
 # Copy entrypoint: runs as root to fix named-volume ownership, then drops to openwa via gosu
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
