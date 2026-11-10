@@ -370,6 +370,11 @@ export class BaileysLifecycle {
       void this.probeAccountRestriction();
       // Backfill names the initial sync skipped (see BaileysHistory.hydrateNames).
       void this.host.hydrateNames();
+      if (process.env.BAILEYS_MARK_ONLINE_ON_CONNECT === 'false') {
+        void this.sock?.sendPresenceUpdate('unavailable').catch(err => {
+          this.host.logger.debug('Could not set unavailable presence on connect');
+        });
+      }
     }
 
     if (connection === 'close') {
